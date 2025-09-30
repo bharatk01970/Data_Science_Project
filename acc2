@@ -42,6 +42,9 @@ class CSVProcessorGUI:
         self.mapping_data = {}
         # **NEW**: Initialize dictionary to store parsed dictionary values for all rows and fields
         self.parsed_dictionaries = {}  # Structure: {field_name: {row_index: parsed_dict}}
+        # **NEW**: Initialize variables to track last successful encoding and delimiter used
+        self.last_encoding_used = None
+        self.last_delimiter_used = None
         
         # Call the UI setup method to create and arrange all GUI components
         self.setup_ui()
@@ -156,26 +159,21 @@ class CSVProcessorGUI:
         # Position status bar at bottom, spanning full width
         status_bar.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
-    # Method to handle input file selection and loading
+    # **MODIFIED METHOD**: Added comprehensive encoding detection and handling
     def load_input_file(self):
         # Open file dialog to let user select input file with specific file type filters
         file_path = filedialog.askopenfilename(
             title="Select Input File",
             # Define allowed file types for input
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("Excel files", "*.xlsx;*.xls"), ("All files", "*.*")]
         )
         
         # Proceed only if user selected a file (not cancelled dialog)
         if file_path:
             # Wrap file loading in try-except to handle potential errors
             try:
-                # Check file extension to determine appropriate pandas reading method
-                if file_path.endswith('.csv'):
-                    # Load CSV file using pandas with default comma delimiter
-                    self.df = pd.read_csv(file_path)
-                else:
-                    # Load text files assuming tab-separated values
-                    self.df = pd.read_csv(file_path, delimiter='\t')
+                # **NEW**: Attempt to load file with automatic encoding detection
+                self.df = self.load_file_with_encoding(file_path)
                 
                 # Store the file path for later reference
                 self.input_file_path = file_path
@@ -208,7 +206,156 @@ class CSVProcessorGUI:
                 # Update status bar to indicate loading failure
                 self.status_var.set("Error loading file")
     
-    # Method to handle addition of mapping files with automatic field detection
+    # **NEW METHOD**: Detect file encoding and load file with proper encoding handling
+    def detect_encoding(self, file_path):
+        """Detect the encoding of a file by trying multiple encodings"""
+        # **NEW**: List of common encodings to try, in order of likelihood
+        encodings_to_try = [
+            'utf-8',           # Most common modern encoding
+            'utf-8-sig',       # UTF-8 with BOM (Byte Order Mark)
+            'latin-1',         # ISO-8859-1, Western European
+            'iso-8859-1',      # Alternative name for latin-1
+            'cp1252',          # Windows Western European
+            'ascii',           # Basic ASCII
+            'utf-16',          # UTF-16 with BOM detection
+            'utf-16le',        # UTF-16 Little Endian
+            'utf-16be',        # UTF-16 Big Endian
+            'cp437',           # DOS/OEM encoding
+            'cp850',           # DOS Latin-1
+            'gb2312',          # Simplified Chinese
+            'gbk',             # Extended Chinese
+            'big5',            # Traditional Chinese
+            'shift-jis',       # Japanese
+            'euc-kr',          # Korean
+            'iso-8859-2',      # Central European
+            'iso-8859-15',     # Western European with Euro sign
+            'windows-1250',    # Windows Central European
+            'windows-1251',    # Windows Cyrillic
+            'windows-1256',    # Windows Arabic
+            'koi8-r',          # Russian
+        ]
+        
+        # **NEW**: Try each encoding until one works
+        for encoding in encodings_to_try:
+            try:
+                # Attempt to read a sample of the file with this encoding
+                with open(file_path, 'r', encoding=encoding) as f:
+                    # Read first 10000 characters to test encoding
+                    f.read(10000)
+                # If successful, return this encoding
+                return encoding
+            except (UnicodeDecodeError, UnicodeError):
+                # This encoding didn't work, try next one
+                continue
+            except Exception:
+                # Other errors, try next encoding
+                continue
+        
+        # **NEW**: If all encodings fail, return None to indicate failure
+        return None
+    
+    # **NEW METHOD**: Load file with automatic encoding detection and format handling
+    def load_file_with_encoding(self, file_path):
+        """Load a file with automatic encoding detection and format handling"""
+        # **NEW**: Check if file is Excel format
+        if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+            try:
+                # Load Excel file using pandas (encoding handled automatically)
+                return pd.read_excel(file_path)
+            except Exception as e:
+                # Raise error if Excel loading fails
+                raise Exception(f"Failed to load Excel file: {str(e)}")
+        
+        # **NEW**: For text-based files (CSV, TXT), detect encoding
+        detected_encoding = self.detect_encoding(file_path)
+        
+        # **NEW**: If encoding detection failed, ask user to specify
+        if detected_encoding is None:
+            # Show dialog asking user to manually specify encoding
+            encoding = simpledialog.askstring(
+                "Encoding Detection Failed",
+                "Could not automatically detect file encoding.\n"
+                "Please enter the encoding manually (e.g., utf-8, latin-1, cp1252):",
+                initialvalue="utf-8"
+            )
+            # Use user-specified encoding or default to utf-8
+            detected_encoding = encoding if encoding else "utf-8"
+        
+        # **NEW**: Try to determine the delimiter (comma, tab, semicolon, pipe)
+        delimiter = self.detect_delimiter(file_path, detected_encoding)
+        
+        # **NEW**: Attempt to load the file with detected encoding and delimiter
+        try:
+            # Load file with detected parameters
+            df = pd.read_csv(file_path, encoding=detected_encoding, delimiter=delimiter, 
+                           # Handle various error scenarios gracefully
+                           on_bad_lines='warn',  # Warn about malformed lines but continue
+                           engine='python')      # Use Python engine for better flexibility
+            
+            # **NEW**: Log successful encoding detection for user information
+            self.last_encoding_used = detected_encoding
+            self.last_delimiter_used = delimiter
+            
+            return df
+            
+        except Exception as e:
+            # **NEW**: If loading still fails, try with error handling parameters
+            try:
+                # Attempt with more lenient settings
+                df = pd.read_csv(file_path, encoding=detected_encoding, delimiter=delimiter,
+                               on_bad_lines='skip',      # Skip problematic lines
+                               engine='python',
+                               encoding_errors='replace')  # Replace bad characters with ?
+                
+                # Warn user that some data may be corrupted
+                messagebox.showwarning("Warning", 
+                    f"File loaded with encoding '{detected_encoding}' but some characters may be corrupted.\n"
+                    f"Some lines may have been skipped due to formatting issues.")
+                
+                return df
+            except Exception as final_error:
+                # **NEW**: Final fallback - raise detailed error message
+                raise Exception(
+                    f"Failed to load file with encoding '{detected_encoding}'.\n"
+                    f"Error: {str(final_error)}\n"
+                    f"Please try manually specifying the correct encoding."
+                )
+    
+    # **NEW METHOD**: Detect the delimiter used in a CSV/text file
+    def detect_delimiter(self, file_path, encoding):
+        """Detect the delimiter used in a CSV/text file"""
+        # **NEW**: Common delimiters to test
+        delimiters = [',', '\t', ';', '|', ':']
+        
+        try:
+            # Read first few lines of the file
+            with open(file_path, 'r', encoding=encoding) as f:
+                # Read up to 5 lines for delimiter detection
+                sample_lines = [f.readline() for _ in range(5)]
+            
+            # **NEW**: Count occurrences of each delimiter in sample
+            delimiter_counts = {}
+            for delim in delimiters:
+                # Count how many times this delimiter appears across all sample lines
+                count = sum(line.count(delim) for line in sample_lines)
+                # Store count if delimiter is present
+                if count > 0:
+                    delimiter_counts[delim] = count
+            
+            # **NEW**: Return the most common delimiter
+            if delimiter_counts:
+                # Get delimiter with highest count
+                detected_delimiter = max(delimiter_counts, key=delimiter_counts.get)
+                return detected_delimiter
+            else:
+                # Default to comma if no delimiter detected
+                return ','
+                
+        except Exception:
+            # **NEW**: If detection fails, default to comma
+            return ','
+    
+    # **MODIFIED METHOD**: Added encoding handling for mapping files
     def add_mapping_file(self):
         # Check if input file has been loaded before allowing mapping file addition
         if not hasattr(self, 'df') or self.df is None:
@@ -219,20 +366,16 @@ class CSVProcessorGUI:
         # Open file dialog for mapping file selection
         file_path = filedialog.askopenfilename(
             title="Select Mapping File",
-            # Use same file type filters as input file
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+            # **MODIFIED**: Added Excel format support
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("Excel files", "*.xlsx;*.xls"), ("All files", "*.*")]
         )
         
         # Proceed if user selected a mapping file
         if file_path:
             # Wrap mapping file loading in error handling
             try:
-                # Load mapping file using appropriate pandas method based on extension
-                if file_path.endswith('.csv'):
-                    mapping_df = pd.read_csv(file_path)
-                else:
-                    # Assume tab-separated for text files
-                    mapping_df = pd.read_csv(file_path, delimiter='\t')
+                # **MODIFIED**: Use encoding-aware loading function for mapping files
+                mapping_df = self.load_file_with_encoding(file_path)
                 
                 # Create sets of column names for intersection analysis
                 input_fields = set(self.df.columns)
