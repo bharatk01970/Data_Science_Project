@@ -10,8 +10,10 @@ import json
 import ast
 # Import os for operating system interface - handles file path operations and system interactions
 import os
-# Import typing for type hints - provides static type checking support (not actively used in runtime)
+# Import typing for type hints - provides static type checking support
 from typing import Dict, List, Any, Optional
+# Import chardet for automatic encoding detection
+import chardet
 
 # Define the main GUI application class that encapsulates all CSV processing functionality
 class CSVProcessorGUI:
@@ -20,19 +22,19 @@ class CSVProcessorGUI:
         # Store reference to the main tkinter root window for later use
         self.root = root
         # Set the window title that appears in the title bar
-        self.root.title("CSV Dictionary Field Processor")
+        self.root.title("CSV Dictionary Field Processor - Two-Stage Processing")
         # Set the initial window size (width x height in pixels)
-        self.root.geometry("700x500")
+        self.root.geometry("750x600")
         
         # Initialize empty string to store the path of the selected input file
         self.input_file_path = ""
         # Initialize empty dictionary to store mapping between field names and their mapping file paths
-        self.mapping_files = {}  # {'A': 'file2_path', 'C': 'file3_path'}
+        self.mapping_files = {}
         # Initialize None to store the loaded pandas DataFrame containing the input data
         self.df = None
         # Initialize empty list to store field names selected by the user for processing
         self.selected_fields = []
-        # **MODIFIED**: Initialize empty dictionary to store ALL fields' dictionary status (not just selected ones)
+        # Initialize empty dictionary to store fields identified as containing dictionary-like data
         self.dictionary_fields = {}
         # Initialize empty dictionary to store user-selected keys for each dictionary field
         self.selected_keys = {}
@@ -40,11 +42,10 @@ class CSVProcessorGUI:
         self.processed_data = None
         # Initialize empty dictionary to store loaded mapping data as DataFrames
         self.mapping_data = {}
-        # **NEW**: Initialize dictionary to store parsed dictionary values for all rows and fields
-        self.parsed_dictionaries = {}  # Structure: {field_name: {row_index: parsed_dict}}
-        # **NEW**: Initialize variables to track last successful encoding and delimiter used
-        self.last_encoding_used = None
-        self.last_delimiter_used = None
+        # Initialize None to store stage 1 processed data before mapping
+        self.stage1_data = None
+        # Initialize flag to track if stage 1 processing is complete
+        self.stage1_complete = False
         
         # Call the UI setup method to create and arrange all GUI components
         self.setup_ui()
@@ -65,902 +66,576 @@ class CSVProcessorGUI:
         
         # Create section header label for file loading with bold font
         ttk.Label(main_frame, text="1. Load Input File:", font=('TkDefaultFont', 10, 'bold')).grid(
-            # Position at row 0, spanning 2 columns, aligned to west (left)
             row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
         
         # Create button to trigger file selection dialog
         ttk.Button(main_frame, text="Select Input File", 
-                  # Connect button click to file loading method
                   command=self.load_input_file).grid(row=1, column=0, sticky=tk.W, pady=(0, 10))
         
         # Create label to display the name of the selected input file
         self.input_file_label = ttk.Label(main_frame, text="No file selected")
-        # Position the file label next to the select button with padding
         self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
         
-        # Create section header label for mapping files functionality
-        ttk.Label(main_frame, text="2. Load Mapping Files (Optional):", 
+        # Create section header label for stage 1 processing
+        ttk.Label(main_frame, text="2. Stage 1 Processing:", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
-            # Position below file selection section
             row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create button for stage 1 processing
+        self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", 
+                  command=self.process_stage1, state='disabled')
+        self.stage1_button.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
+        
+        # Create label to show stage 1 status
+        self.stage1_status_label = ttk.Label(main_frame, text="")
+        self.stage1_status_label.grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+        
+        # Create section header label for mapping files functionality
+        ttk.Label(main_frame, text="3. Load Mapping Files (Optional):", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
         # Create sub-frame container for mapping files controls
         mapping_frame = ttk.Frame(main_frame)
-        # Position the mapping frame in the main layout
-        mapping_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        mapping_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Create button to add mapping files
-        ttk.Button(mapping_frame, text="Add Mapping File", 
-                  # Connect to mapping file addition method
-                  command=self.add_mapping_file).grid(row=0, column=0, sticky=tk.W)
+        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", 
+                  command=self.add_mapping_file, state='disabled')
+        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
         
         # Create listbox to display loaded mapping files
         self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
-        # Position listbox below the add button, spanning full width
         self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
-        # Configure mapping frame to expand its first column
         mapping_frame.columnconfigure(0, weight=1)
         
         # Create section header label for field selection
-        ttk.Label(main_frame, text="3. Select Fields:", 
+        ttk.Label(main_frame, text="4. Select Fields (Auto-selected after Stage 1):", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
-            # Position below mapping section
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
         # Create container frame for field selection controls
         field_frame = ttk.Frame(main_frame)
-        # Position field frame to expand both horizontally and vertically
-        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        # Configure field frame to expand its first column
+        field_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         field_frame.columnconfigure(0, weight=1)
-        # Configure main frame to give weight to field selection area for vertical expansion
-        main_frame.rowconfigure(5, weight=1)
+        main_frame.rowconfigure(7, weight=1)
         
         # Create sub-frame for field listbox with scrollbar
         field_scroll_frame = ttk.Frame(field_frame)
-        # Position scroll frame to fill available space
         field_scroll_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        # Configure scroll frame to expand both dimensions
         field_scroll_frame.columnconfigure(0, weight=1)
         field_scroll_frame.rowconfigure(0, weight=1)
         
         # Create listbox for field selection with multiple selection enabled
         self.field_listbox = tk.Listbox(field_scroll_frame, selectmode=tk.MULTIPLE, height=6)
-        # Create vertical scrollbar for the field listbox
         field_scrollbar = ttk.Scrollbar(field_scroll_frame, orient="vertical", command=self.field_listbox.yview)
-        # Connect scrollbar to listbox for synchronized scrolling
         self.field_listbox.configure(yscrollcommand=field_scrollbar.set)
         
-        # Position listbox to fill available space
         self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        # Position scrollbar on the right side
         field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
-        # Create process button with accent styling to trigger data processing
-        ttk.Button(main_frame, text="Process Data", 
-                  # Connect to data processing method, use accent style for prominence
-                  command=self.process_data, style='Accent.TButton').grid(
-            # Position below field selection area
-            row=6, column=0, columnspan=2, pady=10)
+        # Create stage 2 process button with accent styling
+        self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output with Mapping)", 
+                  command=self.process_stage2, style='Accent.TButton', state='disabled')
+        self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
         
         # Create export button initially disabled until data is processed
         self.export_button = ttk.Button(main_frame, text="Export Results", 
-                                       # Connect to export method, start disabled
                                        command=self.export_data, state='disabled')
-        # Position export button below process button
-        self.export_button.grid(row=7, column=0, columnspan=2, pady=5)
+        self.export_button.grid(row=9, column=0, columnspan=2, pady=5)
         
         # Create StringVar to hold status messages for dynamic updates
         self.status_var = tk.StringVar(value="Ready to load file...")
-        # Create status bar label with sunken border effect
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
-                              # Style status bar with sunken relief and left alignment
                               relief=tk.SUNKEN, anchor=tk.W)
-        # Position status bar at bottom, spanning full width
-        status_bar.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
-    # **MODIFIED METHOD**: Added comprehensive encoding detection and handling
+    # Method to detect file encoding automatically
+    def detect_encoding(self, file_path):
+        """Detect the encoding of a file"""
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(100000)
+                result = chardet.detect(raw_data)
+                encoding = result['encoding']
+                return encoding if encoding else 'utf-8'
+        except Exception:
+            return 'utf-8'
+    
+    # Method to handle input file selection and loading
     def load_input_file(self):
-        # Open file dialog to let user select input file with specific file type filters
         file_path = filedialog.askopenfilename(
             title="Select Input File",
-            # Define allowed file types for input
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("Excel files", "*.xlsx;*.xls"), ("All files", "*.*")]
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
         )
         
-        # Proceed only if user selected a file (not cancelled dialog)
         if file_path:
-            # Wrap file loading in try-except to handle potential errors
             try:
-                # **NEW**: Attempt to load file with automatic encoding detection
-                self.df = self.load_file_with_encoding(file_path)
+                # Detect file encoding automatically
+                encoding = self.detect_encoding(file_path)
                 
-                # Store the file path for later reference
+                if file_path.endswith('.csv'):
+                    self.df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    self.df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                
                 self.input_file_path = file_path
-                # Update label to show only filename (not full path) for better UI
                 self.input_file_label.config(text=os.path.basename(file_path))
                 
-                # **NEW**: Immediately analyze ALL fields to detect dictionary-like content
-                self.analyze_all_fields_for_dictionaries()
-                
-                # **NEW**: Pre-parse all dictionary fields and cache the results
-                self.preparse_dictionary_fields()
-                
-                # Clear any existing items in field listbox
+                # Clear field listbox
                 self.field_listbox.delete(0, tk.END)
-                # Populate field listbox with column names from loaded DataFrame
                 for col in self.df.columns:
-                    # **MODIFIED**: Add visual indicator if field contains dictionary data
-                    display_name = f"{col} [DICT]" if col in self.dictionary_fields else col
-                    # Add field name (with indicator) as selectable option
-                    self.field_listbox.insert(tk.END, display_name)
+                    self.field_listbox.insert(tk.END, col)
                 
-                # **MODIFIED**: Update status to show dictionary detection results
-                dict_count = len(self.dictionary_fields)
-                self.status_var.set(f"Loaded file with {len(self.df)} rows, {len(self.df.columns)} columns ({dict_count} dictionary fields detected)")
+                self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
                 
-            # Handle any exceptions during file loading
+                # Enable stage 1 processing button
+                self.stage1_button.config(state='normal')
+                self.stage1_complete = False
+                self.stage1_status_label.config(text="")
+                self.add_mapping_button.config(state='disabled')
+                self.stage2_button.config(state='disabled')
+                self.export_button.config(state='disabled')
+                
             except Exception as e:
-                # Show error dialog to user with specific error message
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
-                # Update status bar to indicate loading failure
                 self.status_var.set("Error loading file")
     
-    # **NEW METHOD**: Detect file encoding and load file with proper encoding handling
-    def detect_encoding(self, file_path):
-        """Detect the encoding of a file by trying multiple encodings"""
-        # **NEW**: List of common encodings to try, in order of likelihood
-        encodings_to_try = [
-            'utf-8',           # Most common modern encoding
-            'utf-8-sig',       # UTF-8 with BOM (Byte Order Mark)
-            'latin-1',         # ISO-8859-1, Western European
-            'iso-8859-1',      # Alternative name for latin-1
-            'cp1252',          # Windows Western European
-            'ascii',           # Basic ASCII
-            'utf-16',          # UTF-16 with BOM detection
-            'utf-16le',        # UTF-16 Little Endian
-            'utf-16be',        # UTF-16 Big Endian
-            'cp437',           # DOS/OEM encoding
-            'cp850',           # DOS Latin-1
-            'gb2312',          # Simplified Chinese
-            'gbk',             # Extended Chinese
-            'big5',            # Traditional Chinese
-            'shift-jis',       # Japanese
-            'euc-kr',          # Korean
-            'iso-8859-2',      # Central European
-            'iso-8859-15',     # Western European with Euro sign
-            'windows-1250',    # Windows Central European
-            'windows-1251',    # Windows Cyrillic
-            'windows-1256',    # Windows Arabic
-            'koi8-r',          # Russian
-        ]
-        
-        # **NEW**: Try each encoding until one works
-        for encoding in encodings_to_try:
-            try:
-                # Attempt to read a sample of the file with this encoding
-                with open(file_path, 'r', encoding=encoding) as f:
-                    # Read first 10000 characters to test encoding
-                    f.read(10000)
-                # If successful, return this encoding
-                return encoding
-            except (UnicodeDecodeError, UnicodeError):
-                # This encoding didn't work, try next one
-                continue
-            except Exception:
-                # Other errors, try next encoding
-                continue
-        
-        # **NEW**: If all encodings fail, return None to indicate failure
-        return None
-    
-    # **NEW METHOD**: Load file with automatic encoding detection and format handling
-    def load_file_with_encoding(self, file_path):
-        """Load a file with automatic encoding detection and format handling"""
-        # **NEW**: Check if file is Excel format
-        if file_path.endswith('.xlsx') or file_path.endswith('.xls'):
-            try:
-                # Load Excel file using pandas (encoding handled automatically)
-                return pd.read_excel(file_path)
-            except Exception as e:
-                # Raise error if Excel loading fails
-                raise Exception(f"Failed to load Excel file: {str(e)}")
-        
-        # **NEW**: For text-based files (CSV, TXT), detect encoding
-        detected_encoding = self.detect_encoding(file_path)
-        
-        # **NEW**: If encoding detection failed, ask user to specify
-        if detected_encoding is None:
-            # Show dialog asking user to manually specify encoding
-            encoding = simpledialog.askstring(
-                "Encoding Detection Failed",
-                "Could not automatically detect file encoding.\n"
-                "Please enter the encoding manually (e.g., utf-8, latin-1, cp1252):",
-                initialvalue="utf-8"
-            )
-            # Use user-specified encoding or default to utf-8
-            detected_encoding = encoding if encoding else "utf-8"
-        
-        # **NEW**: Try to determine the delimiter (comma, tab, semicolon, pipe)
-        delimiter = self.detect_delimiter(file_path, detected_encoding)
-        
-        # **NEW**: Attempt to load the file with detected encoding and delimiter
-        try:
-            # Load file with detected parameters
-            df = pd.read_csv(file_path, encoding=detected_encoding, delimiter=delimiter, 
-                           # Handle various error scenarios gracefully
-                           on_bad_lines='warn',  # Warn about malformed lines but continue
-                           engine='python')      # Use Python engine for better flexibility
-            
-            # **NEW**: Log successful encoding detection for user information
-            self.last_encoding_used = detected_encoding
-            self.last_delimiter_used = delimiter
-            
-            return df
-            
-        except Exception as e:
-            # **NEW**: If loading still fails, try with error handling parameters
-            try:
-                # Attempt with more lenient settings
-                df = pd.read_csv(file_path, encoding=detected_encoding, delimiter=delimiter,
-                               on_bad_lines='skip',      # Skip problematic lines
-                               engine='python',
-                               encoding_errors='replace')  # Replace bad characters with ?
-                
-                # Warn user that some data may be corrupted
-                messagebox.showwarning("Warning", 
-                    f"File loaded with encoding '{detected_encoding}' but some characters may be corrupted.\n"
-                    f"Some lines may have been skipped due to formatting issues.")
-                
-                return df
-            except Exception as final_error:
-                # **NEW**: Final fallback - raise detailed error message
-                raise Exception(
-                    f"Failed to load file with encoding '{detected_encoding}'.\n"
-                    f"Error: {str(final_error)}\n"
-                    f"Please try manually specifying the correct encoding."
-                )
-    
-    # **NEW METHOD**: Detect the delimiter used in a CSV/text file
-    def detect_delimiter(self, file_path, encoding):
-        """Detect the delimiter used in a CSV/text file"""
-        # **NEW**: Common delimiters to test
-        delimiters = [',', '\t', ';', '|', ':']
-        
-        try:
-            # Read first few lines of the file
-            with open(file_path, 'r', encoding=encoding) as f:
-                # Read up to 5 lines for delimiter detection
-                sample_lines = [f.readline() for _ in range(5)]
-            
-            # **NEW**: Count occurrences of each delimiter in sample
-            delimiter_counts = {}
-            for delim in delimiters:
-                # Count how many times this delimiter appears across all sample lines
-                count = sum(line.count(delim) for line in sample_lines)
-                # Store count if delimiter is present
-                if count > 0:
-                    delimiter_counts[delim] = count
-            
-            # **NEW**: Return the most common delimiter
-            if delimiter_counts:
-                # Get delimiter with highest count
-                detected_delimiter = max(delimiter_counts, key=delimiter_counts.get)
-                return detected_delimiter
-            else:
-                # Default to comma if no delimiter detected
-                return ','
-                
-        except Exception:
-            # **NEW**: If detection fails, default to comma
-            return ','
-    
-    # **MODIFIED METHOD**: Added encoding handling for mapping files
-    def add_mapping_file(self):
-        # Check if input file has been loaded before allowing mapping file addition
-        if not hasattr(self, 'df') or self.df is None:
-            # Show warning if no input file loaded yet
-            messagebox.showwarning("Warning", "Please load the input file first")
-            return
-        
-        # Open file dialog for mapping file selection
-        file_path = filedialog.askopenfilename(
-            title="Select Mapping File",
-            # **MODIFIED**: Added Excel format support
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("Excel files", "*.xlsx;*.xls"), ("All files", "*.*")]
-        )
-        
-        # Proceed if user selected a mapping file
-        if file_path:
-            # Wrap mapping file loading in error handling
-            try:
-                # **MODIFIED**: Use encoding-aware loading function for mapping files
-                mapping_df = self.load_file_with_encoding(file_path)
-                
-                # Create sets of column names for intersection analysis
-                input_fields = set(self.df.columns)
-                mapping_fields = set(mapping_df.columns)
-                
-                # Find common columns between input and mapping files
-                common_fields = input_fields.intersection(mapping_fields)
-                
-                # Check if any common fields exist for mapping
-                if not common_fields:
-                    # Show detailed warning about no matching columns
-                    messagebox.showwarning("Warning", 
-                        f"No matching columns found between input file and mapping file.\n"
-                        f"Input file columns: {list(input_fields)}\n"
-                        f"Mapping file columns: {list(mapping_fields)}")
-                    return
-                
-                # Automatically select first common field for mapping
-                field_to_map = list(common_fields)[0]
-                
-                # If multiple common fields exist, let user choose
-                if len(common_fields) > 1:
-                    # Show dialog for user to select which field to map
-                    field_to_map = simpledialog.askstring(
-                        "Multiple Matches Found",
-                        f"Multiple matching columns found: {list(common_fields)}\n"
-                        f"Enter the field name to use for mapping:",
-                        # Pre-populate with first common field
-                        initialvalue=field_to_map
-                    )
-                    
-                    # Validate user selection
-                    if not field_to_map or field_to_map not in common_fields:
-                        messagebox.showwarning("Warning", "Invalid field selection")
-                        return
-                
-                # Store mapping file path and DataFrame for later use
-                self.mapping_files[field_to_map] = file_path
-                self.mapping_data[field_to_map] = mapping_df
-                
-                # Add mapping information to display listbox
-                self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)}")
-                
-                # Update status to show successful mapping addition with auto-detection note
-                self.status_var.set(f"Added mapping for field '{field_to_map}' (auto-detected)")
-                
-            # Handle mapping file loading errors
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
-    
-    # Method to split multi-valued strings using comma or semicolon delimiters
-    def split_multi_values(self, value):
-        """Split comma or semicolon separated values"""
-        # Handle null or empty values by returning list with empty string
-        if pd.isna(value) or value == "":
-            return [""]
-        
-        # Convert to string and remove leading/trailing whitespace
-        value_str = str(value).strip()
-        
-        # Check for semicolon separator first (higher priority)
-        if ';' in value_str:
-            # Split by semicolon and filter out empty strings after trimming
-            return [v.strip() for v in value_str.split(';') if v.strip()]
-        # Check for comma separator as fallback
-        elif ',' in value_str:
-            # Split by comma and filter out empty strings after trimming
-            return [v.strip() for v in value_str.split(',') if v.strip()]
-        else:
-            # Return single value as list if no separators found
-            return [value_str]
-    
-    # Method to detect if a value contains dictionary-like key-value pairs
-    def is_dictionary_like(self, value):
-        """Check if a value looks like a dictionary"""
-        # Return False for null or empty values
-        if pd.isna(value) or value == "":
-            return False
-        
-        # Convert to string and clean whitespace
-        value_str = str(value).strip()
-        
-        # Check for JSON-like format with curly braces
-        if value_str.startswith('{') and value_str.endswith('}'):
-            return True
-        
-        # Check for key-value separators (colon or equals)
-        if ':' in value_str or '=' in value_str:
-            return True
-        
-        # Return False if no dictionary patterns detected
-        return False
-    
-    # Method to parse dictionary-like strings into Python dictionaries
-    def parse_dictionary_value(self, value):
-        """Parse dictionary-like value into key-value pairs, handling newlines as separators"""
-        # Return empty dictionary for null or empty input
-        if pd.isna(value) or value == "":
-            return {}
-
-        # Convert to string and clean whitespace
-        value_str = str(value).strip()
-        # Initialize result dictionary
-        result = {}
-
-        # First attempt: Try parsing as JSON format
-        try:
-            # Check for JSON-like structure with curly braces
-            if value_str.startswith('{') and value_str.endswith('}'):
-                # Use json.loads to parse valid JSON strings
-                result = json.loads(value_str)
-                return result
-        # Continue to next method if JSON parsing fails
-        except:
-            pass
-
-        # Second attempt: Try Python literal evaluation
-        try:
-            # Use ast.literal_eval for safe evaluation of Python literals
-            result = ast.literal_eval(value_str)
-            # Verify result is actually a dictionary
-            if isinstance(result, dict):
-                return result
-        # Continue to manual parsing if literal evaluation fails
-        except:
-            pass
-
-        # Third attempt: Manual parsing for newline-separated key-value pairs
-        try:
-            # Split string by newline characters and filter empty lines
-            lines = [line.strip() for line in value_str.split('\n') if line.strip()]
-
-            # Process each line for key-value extraction
-            for line in lines:
-                # Check for colon separator
-                if ':' in line:
-                    # Split only on first colon to handle colons in values
-                    key, val = line.split(':', 1)
-                    # Store trimmed key-value pair
-                    result[key.strip()] = val.strip()
-                # Check for equals separator
-                elif '=' in line:
-                    # Split only on first equals to handle equals in values
-                    key, val = line.split('=', 1)
-                    # Store trimmed key-value pair
-                    result[key.strip()] = val.strip()
-                else:
-                    # Store line as key with empty value if no separator found
-                    result[line] = ""
-
-        # Return empty dictionary if all parsing attempts fail
-        except Exception:
-            pass
-
-        # Return the parsed result dictionary
-        return result
-
-    
-    # **NEW METHOD**: Analyze all fields in the loaded DataFrame to detect dictionary-like content
-    def analyze_all_fields_for_dictionaries(self):
-        """Detect which fields contain dictionary-like values across entire dataset"""
-        # Clear any existing dictionary field data
-        self.dictionary_fields = {}
-        
-        # Analyze each column in the DataFrame
-        for field in self.df.columns:
-            # Get sample of non-null values for analysis (limit to 10 for performance)
-            sample_values = self.df[field].dropna().head(10)
-            
-            # Initialize counters for analysis
-            dict_count = 0
-            all_keys = set()
-            
-            # Examine each sample value
-            for value in sample_values:
-                # Check if value appears to be dictionary-like
-                if self.is_dictionary_like(value):
-                    # Increment counter for dictionary-like values
-                    dict_count += 1
-                    # Parse the value to extract keys
-                    parsed = self.parse_dictionary_value(value)
-                    # Add extracted keys to the master set
-                    all_keys.update(parsed.keys())
-            
-            # If more than 50% of samples appear dictionary-like, classify field as dictionary
-            if dict_count > len(sample_values) * 0.5 and all_keys:
-                # Store field with its discovered keys
-                self.dictionary_fields[field] = list(all_keys)
-    
-    # **NEW METHOD**: Pre-parse all dictionary fields and cache results for efficient access
-    def preparse_dictionary_fields(self):
-        """Parse all dictionary fields upfront and cache the results"""
-        # Clear any existing parsed dictionary cache
-        self.parsed_dictionaries = {}
-        
-        # Process each detected dictionary field
-        for field in self.dictionary_fields:
-            # Initialize storage for this field's parsed dictionaries
-            self.parsed_dictionaries[field] = {}
-            
-            # Parse dictionary values for each row in the DataFrame
-            for index, value in self.df[field].items():
-                # Parse the dictionary value and cache it
-                self.parsed_dictionaries[field][index] = self.parse_dictionary_value(value)
-    
-    # **MODIFIED METHOD**: Now retrieves cached dictionary field data instead of detecting on-the-fly
-    def detect_dictionary_fields(self, selected_fields):
-        """Return dictionary fields from the pre-analyzed data for selected fields only"""
-        # Initialize dictionary to store selected fields that are dictionary-like
-        dict_fields = {}
-        
-        # Filter pre-analyzed dictionary fields to include only selected ones
-        for field in selected_fields:
-            # Check if this selected field was identified as a dictionary field
-            if field in self.dictionary_fields:
-                # Include this field and its keys in the result
-                dict_fields[field] = self.dictionary_fields[field]
-        
-        # Return filtered dictionary of fields and their associated keys
-        return dict_fields
-    
-    # Method to display popup window for user selection of dictionary keys
-    def show_key_selection_popup(self, field, available_keys):
-        """Show popup for key selection in dictionary fields"""
-        # Create new popup window as child of main window
-        popup = tk.Toplevel(self.root)
-        # Set popup title with field name
-        popup.title(f"Select Keys for Field: {field}")
-        # Set popup dimensions
-        popup.geometry("400x300")
-        # Make popup transient to main window (stays on top)
-        popup.transient(self.root)
-        # Make popup modal (blocks interaction with parent)
-        popup.grab_set()
-        
-        # Add instruction label with bold formatting
-        ttk.Label(popup, text=f"Select keys to include from field '{field}':", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
-        
-        # Create frame container for key selection controls
-        key_frame = ttk.Frame(popup)
-        # Pack frame to fill popup window
-        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Create listbox for multiple key selection
-        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
-        # Create scrollbar for the key listbox
-        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
-        # Connect scrollbar to listbox
-        key_listbox.configure(yscrollcommand=key_scrollbar.set)
-        
-        # Pack listbox to fill available space
-        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # Pack scrollbar on right side
-        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Populate listbox with available keys from dictionary field
-        for key in available_keys:
-            key_listbox.insert(tk.END, key)
-        
-        # Select all keys by default for user convenience
-        key_listbox.select_set(0, tk.END)
-        
-        # Initialize list to store user's key selections
-        selected_keys = []
-        
-        # Define function to handle confirm button click
-        def on_confirm():
-            # Access outer scope variable
-            nonlocal selected_keys
-            # Get indices of selected items
-            selected_indices = key_listbox.curselection()
-            # Convert indices to actual key names
-            selected_keys = [available_keys[i] for i in selected_indices]
-            # Close popup window
-            popup.destroy()
-        
-        # Define function to handle cancel button click
-        def on_cancel():
-            # Access outer scope variable
-            nonlocal selected_keys
-            # Clear selection list
-            selected_keys = []
-            # Close popup window
-            popup.destroy()
-        
-        # Create frame for action buttons
-        button_frame = ttk.Frame(popup)
-        # Pack button frame at bottom of popup
-        button_frame.pack(pady=10)
-        
-        # Create confirm button
-        ttk.Button(button_frame, text="Confirm", command=on_confirm).pack(side=tk.LEFT, padx=5)
-        # Create cancel button
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
-        
-        # Wait for popup window to be closed before continuing
-        popup.wait_window()
-        # Return user's key selections
-        return selected_keys
-    
-    # Method to orchestrate the complete data processing workflow
-    def process_data(self):
-        # Verify that input data has been loaded
+    # Method to perform stage 1 processing - dictionary expansion
+    def process_stage1(self):
         if self.df is None:
             messagebox.showwarning("Warning", "Please load an input file first")
             return
         
-        # Get user's field selections from the listbox
-        selected_indices = self.field_listbox.curselection()
-        # Ensure at least one field is selected
-        if not selected_indices:
-            messagebox.showwarning("Warning", "Please select at least one field")
-            return
-        
-        # **MODIFIED**: Extract actual field names by removing [DICT] indicator if present
-        self.selected_fields = []
-        for i in selected_indices:
-            field_name = self.field_listbox.get(i)
-            # Remove the [DICT] suffix if present to get the actual field name
-            if field_name.endswith(' [DICT]'):
-                field_name = field_name[:-7]  # Remove ' [DICT]' (7 characters)
-            self.selected_fields.append(field_name)
-        
-        # **MODIFIED**: Use cached dictionary field data instead of detecting again
-        # Filter to only include dictionary fields that were selected by user
-        selected_dict_fields = {field: keys for field, keys in self.dictionary_fields.items() 
-                               if field in self.selected_fields}
-        
-        # Initialize dictionary to store user's key selections
-        self.selected_keys = {}
-        # Process each detected dictionary field that was selected
-        for field, available_keys in selected_dict_fields.items():
-            # Only show popup if field has keys available
-            if available_keys:
-                # Display key selection popup and get user choices
-                selected = self.show_key_selection_popup(field, available_keys)
-                # Store selections if user made any
-                if selected:
-                    self.selected_keys[field] = selected
-                else:
-                    # Inform user about skipped field
-                    messagebox.showinfo("Info", f"No keys selected for field '{field}'. Skipping dictionary processing for this field.")
-        
-        # Execute the main data processing with error handling
         try:
-            # Process the DataFrame according to user selections
-            self.processed_data = self.process_dataframe()
-            # Enable export button now that data is processed
-            self.export_button.config(state='normal')
-            # Update status with processing results
-            self.status_var.set(f"Processing complete. {len(self.processed_data)} rows generated.")
+            # Auto-select all fields for initial processing
+            self.selected_fields = list(self.df.columns)
             
-        # Handle processing errors
+            # Clear field listbox and populate with all columns
+            self.field_listbox.delete(0, tk.END)
+            for col in self.selected_fields:
+                self.field_listbox.insert(tk.END, col)
+            
+            # Detect dictionary fields automatically
+            self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
+            
+            # Initialize dictionary to store user's key selections
+            self.selected_keys = {}
+            
+            # If dictionary fields are found, show popup for key selection
+            if self.dictionary_fields:
+                for field, available_keys in self.dictionary_fields.items():
+                    if available_keys:
+                        selected = self.show_key_selection_popup(field, available_keys)
+                        if selected:
+                            self.selected_keys[field] = selected
+                        else:
+                            messagebox.showinfo("Info", f"No keys selected for field '{field}'. Skipping dictionary processing for this field.")
+            
+            # Process stage 1 data
+            self.stage1_data = self.process_stage1_dataframe()
+            
+            # Update field listbox with new columns from stage 1 processing
+            if self.stage1_data:
+                stage1_columns = set()
+                for row in self.stage1_data:
+                    stage1_columns.update(row.keys())
+                
+                self.field_listbox.delete(0, tk.END)
+                for col in sorted(stage1_columns):
+                    self.field_listbox.insert(tk.END, col)
+                self.field_listbox.select_set(0, tk.END)
+                
+                self.selected_fields = list(stage1_columns)
+            
+            # Mark stage 1 as complete
+            self.stage1_complete = True
+            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
+            
+            # Enable mapping file addition and stage 2 processing
+            self.add_mapping_button.config(state='normal')
+            self.stage2_button.config(state='normal')
+            
+            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated. You can now add mapping files or proceed to Stage 2.")
+            
         except Exception as e:
-            # Show error dialog with specific error message
-            messagebox.showerror("Error", f"Failed to process data: {str(e)}")
-            # Update status to indicate failure
-            self.status_var.set("Processing failed")
+            messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
+            self.status_var.set("Stage 1 processing failed")
     
-    # Method to process the entire DataFrame row by row
-    def process_dataframe(self):
-        """Process the dataframe according to the algorithm"""
-        # Initialize list to store all processed result rows
+    # Method to process dataframe for stage 1
+    def process_stage1_dataframe(self):
+        """Process the dataframe for stage 1 - dictionary expansion and multi-value splitting"""
         result_rows = []
         
-        # Process each row in the input DataFrame
         for index, row in self.df.iterrows():
-            # Process individual row and append results to master list
             self.process_single_row(row, result_rows)
         
-        # Apply mapping transformations if mapping data exists
-        if self.mapping_data:
-            result_rows = self.apply_mappings(result_rows)
-        
-        # Return the complete processed dataset
         return result_rows
     
-    # **MODIFIED METHOD**: Now uses pre-parsed cached dictionary data instead of parsing on-demand
+    # Method to handle addition of mapping files
+    def add_mapping_file(self):
+        if not self.stage1_complete:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Mapping File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                encoding = self.detect_encoding(file_path)
+                
+                if file_path.endswith('.csv'):
+                    mapping_df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                
+                # Get column names from stage 1 processed data
+                if self.stage1_data:
+                    stage1_columns = set()
+                    for row in self.stage1_data:
+                        stage1_columns.update(row.keys())
+                else:
+                    messagebox.showwarning("Warning", "No stage 1 data available")
+                    return
+                
+                input_fields = stage1_columns
+                mapping_fields = set(mapping_df.columns)
+                
+                common_fields = input_fields.intersection(mapping_fields)
+                
+                if not common_fields:
+                    messagebox.showwarning("Warning", 
+                        f"No matching columns found between stage 1 data and mapping file.\n"
+                        f"Stage 1 columns: {list(input_fields)}\n"
+                        f"Mapping file columns: {list(mapping_fields)}")
+                    return
+                
+                field_to_map = list(common_fields)[0]
+                
+                if len(common_fields) > 1:
+                    field_to_map = simpledialog.askstring(
+                        "Multiple Matches Found",
+                        f"Multiple matching columns found: {list(common_fields)}\n"
+                        f"Enter the field name to use for mapping:",
+                        initialvalue=field_to_map
+                    )
+                    
+                    if not field_to_map or field_to_map not in common_fields:
+                        messagebox.showwarning("Warning", "Invalid field selection")
+                        return
+                
+                self.mapping_files[field_to_map] = file_path
+                self.mapping_data[field_to_map] = mapping_df
+                
+                self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)}")
+                
+                self.status_var.set(f"Added mapping for field '{field_to_map}' (auto-detected)")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
+    
+    # Method to split multi-valued strings
+    def split_multi_values(self, value):
+        """Split comma or semicolon separated values"""
+        if pd.isna(value) or value == "":
+            return [""]
+        
+        value_str = str(value).strip()
+        
+        if ';' in value_str:
+            return [v.strip() for v in value_str.split(';') if v.strip()]
+        elif ',' in value_str:
+            return [v.strip() for v in value_str.split(',') if v.strip()]
+        else:
+            return [value_str]
+    
+    # Method to detect if a value contains dictionary-like data
+    def is_dictionary_like(self, value):
+        """Check if a value looks like a dictionary"""
+        if pd.isna(value) or value == "":
+            return False
+        
+        value_str = str(value).strip()
+        
+        if value_str.startswith('{') and value_str.endswith('}'):
+            return True
+        
+        if ':' in value_str or '=' in value_str:
+            return True
+        
+        return False
+    
+    # Method to parse dictionary-like strings
+    def parse_dictionary_value(self, value):
+        """Parse dictionary-like value into key-value pairs, handling newlines as separators"""
+        if pd.isna(value) or value == "":
+            return {}
+
+        value_str = str(value).strip()
+        result = {}
+
+        # Try JSON parsing
+        try:
+            if value_str.startswith('{') and value_str.endswith('}'):
+                result = json.loads(value_str)
+                return result
+        except:
+            pass
+
+        # Try literal eval
+        try:
+            result = ast.literal_eval(value_str)
+            if isinstance(result, dict):
+                return result
+        except:
+            pass
+
+        # Manual parsing for newline-separated key-value pairs
+        try:
+            lines = [line.strip() for line in value_str.split('\n') if line.strip()]
+
+            for line in lines:
+                if ':' in line:
+                    key, val = line.split(':', 1)
+                    result[key.strip()] = val.strip()
+                elif '=' in line:
+                    key, val = line.split('=', 1)
+                    result[key.strip()] = val.strip()
+                else:
+                    result[line] = ""
+
+        except Exception:
+            pass
+
+        return result
+    
+    # Method to detect dictionary fields
+    def detect_dictionary_fields(self, selected_fields):
+        """Detect which fields contain dictionary-like values"""
+        dict_fields = {}
+        
+        for field in selected_fields:
+            if field in self.df.columns:
+                sample_values = self.df[field].dropna().head(10)
+                
+                dict_count = 0
+                all_keys = set()
+                
+                for value in sample_values:
+                    if self.is_dictionary_like(value):
+                        dict_count += 1
+                        parsed = self.parse_dictionary_value(value)
+                        all_keys.update(parsed.keys())
+                
+                if dict_count > len(sample_values) * 0.5:
+                    dict_fields[field] = list(all_keys)
+        
+        return dict_fields
+    
+    # Method to show key selection popup
+    def show_key_selection_popup(self, field, available_keys):
+        """Show popup for key selection in dictionary fields"""
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Select Keys for Field: {field}")
+        popup.geometry("400x300")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text=f"Select keys to include from field '{field}':", 
+                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+        
+        key_frame = ttk.Frame(popup)
+        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
+        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
+        key_listbox.configure(yscrollcommand=key_scrollbar.set)
+        
+        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for key in available_keys:
+            key_listbox.insert(tk.END, key)
+        
+        key_listbox.select_set(0, tk.END)
+        
+        selected_keys = []
+        
+        def on_confirm():
+            nonlocal selected_keys
+            selected_indices = key_listbox.curselection()
+            selected_keys = [available_keys[i] for i in selected_indices]
+            popup.destroy()
+        
+        def on_cancel():
+            nonlocal selected_keys
+            selected_keys = []
+            popup.destroy()
+        
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(pady=10)
+        
+        ttk.Button(button_frame, text="Confirm", command=on_confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return selected_keys
+    
+    # Method to orchestrate stage 2 processing
+    def process_stage2(self):
+        """Stage 2: Apply mappings and generate final output"""
+        if not self.stage1_complete or not self.stage1_data:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        try:
+            # Apply mappings to stage 1 data
+            if self.mapping_data:
+                self.processed_data = self.apply_mappings(self.stage1_data.copy())
+            else:
+                self.processed_data = self.stage1_data.copy()
+            
+            self.export_button.config(state='normal')
+            self.status_var.set(f"Stage 2 complete. {len(self.processed_data)} rows ready for export.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to process Stage 2: {str(e)}")
+            self.status_var.set("Stage 2 processing failed")
+    
+    # Method to process a single row
     def process_single_row(self, row, result_rows):
         """Process a single row, handling multi-values and dictionary fields with Cartesian product"""
-        # Import itertools for Cartesian product generation
         import itertools
         
-        # Initialize dictionary to store field expansions for this row
         field_expansions = {}
         
-        # Process regular (non-dictionary) fields for multi-value splitting
+        # Process regular fields
         for field in self.selected_fields:
-            # Skip fields identified as dictionary fields
             if field not in self.dictionary_fields:
-                # Split field value into multiple values
                 values = self.split_multi_values(row[field])
-                # Remove empty values and duplicates while preserving order
                 unique_values = []
                 for val in values:
-                    # Add only non-empty values that haven't been added yet
                     if val and val not in unique_values:
                         unique_values.append(val)
-                # Ensure at least one value (empty string) if no valid values found
                 if not unique_values:
                     unique_values = [""]
-                # Store processed values for this field
                 field_expansions[field] = unique_values
         
-        # **MODIFIED**: Process dictionary fields using pre-parsed cached data
+        # Process dictionary fields
         for field in self.dictionary_fields:
-            # Only process fields where user selected keys
             if field in self.selected_keys:
-                # **MODIFIED**: Retrieve pre-parsed dictionary from cache instead of parsing now
-                parsed_dict = self.parsed_dictionaries.get(field, {}).get(row.name, {})
+                parsed_dict = self.parse_dictionary_value(row[field])
                 
-                # Extract each user-selected key from the cached parsed dictionary
                 for key in self.selected_keys[field]:
-                    # Check if key exists in cached parsed dictionary
                     if key in parsed_dict:
-                        # Split the key's value for multi-values
                         key_values = self.split_multi_values(parsed_dict[key])
-                        # Remove duplicates while preserving order
                         unique_values = []
                         for val in key_values:
                             if val and val not in unique_values:
                                 unique_values.append(val)
-                        # Ensure at least one value exists
                         if not unique_values:
                             unique_values = [""]
-                        # Store values with field_key naming convention
                         field_expansions[f"{field}_{key}"] = unique_values
                     else:
-                        # Store empty value if key not found in dictionary
                         field_expansions[f"{field}_{key}"] = [""]
         
-        # Generate Cartesian product of all field values
+        # Generate Cartesian product
         if field_expansions:
-            # Get ordered lists of field names and their corresponding values
             field_names = list(field_expansions.keys())
             field_values = list(field_expansions.values())
             
-            # Generate all possible combinations using Cartesian product
             for combination in itertools.product(*field_values):
-                # Create new row dictionary for this combination
                 new_row = {}
-                # Assign each field name its corresponding value from combination
                 for field_name, value in zip(field_names, combination):
                     new_row[field_name] = value
                 
-                # Add combination only if it's not a duplicate
                 if new_row not in result_rows:
                     result_rows.append(new_row)
     
-    # Deprecated method kept for backward compatibility
-    def expand_multivalued_fields(self, base_row, dict_expansions, result_rows):
-        """Handle multiple values by creating separate rows - DEPRECATED"""
-        # This method is now replaced by process_single_row
-        # Kept as placeholder to avoid breaking existing code references
-        pass
-    
-    # Method to apply mapping transformations to processed data
+    # Method to apply mappings
     def apply_mappings(self, result_rows):
         """Apply mapping files to add additional columns"""
-        # Process each loaded mapping file
         for field, mapping_df in self.mapping_data.items():
-            # Only apply mapping if the field was selected for processing
             if field in self.selected_fields:
-                # Verify mapping DataFrame has at least 2 columns
                 if len(mapping_df.columns) >= 2:
-                    # Use first column as key for mapping lookup
                     key_col = mapping_df.columns[0]
-                    # Use second column as value for mapping result
                     value_col = mapping_df.columns[1]
                     
-                    # Create dictionary for efficient lookups
                     mapping_dict = dict(zip(mapping_df[key_col], mapping_df[value_col]))
                     
-                    # Apply mapping to each result row
                     for row in result_rows:
-                        # Check if the field exists in this row
                         if field in row:
-                            # Look up mapped value, default to empty string if not found
                             mapped_value = mapping_dict.get(row[field], "")
-                            # Add mapped value as new column with _mapped suffix
                             row[f"{field}_mapped"] = mapped_value
         
-        # Return the enhanced result rows with mapping applied
         return result_rows
     
-    # Method to display completion popup asking for next action
+    # Method to show completion popup
     def show_completion_popup(self):
         """Show popup asking user what to do next"""
-        # Create modal popup window
         popup = tk.Toplevel(self.root)
         popup.title("Processing Complete")
         popup.geometry("300x150")
-        # Make popup stay on top of main window
         popup.transient(self.root)
-        # Make popup modal to block interaction with main window
         popup.grab_set()
         
-        # Add success message with bold formatting
-        ttk.Label(popup, text="Data processing completed successfully!", 
+        ttk.Label(popup, text="Data exported successfully!", 
                  font=('TkDefaultFont', 10, 'bold')).pack(pady=20)
         
-        # Add instruction label asking user for next action
         ttk.Label(popup, text="What would you like to do next?").pack(pady=5)
         
-        # Create frame container for action buttons
         button_frame = ttk.Frame(popup)
-        # Pack button frame with vertical padding
         button_frame.pack(pady=20)
         
-        # Define function to handle "continue working" action
         def continue_working():
-            # Close popup and return to main interface
             popup.destroy()
         
-        # Define function to handle "close application" action  
         def close_application():
-            # Close popup first
             popup.destroy()
-            # Properly destroy main window (not just quit mainloop)
-            self.root.destroy()  # Use destroy() instead of quit()
+            self.root.destroy()
         
-        # Create "Continue Working" button
         ttk.Button(button_frame, text="Continue Working", 
-                  # Connect to continue function, position on left
                   command=continue_working).pack(side=tk.LEFT, padx=10)
-        # Create "Close Application" button  
         ttk.Button(button_frame, text="Close Application", 
-                  # Connect to close function, position on right
                   command=close_application).pack(side=tk.LEFT, padx=10)
     
-    # Method to handle data export functionality
+    # Method to export data
     def export_data(self):
-        # Verify that processed data exists before attempting export
         if not self.processed_data:
             messagebox.showwarning("Warning", "No processed data to export")
             return
         
-        # Open save dialog to let user choose export location and format
         file_path = filedialog.asksaveasfilename(
             title="Save Processed Data",
-            # Set default extension to CSV
             defaultextension=".csv",
-            # Provide export format options
             filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx"), ("All files", "*.*")]
         )
         
-        # Proceed with export if user selected a save location
         if file_path:
-            # Wrap export process in error handling
             try:
-                # Convert processed data list to pandas DataFrame for export
                 df_export = pd.DataFrame(self.processed_data)
                 
-                # Choose export method based on file extension
                 if file_path.endswith('.xlsx'):
-                    # Export as Excel file without row indices
                     df_export.to_excel(file_path, index=False)
                 else:
-                    # Export as CSV file without row indices
                     df_export.to_csv(file_path, index=False)
                 
-                # Show success message with filename
                 messagebox.showinfo("Success", f"Data exported successfully to {os.path.basename(file_path)}")
-                # Update status bar to reflect successful export
                 self.status_var.set(f"Data exported to {os.path.basename(file_path)}")
                 
-                # Show completion popup after successful export
                 self.show_completion_popup()
                 
-            # Handle export errors
             except Exception as e:
-                # Show error dialog with specific error message
                 messagebox.showerror("Error", f"Failed to export data: {str(e)}")
 
-# Main function to create and run the GUI application
+# Main function
 def main():
-    # Create the root tkinter window
     root = tk.Tk()
-    # Instantiate the CSV processor GUI application
     app = CSVProcessorGUI(root)
-    # Start the GUI event loop to handle user interactions
     root.mainloop()
 
-# Python idiom to run main() only when script is executed directly (not imported)
 if __name__ == "__main__":
-    # Execute the main function to start the application
     main()
