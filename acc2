@@ -104,21 +104,16 @@ class CSVProcessorGUI:
                   command=self.add_mapping_file, state='disabled')
         self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
         
-        # Create listbox to display loaded mapping files
-        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
-        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
-        mapping_frame.columnconfigure(0, weight=1)
-        
         # Create section header label for field selection
-        ttk.Label(main_frame, text="4. Select Fields (Auto-selected after Stage 1):", 
+        ttk.Label(main_frame, text="3. Select Fields for Processing:", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
-            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
         # Create container frame for field selection controls
         field_frame = ttk.Frame(main_frame)
-        field_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         field_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(7, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # Create sub-frame for field listbox with scrollbar
         field_scroll_frame = ttk.Frame(field_frame)
@@ -134,21 +129,54 @@ class CSVProcessorGUI:
         self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
         
+        # Create section header label for stage 1 processing
+        ttk.Label(main_frame, text="4. Stage 1 Processing:", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create button for stage 1 processing
+        self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", 
+                  command=self.process_stage1, state='disabled')
+        self.stage1_button.grid(row=7, column=0, sticky=tk.W, pady=(0, 10))
+        
+        # Create label to show stage 1 status
+        self.stage1_status_label = ttk.Label(main_frame, text="")
+        self.stage1_status_label.grid(row=7, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+        
+        # Create section header label for mapping files functionality
+        ttk.Label(main_frame, text="5. Load Mapping Files (Optional):", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=8, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create sub-frame container for mapping files controls
+        mapping_frame = ttk.Frame(main_frame)
+        mapping_frame.grid(row=9, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Create button to add mapping files
+        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", 
+                  command=self.add_mapping_file, state='disabled')
+        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
+        
+        # Create listbox to display loaded mapping files
+        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
+        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        mapping_frame.columnconfigure(0, weight=1)
+        
         # Create stage 2 process button with accent styling
         self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output with Mapping)", 
                   command=self.process_stage2, style='Accent.TButton', state='disabled')
-        self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
+        self.stage2_button.grid(row=10, column=0, columnspan=2, pady=10)
         
         # Create export button initially disabled until data is processed
         self.export_button = ttk.Button(main_frame, text="Export Results", 
                                        command=self.export_data, state='disabled')
-        self.export_button.grid(row=9, column=0, columnspan=2, pady=5)
+        self.export_button.grid(row=11, column=0, columnspan=2, pady=5)
         
         # Create StringVar to hold status messages for dynamic updates
         self.status_var = tk.StringVar(value="Ready to load file...")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                               relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=12, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
     # Method to detect file encoding automatically
     def detect_encoding(self, file_path):
@@ -189,7 +217,7 @@ class CSVProcessorGUI:
                 
                 self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
                 
-                # Enable stage 1 processing button
+                # Enable field selection and stage 1 button
                 self.stage1_button.config(state='normal')
                 self.stage1_complete = False
                 self.stage1_status_label.config(text="")
@@ -207,22 +235,23 @@ class CSVProcessorGUI:
             messagebox.showwarning("Warning", "Please load an input file first")
             return
         
+        # Get user's field selections from the listbox
+        selected_indices = self.field_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Warning", "Please select at least one field")
+            return
+        
+        # Convert selection indices to field names
+        self.selected_fields = [self.field_listbox.get(i) for i in selected_indices]
+        
         try:
-            # Auto-select all fields for initial processing
-            self.selected_fields = list(self.df.columns)
-            
-            # Clear field listbox and populate with all columns
-            self.field_listbox.delete(0, tk.END)
-            for col in self.selected_fields:
-                self.field_listbox.insert(tk.END, col)
-            
-            # Detect dictionary fields automatically
+            # Detect dictionary fields only in selected fields
             self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
             
             # Initialize dictionary to store user's key selections
             self.selected_keys = {}
             
-            # If dictionary fields are found, show popup for key selection
+            # If dictionary fields are found in selected fields, show popup for key selection
             if self.dictionary_fields:
                 for field, available_keys in self.dictionary_fields.items():
                     if available_keys:
@@ -230,22 +259,24 @@ class CSVProcessorGUI:
                         if selected:
                             self.selected_keys[field] = selected
                         else:
-                            messagebox.showinfo("Info", f"No keys selected for field '{field}'. Skipping dictionary processing for this field.")
+                            # If user cancels, ask if they want to skip this field
+                            response = messagebox.askyesno("Skip Field?", 
+                                f"No keys selected for field '{field}'.\n\n"
+                                f"Do you want to keep this field without dictionary expansion?")
+                            if not response:
+                                # Remove from selected fields if user doesn't want to keep it
+                                self.selected_fields.remove(field)
             
             # Process stage 1 data
             self.stage1_data = self.process_stage1_dataframe()
             
-            # Update field listbox with new columns from stage 1 processing
+            # Get column names from stage 1 data (only from selected fields processing)
             if self.stage1_data:
                 stage1_columns = set()
                 for row in self.stage1_data:
                     stage1_columns.update(row.keys())
                 
-                self.field_listbox.delete(0, tk.END)
-                for col in sorted(stage1_columns):
-                    self.field_listbox.insert(tk.END, col)
-                self.field_listbox.select_set(0, tk.END)
-                
+                # Update the selected_fields to match stage 1 output columns
                 self.selected_fields = list(stage1_columns)
             
             # Mark stage 1 as complete
@@ -256,7 +287,7 @@ class CSVProcessorGUI:
             self.add_mapping_button.config(state='normal')
             self.stage2_button.config(state='normal')
             
-            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated. You can now add mapping files or proceed to Stage 2.")
+            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated from selected fields. You can now add mapping files or proceed to Stage 2.")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
@@ -557,8 +588,9 @@ class CSVProcessorGUI:
     
     # Method to apply mappings
     def apply_mappings(self, result_rows):
-        """Apply mapping files to add additional columns"""
+        """Apply mapping files to add additional columns with original column names"""
         for field, mapping_df in self.mapping_data.items():
+            # Check if field exists in stage 1 data
             if field in self.selected_fields:
                 if len(mapping_df.columns) >= 2:
                     key_col = mapping_df.columns[0]
@@ -569,7 +601,8 @@ class CSVProcessorGUI:
                     for row in result_rows:
                         if field in row:
                             mapped_value = mapping_dict.get(row[field], "")
-                            row[f"{field}_mapped"] = mapped_value
+                            # Use the original column name from mapping file instead of field_mapped
+                            row[value_col] = mapped_value
         
         return result_rows
     
