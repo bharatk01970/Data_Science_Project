@@ -128,3 +128,408 @@
         
         # Return user's key selections (empty list if cancelled or nothing selected)
         return selected_keys
+
+
+
+
+# Key Selection UX Improvement Summary
+
+## Change Overview
+Updated the dictionary key selection popup to use **manual selection** behavior instead of **pre-selected all** behavior, providing consistency with the main field selection interface.
+
+---
+
+## Problem Statement
+
+### Previous Behavior:
+- When dictionary fields were detected, a popup appeared with **ALL keys pre-selected**
+- Users had to **manually deselect** keys they didn't want
+- This was inconsistent with the main field selection listbox behavior
+- For fields with many keys (10+), deselecting unwanted keys was tedious
+
+### Example Scenario:
+```
+Dictionary Field: "Details"
+Available Keys: Name, Age, Address, Phone, Email, City, State, ZIP, Country, Notes
+                (All 10 pre-selected)
+
+User wants only: Name, Email, Phone
+Action Required: Click to deselect 7 unwanted keys (tedious!)
+```
+
+---
+
+## Solution Implemented
+
+### New Behavior:
+- Popup appears with **NO keys pre-selected** (empty selection)
+- Users **manually select** only the keys they want
+- Matches the behavior of the main field selection listbox
+- More intuitive and faster for selective key extraction
+
+### Updated Scenario:
+```
+Dictionary Field: "Details"
+Available Keys: Name, Age, Address, Phone, Email, City, State, ZIP, Country, Notes
+                (None pre-selected)
+
+User wants only: Name, Email, Phone
+Action Required: Click to select 3 desired keys (efficient!)
+```
+
+---
+
+## Code Changes
+
+### Function Modified: `show_key_selection_popup(field, available_keys)`
+
+### Change 1: Removed Pre-Selection
+```python
+# OLD CODE - Pre-selected all keys
+key_listbox.select_set(0, tk.END)  # Select all by default
+
+# NEW CODE - Nothing pre-selected
+# key_listbox.select_set(0, tk.END)  # REMOVED: No default selection
+```
+
+**Impact:** Users start with a clean slate for selection
+
+---
+
+### Change 2: Enhanced UI Layout
+```python
+# NEW: Improved window size for better visibility
+popup.geometry("450x350")  # Was: "400x300"
+
+# NEW: Added instruction text
+ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
+         font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
+```
+
+**Impact:** Better user guidance and more screen space
+
+---
+
+### Change 3: Selection Counter (NEW)
+```python
+# NEW: Real-time selection count display
+status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
+                        foreground='blue')
+status_label.pack(pady=(0, 5))
+
+# NEW: Update counter when selection changes
+def update_status(event=None):
+    count = len(key_listbox.curselection())
+    status_label.config(text=f"{count} of {len(available_keys)} keys selected")
+
+key_listbox.bind('<<ListboxSelect>>', update_status)
+```
+
+**Impact:** Users see instant feedback on how many keys they've selected
+
+**Example Display:**
+```
+0 of 10 keys selected   →   3 of 10 keys selected
+```
+
+---
+
+### Change 4: Helper Buttons (NEW)
+```python
+# NEW: Quick selection helper buttons
+helper_button_frame = ttk.Frame(popup)
+helper_button_frame.pack(pady=(5, 5))
+
+ttk.Button(helper_button_frame, text="Select All", 
+          command=on_select_all).pack(side=tk.LEFT, padx=5)
+ttk.Button(helper_button_frame, text="Clear All", 
+          command=on_clear_all).pack(side=tk.LEFT, padx=5)
+
+# NEW: Select all functionality
+def on_select_all():
+    """Select all keys"""
+    key_listbox.select_set(0, tk.END)
+    update_status()
+
+# NEW: Clear all functionality
+def on_clear_all():
+    """Clear all selections"""
+    key_listbox.selection_clear(0, tk.END)
+    update_status()
+```
+
+**Impact:** Power users can quickly select/clear all when needed
+
+---
+
+### Change 5: Button Label Update
+```python
+# OLD: Generic button text
+ttk.Button(button_frame, text="Confirm", command=on_confirm)
+
+# NEW: More descriptive button text
+ttk.Button(button_frame, text="Confirm Selection", command=on_confirm)
+```
+
+**Impact:** Clearer action description
+
+---
+
+## Visual Comparison
+
+### OLD Popup Layout:
+```
+┌────────────────────────────────────┐
+│ Select keys to include from        │
+│ field 'Details':                   │
+│                                    │
+│ ┌────────────────────────────────┐ │
+│ │ ☑ Name        (all selected)   │ │
+│ │ ☑ Age                          │ │
+│ │ ☑ Address                      │ │
+│ │ ☑ Phone                        │ │
+│ │ ☑ Email                        │ │
+│ │ ☑ City                         │ │
+│ │ ☑ State                        │ │
+│ │ ☑ ZIP                          │ │
+│ │ ☑ Country                      │ │
+│ │ ☑ Notes                        │ │
+│ └────────────────────────────────┘ │
+│                                    │
+│     [Confirm]     [Cancel]         │
+└────────────────────────────────────┘
+```
+
+### NEW Popup Layout:
+```
+┌─────────────────────────────────────────┐
+│ Select keys to include from             │
+│ field 'Details':                        │
+│ Tip: Click to select. Hold Ctrl for    │
+│      multiple selections.               │
+│                                         │
+│ ┌─────────────────────────────────────┐ │
+│ │ ☐ Name      (none selected)         │ │
+│ │ ☐ Age                               │ │
+│ │ ☐ Address                           │ │
+│ │ ☐ Phone                             │ │
+│ │ ☐ Email                             │ │
+│ │ ☐ City                              │ │
+│ │ ☐ State                             │ │
+│ │ ☐ ZIP                               │ │
+│ │ ☐ Country                           │ │
+│ │ ☐ Notes                             │ │
+│ └─────────────────────────────────────┘ │
+│                                         │
+│        3 of 10 keys selected            │
+│                                         │
+│    [Select All]    [Clear All]          │
+│                                         │
+│  [Confirm Selection]    [Cancel]        │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## User Experience Improvements
+
+### 1. Consistency
+✅ **Before:** Different behavior from main field selection  
+✅ **After:** Consistent manual selection across all interfaces
+
+### 2. Efficiency
+✅ **Before:** Deselect 7 unwanted from 10 (7 clicks)  
+✅ **After:** Select 3 wanted from 10 (3 clicks)  
+📊 **Improvement:** 57% fewer clicks for selective extraction
+
+### 3. Clarity
+✅ **Before:** No feedback on selection count  
+✅ **After:** Real-time counter shows "3 of 10 keys selected"
+
+### 4. Flexibility
+✅ **Added:** "Select All" button for full extraction  
+✅ **Added:** "Clear All" button to reset selection  
+✅ **Added:** Helpful tips for multi-selection
+
+### 5. Intent
+✅ **Before:** Assumes user wants everything (opt-out model)  
+✅ **After:** Lets user choose explicitly (opt-in model)
+
+---
+
+## Use Case Scenarios
+
+### Scenario 1: Selective Extraction
+**User Goal:** Extract only 2-3 specific keys from a 15-key dictionary
+
+**OLD Method:**
+1. Popup opens with 15 keys selected
+2. Scroll through list
+3. Click to deselect 12 unwanted keys
+4. Confirm
+5. **Total Actions:** 12 deselects + 1 confirm = 13 clicks
+
+**NEW Method:**
+1. Popup opens with 0 keys selected
+2. Click to select 3 wanted keys
+3. See "3 of 15 keys selected"
+4. Confirm
+5. **Total Actions:** 3 selects + 1 confirm = 4 clicks
+6. **Efficiency Gain:** 69% fewer actions
+
+---
+
+### Scenario 2: Full Extraction
+**User Goal:** Extract all keys from dictionary field
+
+**OLD Method:**
+1. Popup opens with all selected (0 actions)
+2. Confirm
+3. **Total Actions:** 1 click
+
+**NEW Method:**
+1. Popup opens with none selected
+2. Click "Select All" button
+3. See "10 of 10 keys selected"
+4. Confirm
+5. **Total Actions:** 2 clicks
+6. **Trade-off:** 1 extra click, but clearer intent
+
+---
+
+### Scenario 3: Iterative Selection
+**User Goal:** Experiment with different key combinations
+
+**OLD Method:**
+- Difficult to track what's selected
+- Must remember which keys were deselected
+- No visual counter
+
+**NEW Method:**
+- Clear starting point (nothing selected)
+- Real-time counter: "5 of 12 selected"
+- Easy to "Clear All" and restart
+- Better experimentation workflow
+
+---
+
+## Keyboard Shortcuts Support
+
+The selection listbox supports standard keyboard shortcuts:
+
+### Windows/Linux:
+- **Click:** Select single key
+- **Ctrl + Click:** Toggle individual keys
+- **Shift + Click:** Select range
+- **Ctrl + A:** Select all (built-in)
+
+### macOS:
+- **Click:** Select single key
+- **Cmd + Click:** Toggle individual keys
+- **Shift + Click:** Select range
+- **Cmd + A:** Select all (built-in)
+
+---
+
+## Edge Cases Handled
+
+### Case 1: No Keys Selected
+```python
+# User clicks "Confirm" without selecting any keys
+selected_indices = key_listbox.curselection()  # Empty tuple
+selected_keys = []  # Returns empty list
+
+# In process_stage1():
+if not selected:
+    # Asks user if they want to keep field without expansion
+    response = messagebox.askyesno(...)
+```
+
+**Behavior:** User is prompted to confirm if they want to skip the field
+
+---
+
+### Case 2: Cancel Action
+```python
+def on_cancel():
+    nonlocal selected_keys
+    selected_keys = []  # Returns empty list
+    popup.destroy()
+```
+
+**Behavior:** Field is skipped with user confirmation
+
+---
+
+### Case 3: Single Key Selection
+**Before:** Had to deselect all others (tedious)  
+**After:** Simply click the one key you want (intuitive)
+
+---
+
+## Testing Checklist
+
+✅ **Visual Tests:**
+- [ ] Popup opens with NO keys pre-selected
+- [ ] Selection counter shows "0 of N keys selected" initially
+- [ ] Counter updates in real-time when keys are selected
+- [ ] "Select All" button selects all keys and updates counter
+- [ ] "Clear All" button deselects all keys and resets counter
+
+✅ **Functional Tests:**
+- [ ] Selecting keys manually works correctly
+- [ ] Ctrl/Cmd + Click toggles individual keys
+- [ ] Shift + Click selects range
+- [ ] Confirm returns only selected keys
+- [ ] Cancel returns empty list
+- [ ] No selection triggers skip confirmation dialog
+
+✅ **UX Tests:**
+- [ ] Tip text is visible and helpful
+- [ ] Button labels are clear and descriptive
+- [ ] Window size accommodates long key names
+- [ ] Scrollbar appears when many keys present
+
+---
+
+## Migration Impact
+
+### For Existing Users:
+⚠️ **Behavior Change:** Users familiar with the old "deselect" pattern need to adapt to "select" pattern
+
+💡 **Mitigation:**
+- Clear on-screen instructions added
+- "Select All" button available for quick full selection
+- Real-time feedback helps users understand the change
+
+### For New Users:
+✅ **Benefit:** Intuitive from the start - matches standard selection patterns
+
+---
+
+## Summary Statistics
+
+| Metric | OLD | NEW | Change |
+|--------|-----|-----|--------|
+| Default Selection | All | None | -100% |
+| UI Components | 3 | 6 | +100% |
+| Helper Buttons | 0 | 2 | +2 |
+| Visual Feedback | None | Real-time counter | +1 |
+| Instructions | Minimal | Detailed | Enhanced |
+| Window Size | 400x300 | 450x350 | +16% area |
+| Clicks (Selective) | 12+ | 3 | -75% |
+| User Control | Medium | High | +++ |
+
+---
+
+## Conclusion
+
+This update transforms the key selection experience from a **deselection-heavy** workflow to an **intentional selection** workflow, resulting in:
+
+1. 🎯 **Better UX:** Consistent with field selection behavior
+2. ⚡ **Higher Efficiency:** Fewer clicks for selective extraction
+3. 📊 **Better Feedback:** Real-time selection counter
+4. 🛠️ **More Tools:** "Select All" and "Clear All" helpers
+5. 📖 **Clearer Intent:** Users explicitly choose what they want
+
+The change follows the principle of **explicit over implicit** and provides a more intuitive, efficient interface for dictionary key selection.
