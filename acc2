@@ -1,662 +1,489 @@
-# Import tkinter for GUI framework - provides window management and user interface components
-import tkinter as tk
-# Import ttk for themed tkinter widgets - provides modern styled GUI elements
-from tkinter import ttk, filedialog, messagebox, simpledialog
-# Import pandas for data manipulation - handles CSV/Excel file reading and DataFrame operations
-import pandas as pd
-# Import json for JSON parsing - attempts to parse dictionary-like strings as JSON objects
-import json
-# Import ast for abstract syntax tree evaluation - safely evaluates Python literal expressions
-import ast
-# Import os for operating system interface - handles file path operations and system interactions
-import os
-# Import typing for type hints - provides static type checking support
-from typing import Dict, List, Any, Optional
-# Import chardet for automatic encoding detection
-import chardet
+# Final Enhanced Features - Complete Summary
 
-# Define the main GUI application class that encapsulates all CSV processing functionality
-class CSVProcessorGUI:
-    # Constructor method that initializes the GUI application and sets up initial state
-    def __init__(self, root):
-        # Store reference to the main tkinter root window for later use
-        self.root = root
-        # Set the window title that appears in the title bar
-        self.root.title("CSV Dictionary Field Processor - Enhanced Version")
-        # Set the initial window size (width x height in pixels)
-        self.root.geometry("750x700")
+## Overview
+Three major features have been added to the CSV Dictionary Field Processor, with critical enhancements to the mapping functionality to provide intelligent column handling based on Stage 1 field selection.
+
+---
+
+## Feature 1: Smart Mapping Logic (ENHANCED)
+
+### Description
+**Revolutionary mapping behavior that intelligently decides whether to include or exclude the mapping key column based on Stage 1 field selection.**
+
+### The Problem Solved
+Previously, mapping files would always add redundant columns or fail to work with non-selected fields. The new logic solves this by:
+
+### Two Mapping Modes
+
+#### Mode 1: Normal Mapping (Field WAS Selected in Stage 1)
+**Scenario:** You selected a field in Stage 1, and now you're adding a mapping for it.
+
+**Behavior:**
+- ✅ Keep the original field column in output
+- ✅ Add all mapped columns from mapping file
+- ✅ Both key and value columns appear in final output
+
+**Example:**
+```
+Original Input:
+EmployeeID, Name, Skills
+E001, John, Python
+
+Stage 1 Selection: EmployeeID, Name, Skills
+
+Stage 1 Output:
+EmployeeID, Name, Skills
+E001, John, Python
+
+Mapping File (for EmployeeID):
+EmployeeID, Department, Manager
+E001, Engineering, Bob
+
+Final Output:
+EmployeeID, Name, Skills, Department, Manager
+E001, John, Python, Engineering, Bob
+         ↑ Original column kept
+```
+
+**Why?** User explicitly selected this field, so they want to see it.
+
+---
+
+#### Mode 2: Lookup-Only Mapping (Field was NOT Selected in Stage 1)
+**Scenario:** You did NOT select a field in Stage 1, but you add a mapping for it.
+
+**Behavior:**
+- ❌ Exclude the mapping key column from output
+- ✅ Add all other mapped columns from mapping file
+- ✅ Uses original input file data for lookup
+- ✅ Enriches without cluttering output
+
+**Example:**
+```
+Original Input:
+EmployeeID, Name, Skills
+E001, John, Python
+E002, Jane, SQL
+
+Stage 1 Selection: Name, Skills (EmployeeID NOT selected)
+
+Stage 1 Output:
+Name, Skills
+John, Python
+Jane, SQL
+
+Mapping File (for EmployeeID):
+EmployeeID, Department, Manager, Location
+E001, Engineering, Bob, NYC
+E002, Analytics, Alice, LA
+
+Final Output:
+Name, Skills, Department, Manager, Location
+John, Python, Engineering, Bob, NYC
+Jane, SQL, Analytics, Alice, LA
+     ↑ EmployeeID NOT in output (lookup-only)
+```
+
+**Why?** User didn't select this field, so they don't want to see it. It's only used for enrichment lookup.
+
+---
+
+### Technical Implementation
+
+#### New Instance Variables
+```python
+self.mapping_lookup_only = {}  # Tracks which mappings are lookup-only
+# Format: {field_name: True/False}
+```
+
+#### Detection Logic in `add_mapping_file()`
+```python
+# Determine if this field was selected in Stage 1
+is_lookup_only = field_to_map not in self.selected_fields
+
+# Store the mode
+self.mapping_lookup_only[field_to_map] = is_lookup_only
+
+# Update display with indicator
+if is_lookup_only:
+    self.mapping_listbox.insert(tk.END, 
+        f"{field_to_map}: {os.path.basename(file_path)} [Lookup Only]")
+else:
+    self.mapping_listbox.insert(tk.END, 
+        f"{field_to_map}: {os.path.basename(file_path)}")
+```
+
+#### Mapping Application Logic in `apply_mappings()`
+```python
+def apply_mappings(self, result_rows):
+    for field, mapping_df in self.mapping_data.items():
+        key_col = mapping_df.columns[0]
+        is_lookup_only = self.mapping_lookup_only.get(field, False)
         
-        # Initialize empty string to store the path of the selected input file
-        self.input_file_path = ""
-        # Initialize empty dictionary to store mapping between field names and their mapping file paths
-        self.mapping_files = {}
-        # Initialize None to store the loaded pandas DataFrame containing the input data
-        self.df = None
-        # Initialize empty list to store field names selected by the user for processing
-        self.selected_fields = []
-        # Initialize empty dictionary to store fields identified as containing dictionary-like data
-        self.dictionary_fields = {}
-        # Initialize empty dictionary to store user-selected keys for each dictionary field
-        self.selected_keys = {}
-        # Initialize None to store the final processed data after transformation
-        self.processed_data = None
-        # Initialize empty dictionary to store loaded mapping data as DataFrames
-        self.mapping_data = {}
-        # Initialize dictionary to track which mapping fields are lookup-only (not in Stage 1)
-        self.mapping_lookup_only = {}
-        # Initialize None to store stage 1 processed data before mapping
-        self.stage1_data = None
-        # Initialize flag to track if stage 1 processing is complete
-        self.stage1_complete = False
-        # Initialize dictionary to store default columns with their values
-        self.default_columns = {}
-        # Initialize dictionary to store column renames
-        self.column_renames = {}
+        # Create mapping for lookup-only fields
+        original_data_map = {}
+        if is_lookup_only:
+            # Get values from ORIGINAL input file
+            for index, orig_row in self.df.iterrows():
+                if field in orig_row:
+                    original_data_map[index] = orig_row[field]
         
-        # Call the UI setup method to create and arrange all GUI components
-        self.setup_ui()
-    
-    # Method to create and configure all GUI elements and their layout
-    def setup_ui(self):
-        # Create the main container frame with padding for visual spacing
-        main_frame = ttk.Frame(self.root, padding="10")
-        # Place the main frame in the root window using grid layout manager
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Configure the root window's first column to expand horizontally when window resizes
-        self.root.columnconfigure(0, weight=1)
-        # Configure the root window's first row to expand vertically when window resizes
-        self.root.rowconfigure(0, weight=1)
-        # Configure the main frame's second column to expand horizontally
-        main_frame.columnconfigure(1, weight=1)
-        
-        # Create section header label for file loading with bold font
-        ttk.Label(main_frame, text="1. Load Input File:", font=('TkDefaultFont', 10, 'bold')).grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
-        
-        # Create button to trigger file selection dialog
-        ttk.Button(main_frame, text="Select Input File", 
-                  command=self.load_input_file).grid(row=1, column=0, sticky=tk.W, pady=(0, 10))
-        
-        # Create label to display the name of the selected input file
-        self.input_file_label = ttk.Label(main_frame, text="No file selected")
-        self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
-        
-        # Create section header label for stage 1 processing
-        ttk.Label(main_frame, text="2. Stage 1 Processing:", 
-                 font=('TkDefaultFont', 10, 'bold')).grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
-        
-        # Create button for stage 1 processing
-        self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", 
-                  command=self.process_stage1, state='disabled')
-        self.stage1_button.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
-        
-        # Create label to show stage 1 status
-        self.stage1_status_label = ttk.Label(main_frame, text="")
-        self.stage1_status_label.grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
-        
-        # Create section header label for field selection
-        ttk.Label(main_frame, text="3. Select Fields for Processing:", 
-                 font=('TkDefaultFont', 10, 'bold')).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
-        
-        # Create container frame for field selection controls
-        field_frame = ttk.Frame(main_frame)
-        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        field_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(5, weight=1)
-        
-        # Create sub-frame for field listbox with scrollbar
-        field_scroll_frame = ttk.Frame(field_frame)
-        field_scroll_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        field_scroll_frame.columnconfigure(0, weight=1)
-        field_scroll_frame.rowconfigure(0, weight=1)
-        
-        # Create listbox for field selection with multiple selection enabled
-        self.field_listbox = tk.Listbox(field_scroll_frame, selectmode=tk.MULTIPLE, height=6)
-        field_scrollbar = ttk.Scrollbar(field_scroll_frame, orient="vertical", command=self.field_listbox.yview)
-        self.field_listbox.configure(yscrollcommand=field_scrollbar.set)
-        
-        self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
-        # Create section header label for mapping files functionality
-        ttk.Label(main_frame, text="4. Load Mapping Files (Optional):", 
-                 font=('TkDefaultFont', 10, 'bold')).grid(
-            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
-        
-        # Create sub-frame container for mapping files controls
-        mapping_frame = ttk.Frame(main_frame)
-        mapping_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        # Create button to add mapping files
-        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", 
-                  command=self.add_mapping_file, state='disabled')
-        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
-        
-        # Create listbox to display loaded mapping files
-        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
-        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
-        mapping_frame.columnconfigure(0, weight=1)
-        
-        # Create section header for default columns
-        ttk.Label(main_frame, text="5. Add Default Columns (Optional):", 
-                 font=('TkDefaultFont', 10, 'bold')).grid(
-            row=8, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
-        
-        # Create button to add default columns
-        self.add_default_button = ttk.Button(main_frame, text="Add Default Column", 
-                  command=self.add_default_column, state='disabled')
-        self.add_default_button.grid(row=9, column=0, sticky=tk.W, pady=(0, 10))
-        
-        # Create listbox to display default columns
-        self.default_listbox = tk.Listbox(main_frame, height=2)
-        self.default_listbox.grid(row=9, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=(0, 10))
-        
-        # Create stage 2 process button with accent styling
-        self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output)", 
-                  command=self.process_stage2, style='Accent.TButton', state='disabled')
-        self.stage2_button.grid(row=10, column=0, columnspan=2, pady=10)
-        
-        # Create export button initially disabled until data is processed
-        self.export_button = ttk.Button(main_frame, text="Export Results", 
-                                       command=self.export_data, state='disabled')
-        self.export_button.grid(row=11, column=0, columnspan=2, pady=5)
-        
-        # Create StringVar to hold status messages for dynamic updates
-        self.status_var = tk.StringVar(value="Ready to load file...")
-        status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
-                              relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=12, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
-    
-    # Method to detect file encoding automatically
-    def detect_encoding(self, file_path):
-        """Detect the encoding of a file"""
-        try:
-            with open(file_path, 'rb') as f:
-                raw_data = f.read(100000)
-                result = chardet.detect(raw_data)
-                encoding = result['encoding']
-                return encoding if encoding else 'utf-8'
-        except Exception:
-            return 'utf-8'
-    
-    # Method to handle input file selection and loading
-    def load_input_file(self):
-        file_path = filedialog.askopenfilename(
-            title="Select Input File",
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        
-        if file_path:
-            try:
-                # Detect file encoding automatically
-                encoding = self.detect_encoding(file_path)
-                
-                if file_path.endswith('.csv'):
-                    self.df = pd.read_csv(file_path, encoding=encoding)
-                else:
-                    self.df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
-                
-                self.input_file_path = file_path
-                self.input_file_label.config(text=os.path.basename(file_path))
-                
-                # Clear field listbox
-                self.field_listbox.delete(0, tk.END)
-                for col in self.df.columns:
-                    self.field_listbox.insert(tk.END, col)
-                
-                self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
-                
-                # Enable field selection and stage 1 button
-                self.stage1_button.config(state='normal')
-                self.stage1_complete = False
-                self.stage1_status_label.config(text="")
-                self.add_mapping_button.config(state='disabled')
-                self.add_default_button.config(state='disabled')
-                self.stage2_button.config(state='disabled')
-                self.export_button.config(state='disabled')
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load file: {str(e)}")
-                self.status_var.set("Error loading file")
-    
-    # Method to perform stage 1 processing - dictionary expansion
-    def process_stage1(self):
-        if self.df is None:
-            messagebox.showwarning("Warning", "Please load an input file first")
-            return
-        
-        # Get user's field selections from the listbox
-        selected_indices = self.field_listbox.curselection()
-        if not selected_indices:
-            messagebox.showwarning("Warning", "Please select at least one field")
-            return
-        
-        # Convert selection indices to field names
-        self.selected_fields = [self.field_listbox.get(i) for i in selected_indices]
-        
-        try:
-            # Detect dictionary fields only in selected fields
-            self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
+        # Process each row
+        for idx, row in enumerate(result_rows):
+            mapping_key_value = None
             
-            # Initialize dictionary to store user's key selections
-            self.selected_keys = {}
+            if is_lookup_only:
+                # Lookup mode: Get from original data
+                if idx < len(self.df):
+                    mapping_key_value = original_data_map.get(idx)
+            else:
+                # Normal mode: Get from Stage 1 processed data
+                if field in row:
+                    mapping_key_value = row[field]
             
-            # If dictionary fields are found in selected fields, show popup for key selection
-            if self.dictionary_fields:
-                for field, available_keys in self.dictionary_fields.items():
-                    if available_keys:
-                        selected = self.show_key_selection_popup(field, available_keys)
-                        if selected:
-                            self.selected_keys[field] = selected
+            # Perform lookup
+            if mapping_key_value is not None:
+                matching_rows = mapping_df[mapping_df[key_col] == mapping_key_value]
+                
+                if not matching_rows.empty:
+                    for col in mapping_df.columns:
+                        if is_lookup_only:
+                            # EXCLUDE key column in lookup-only mode
+                            if col != key_col:
+                                row[col] = matching_rows.iloc[0][col]
                         else:
-                            # If user cancels, ask if they want to skip this field
-                            response = messagebox.askyesno("Skip Field?", 
-                                f"No keys selected for field '{field}'.\n\n"
-                                f"Do you want to keep this field without dictionary expansion?")
-                            if not response:
-                                # Remove from selected fields if user doesn't want to keep it
-                                self.selected_fields.remove(field)
-            
-            # Process stage 1 data
-            self.stage1_data = self.process_stage1_dataframe()
-            
-            # Get column names from stage 1 data (only from selected fields processing)
-            if self.stage1_data:
-                stage1_columns = set()
-                for row in self.stage1_data:
-                    stage1_columns.update(row.keys())
-                
-                # Update the selected_fields to match stage 1 output columns
-                self.selected_fields = list(stage1_columns)
-            
-            # Mark stage 1 as complete
-            self.stage1_complete = True
-            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
-            
-            # Enable mapping file addition and stage 2 processing
-            self.add_mapping_button.config(state='normal')
-            self.add_default_button.config(state='normal')
-            self.stage2_button.config(state='normal')
-            
-            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated from selected fields. You can now add mapping files or proceed to Stage 2.")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
-            self.status_var.set("Stage 1 processing failed")
-    
-    # Method to process dataframe for stage 1
-    def process_stage1_dataframe(self):
-        """Process the dataframe for stage 1 - dictionary expansion and multi-value splitting"""
-        result_rows = []
-        
-        for index, row in self.df.iterrows():
-            self.process_single_row(row, result_rows)
-        
-        return result_rows
-    
-    # Method to handle addition of mapping files with enhanced logic
-    def add_mapping_file(self):
-        if not self.stage1_complete:
-            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
-            return
-        
-        file_path = filedialog.askopenfilename(
-            title="Select Mapping File",
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        
-        if file_path:
-            try:
-                encoding = self.detect_encoding(file_path)
-                
-                if file_path.endswith('.csv'):
-                    mapping_df = pd.read_csv(file_path, encoding=encoding)
-                else:
-                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
-                
-                # Get column names from ORIGINAL input file (not stage 1 data)
-                if self.df is not None:
-                    input_fields = set(self.df.columns)
-                else:
-                    messagebox.showwarning("Warning", "No input data available")
-                    return
-                
-                mapping_fields = set(mapping_df.columns)
-                
-                common_fields = input_fields.intersection(mapping_fields)
-                
-                if not common_fields:
-                    messagebox.showwarning("Warning", 
-                        f"No matching columns found between input file and mapping file.\n"
-                        f"Input file columns: {list(input_fields)}\n"
-                        f"Mapping file columns: {list(mapping_fields)}")
-                    return
-                
-                field_to_map = list(common_fields)[0]
-                
-                if len(common_fields) > 1:
-                    field_to_map = simpledialog.askstring(
-                        "Multiple Matches Found",
-                        f"Multiple matching columns found: {list(common_fields)}\n"
-                        f"Enter the field name to use for mapping:",
-                        initialvalue=field_to_map
-                    )
-                    
-                    if not field_to_map or field_to_map not in common_fields:
-                        messagebox.showwarning("Warning", "Invalid field selection")
-                        return
-                
-                # Determine if this field was selected in Stage 1
-                is_lookup_only = field_to_map not in self.selected_fields
-                
-                self.mapping_files[field_to_map] = file_path
-                self.mapping_data[field_to_map] = mapping_df
-                self.mapping_lookup_only[field_to_map] = is_lookup_only
-                
-                # Update display with indicator
-                if is_lookup_only:
-                    self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)} [Lookup Only]")
-                else:
-                    self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)}")
-                
-                self.status_var.set(f"Added mapping for field '{field_to_map}' ({'lookup-only' if is_lookup_only else 'with original column'})")
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
-    
-    # Method to add default column with user-specified name and value
-    def add_default_column(self):
-        if not self.stage1_complete:
-            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
-            return
-        
-        # Create popup for default column input
-        popup = tk.Toplevel(self.root)
-        popup.title("Add Default Column")
-        popup.geometry("400x200")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Enter default column details:", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
-        
-        # Frame for column name
-        name_frame = ttk.Frame(popup)
-        name_frame.pack(pady=5, padx=20, fill=tk.X)
-        ttk.Label(name_frame, text="Column Name:").pack(side=tk.LEFT)
-        name_entry = ttk.Entry(name_frame, width=30)
-        name_entry.pack(side=tk.LEFT, padx=10)
-        
-        # Frame for column value
-        value_frame = ttk.Frame(popup)
-        value_frame.pack(pady=5, padx=20, fill=tk.X)
-        ttk.Label(value_frame, text="Column Value:").pack(side=tk.LEFT)
-        value_entry = ttk.Entry(value_frame, width=30)
-        value_entry.pack(side=tk.LEFT, padx=10)
-        
-        result = {'confirmed': False}
-        
-        def on_confirm():
-            col_name = name_entry.get().strip()
-            col_value = value_entry.get().strip()
-            
-            if not col_name:
-                messagebox.showwarning("Warning", "Column name cannot be empty")
-                return
-            
-            self.default_columns[col_name] = col_value
-            self.default_listbox.insert(tk.END, f"{col_name} = {col_value}")
-            result['confirmed'] = True
-            popup.destroy()
-        
-        def on_cancel():
-            popup.destroy()
-        
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=20)
-        
-        ttk.Button(button_frame, text="Add Column", command=on_confirm).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-        
-        if result['confirmed']:
-            self.status_var.set(f"Added default column '{list(self.default_columns.keys())[-1]}'")
-    
-    # Method to split multi-valued strings
-    def split_multi_values(self, value):
-        """Split comma or semicolon separated values"""
-        if pd.isna(value) or value == "" or value is None:
-            return [""]
-        
-        # Convert to string to handle any data type
-        value_str = str(value).strip()
-        
-        # Handle empty string after conversion
-        if not value_str:
-            return [""]
-        
-        if ';' in value_str:
-            return [v.strip() for v in value_str.split(';') if v.strip()]
-        elif ',' in value_str:
-            return [v.strip() for v in value_str.split(',') if v.strip()]
-        else:
-            return [value_str]
-    
-    # Method to detect if a value contains dictionary-like data
-    def is_dictionary_like(self, value):
-        """Check if a value looks like a dictionary"""
-        # Handle pandas NA, None, and empty values
-        try:
-            if pd.isna(value):
-                return False
-        except (ValueError, TypeError):
-            # Handle cases where pd.isna raises an error (e.g., with arrays)
-            if value is None:
-                return False
-        
-        if value == "":
-            return False
-        
-        value_str = str(value).strip()
-        
-        if value_str.startswith('{') and value_str.endswith('}'):
-            return True
-        
-        if ':' in value_str or '=' in value_str:
-            return True
-        
-        return False
-    
-    # Method to parse dictionary-like strings
-    def parse_dictionary_value(self, value):
-        """Parse dictionary-like value into key-value pairs, handling duplicate keys by collecting all values"""
-        # Handle pandas NA, None, and empty values
-        try:
-            if pd.isna(value):
-                return {}
-        except (ValueError, TypeError):
-            # Handle cases where pd.isna raises an error
-            if value is None:
-                return {}
-        
-        if value == "":
-            return {}
+                            # Include value columns in normal mode
+                            if col != key_col:
+                                row[col] = matching_rows.iloc[0][col]
+```
 
-        value_str = str(value).strip()
-        result = {}
+### UI Indicators
+When adding a mapping file, the listbox now shows:
+- **Normal mode:** `EmployeeID: employees.csv`
+- **Lookup-only mode:** `EmployeeID: employees.csv [Lookup Only]`
 
-        # Try JSON parsing
-        try:
-            if value_str.startswith('{') and value_str.endswith('}'):
-                parsed = json.loads(value_str)
-                # Convert to list values to handle duplicates uniformly
-                for k, v in parsed.items():
-                    result[k] = [v] if not isinstance(v, list) else v
-                return result
-        except:
-            pass
+---
 
-        # Try literal eval
-        try:
-            parsed = ast.literal_eval(value_str)
-            if isinstance(parsed, dict):
-                # Convert to list values to handle duplicates uniformly
-                for k, v in parsed.items():
-                    result[k] = [v] if not isinstance(v, list) else v
-                return result
-        except:
-            pass
+## Feature 2: Default Column Addition
 
-        # Manual parsing for newline-separated key-value pairs with duplicate key support
-        try:
-            lines = [line.strip() for line in value_str.split('\n') if line.strip()]
+### Description
+Add custom columns with constant values to every row in the final output.
 
-            for line in lines:
-                if ':' in line:
-                    key, val = line.split(':', 1)
-                    key = key.strip()
-                    val = val.strip()
-                    # If key already exists, append to list; otherwise create new list
-                    if key in result:
-                        result[key].append(val)
-                    else:
-                        result[key] = [val]
-                elif '=' in line:
-                    key, val = line.split('=', 1)
-                    key = key.strip()
-                    val = val.strip()
-                    # If key already exists, append to list; otherwise create new list
-                    if key in result:
-                        result[key].append(val)
-                    else:
-                        result[key] = [val]
-                else:
-                    # Store line as key with empty value
-                    if line in result:
-                        result[line].append("")
-                    else:
-                        result[line] = [""]
+### Use Cases
+- **Metadata:** ProcessedDate, DataSource, Version
+- **Audit Trail:** ProcessedBy, BatchID, Status
+- **Reference:** Department, Region, Country
+- **Categorization:** Type, Category, Source
 
-        except Exception:
-            pass
+### User Interface
 
-        return result
-    
-    # Method to detect dictionary fields
-    def detect_dictionary_fields(self, selected_fields):
-        """Detect which fields contain dictionary-like values and collect all unique keys including duplicates"""
-        dict_fields = {}
-        
-        for field in selected_fields:
-            if field in self.df.columns:
-                sample_values = self.df[field].dropna().head(10)
-                
-                dict_count = 0
-                all_keys = set()
-                
-                for value in sample_values:
-                    if self.is_dictionary_like(value):
-                        dict_count += 1
-                        parsed = self.parse_dictionary_value(value)
-                        # Now parsed dict has lists as values, just get the keys
-                        all_keys.update(parsed.keys())
-                
-                if dict_count > len(sample_values) * 0.5:
-                    dict_fields[field] = list(all_keys)
-        
-        return dict_fields
-    
-    # Method to show key selection popup
-    def show_key_selection_popup(self, field, available_keys):
-        """Show popup for key selection in dictionary fields with manual selection (nothing pre-selected)"""
-        # Create popup window as child of main window
-        popup = tk.Toplevel(self.root)
-        # Set popup title with field name
-        popup.title(f"Select Keys for Field: {field}")
-        # Set popup dimensions - larger for better visibility
-        popup.geometry("450x350")
-        # Make popup transient to main window (stays on top)
-        popup.transient(self.root)
-        # Make popup modal (blocks interaction with parent)
-        popup.grab_set()
-        
-        # Header frame with title and instructions
-        header_frame = ttk.Frame(popup)
-        header_frame.pack(pady=10, padx=10, fill=tk.X)
-        
-        # Main instruction label with bold formatting
-        ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
-        
-        # Helpful tip for users about multi-selection
-        ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
-                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
-        
-        # Key selection frame with listbox and scrollbar
-        key_frame = ttk.Frame(popup)
-        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Create listbox for multiple key selection
-        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
-        # Create scrollbar for the key listbox
-        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
-        # Connect scrollbar to listbox
-        key_listbox.configure(yscrollcommand=key_scrollbar.set)
-        
-        # Pack listbox to fill available space
-        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # Pack scrollbar on right side
-        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Populate listbox with available keys from dictionary field
-        for key in available_keys:
-            key_listbox.insert(tk.END, key)
-        
-        # IMPORTANT: DO NOT pre-select any keys - let user select manually
-        # This line is intentionally commented out to show the change:
-        # key_listbox.select_set(0, tk.END)  # REMOVED: No default selection
-        
-        # Status label to show real-time selection count
-        status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
-                                foreground='blue')
-        status_label.pack(pady=(0, 5))
-        
-        # Function to update status label when selection changes
-        def update_status(event=None):
-            """Update the selection counter display"""
-            count = len(key_listbox.curselection())
-            status_label.config(text=f"{count} of {len(available_keys)} keys selected")
-        
-        # Bind listbox selection event to update function
-        key_listbox.bind('<<ListboxSelect>>', update_status)
-        
-        # Initialize list to store user's key selections
-        selected_keys = []
-        
-        # Function to select all keys at once
-        def on_select_all():
-            """Select all keys in the listbox"""
-            key_listbox.select_set(0, tk.END)
-            update_status()
-        
-        # Function to clear all selections
-        def on_clear_all():
-            """Clear all selections in the listbox"""
-            key_listbox.selection_clear(0, tk.END)
-            update_status()
-        
-        # Function to handle confirm button click
-        def on_confirm():
-            """Confirm selection and return selected keys"""
-            # Access outer scope variable
-            nonlocal selected_keys
-            # Get indices of selected items
-            selected_indices = key_listbox.curselection()
-            # Convert indices to actual key names
-            selected_keys = [available_keys[i] for i in selected_indices]
-            # Close popup window
-            popup.destroy()
+**New Section:**
+```
+5. Add Default Columns (Optional):
+   [Add Default Column] Button
+   [Listbox showing: ColumnName = ColumnValue]
+```
+
+### Workflow
+1. After Stage 1, click "Add Default Column"
+2. Popup appears with inputs:
+   - **Column Name:** (e.g., "ProcessedDate")
+   - **Column Value:** (e.g., "2025-10-08")
+3. Click "Add Column"
+4. Repeat for multiple columns
+5. All default columns added to every row in Stage 2
+
+### Example
+**Added Default Columns:**
+```
+ProcessedDate = 2025-10-08
+DataSource = Legacy_CRM
+BatchID = BATCH_001
+```
+
+**Stage 1 Output:**
+```csv
+ID,Name,Email
+1,John,john@email.com
+2,Jane,jane@email.com
+```
+
+**Final Output (after Stage 2):**
+```csv
+ID,Name,Email,ProcessedDate,DataSource,BatchID
+1,John,john@email.com,2025-10-08,Legacy_CRM,BATCH_001
+2,Jane,jane@email.com,2025-10-08,Legacy_CRM,BATCH_001
+```
+
+### Technical Implementation
+
+#### New Variables
+```python
+self.default_columns = {}  # {column_name: column_value}
+```
+
+#### New Method: `add_default_column()`
+- Creates popup with two entry fields
+- Validates column name (not empty)
+- Stores in dictionary
+- Updates display listbox
+
+#### Integration in `process_stage2()`
+```python
+# Add default columns to all rows
+if self.default_columns:
+    for row in self.processed_data:
+        for col_name, col_value in self.default_columns.items():
+            row[col_name] = col_value
+```
+
+---
+
+## Feature 3: Column Renaming
+
+### Description
+Interactive popup after Stage 2 processing allows users to rename any output columns before export.
+
+### User Interface
+
+**Automatic Popup After Stage 2:**
+```
+┌─────────────────────────────────────────┐
+│ Rename Columns (Optional)              │
+│ Leave 'New Name' blank to keep         │
+│ original name                           │
+├─────────────────────────────────────────┤
+│ Original Column Name | New Column Name │
+│ EmployeeID          | [___________]   │
+│ Name                | [___________]   │
+│ Details_Email       | [Email_Addr_]   │
+│ Details_Phone       | [Phone_Num__]   │
+│ Department          | [___________]   │
+├─────────────────────────────────────────┤
+│   [Apply Renames]   [Skip Renaming]    │
+└─────────────────────────────────────────┘
+```
+
+### Features
+- ✅ Scrollable list for many columns
+- ✅ Optional - can skip entirely
+- ✅ Selective - only rename what you want
+- ✅ Real-time - happens before export
+- ✅ Preview - see original names
+
+### Example Usage
+
+**Original Columns:**
+```
+EmployeeID, Name, ContactDetails_Email, ContactDetails_Phone
+```
+
+**User Renames:**
+```
+ContactDetails_Email → Email
+ContactDetails_Phone → Phone
+(Leave others unchanged)
+```
+
+**Final Export:**
+```csv
+EmployeeID,Name,Email,Phone
+E001,John,john@email.com,555-1234
+```
+
+### Technical Implementation
+
+#### New Variables
+```python
+self.column_renames = {}  # {old_name: new_name}
+```
+
+#### New Method: `show_column_rename_popup()`
+- Collects all column names from processed data
+- Creates scrollable popup with entry fields
+- Returns dictionary of renames
+- Empty dictionary if skipped
+
+#### Integration in `process_stage2()`
+```python
+# Show column rename popup
+rename_dict = self.show_column_rename_popup()
+
+# Apply renames
+if rename_dict:
+    self.column_renames = rename_dict
+    for row in self.processed_data:
+        for old_name, new_name in rename_dict.items():
+            if old_name in row:
+                row[new_name] = row.pop(old_name)
+```
+
+---
+
+## Complete Workflow with New Features
+
+### Step-by-Step Process
+
+**1. Load Input File**
+```csv
+EmployeeID, Name, Skills
+E001, John, Python;SQL
+E002, Jane, Java;R
+```
+
+**2. Select Fields for Stage 1**
+- Select: `Name`, `Skills`
+- Do NOT select: `EmployeeID`
+
+**3. Process Stage 1**
+- Skills split into separate rows
+```csv
+Name, Skills
+John, Python
+John, SQL
+Jane, Java
+Jane, R
+```
+
+**4. Add Mapping File (Lookup-Only Mode)**
+```
+Mapping File: employees.csv
+EmployeeID, Department, Manager
+E001, Engineering, Bob
+E002, Analytics, Alice
+
+Detection: EmployeeID NOT in Stage 1 selections
+Mode: Lookup Only [indicator shown]
+```
+
+**5. Add Default Columns**
+```
+Add Column: ProcessedDate = 2025-10-08
+Add Column: Source = HR_System
+```
+
+**6. Process Stage 2**
+- Applies mapping (lookup-only, excludes EmployeeID)
+- Adds default columns
+- Shows rename popup
+
+**7. Rename Columns (Optional)**
+```
+Skills → Skill
+(Leave others)
+```
+
+**8. Final Output**
+```csv
+Name,Skill,Department,Manager,ProcessedDate,Source
+John,Python,Engineering,Bob,2025-10-08,HR_System
+John,SQL,Engineering,Bob,2025-10-08,HR_System
+Jane,Java,Analytics,Alice,2025-10-08,HR_System
+Jane,R,Analytics,Alice,2025-10-08,HR_System
+```
+
+**Note:** EmployeeID is NOT in output (lookup-only mode)!
+
+---
+
+## Summary of Code Changes
+
+### Modified Files Structure
+```
+CSVProcessorGUI Class
+├── __init__() [UPDATED]
+│   ├── Added: self.mapping_lookup_only = {}
+│   ├── Added: self.default_columns = {}
+│   └── Added: self.column_renames = {}
+│
+├── setup_ui() [UPDATED]
+│   ├── Added: Section 5 - Default Columns UI
+│   ├── Added: self.add_default_button
+│   └── Added: self.default_listbox
+│
+├── add_mapping_file() [MAJOR UPDATE]
+│   ├── Changed: Check against original df.columns (not stage1_data)
+│   ├── Added: Detection of lookup-only mode
+│   ├── Added: self.mapping_lookup_only tracking
+│   └── Added: UI indicator [Lookup Only]
+│
+├── apply_mappings() [COMPLETE REWRITE]
+│   ├── Added: Dual-mode logic (normal vs lookup-only)
+│   ├── Added: Original data mapping for lookup-only
+│   ├── Added: Smart column inclusion/exclusion
+│   └── Changed: Works with original input file for lookups
+│
+├── process_stage2() [UPDATED]
+│   ├── Added: Default columns addition
+│   ├── Added: Column rename popup call
+│   └── Added: Rename application logic
+│
+├── add_default_column() [NEW METHOD]
+│   ├── Creates popup for column name/value input
+│   ├── Validates input
+│   ├── Stores in self.default_columns
+│   └── Updates display listbox
+│
+└── show_column_rename_popup() [NEW METHOD]
+    ├── Collects all output columns
+    ├── Creates scrollable rename interface
+    ├── Returns rename dictionary
+    └── Allows selective renaming
+```
+
+### New Instance Variables
+```python
+self.mapping_lookup_only = {}  # Track lookup-only mappings
+self.default_columns = {}      # Store default columns
+self.column_renames = {}       # Store column renames
+```
+
+### New Methods
+1. **`add_default_column()`** - Add default columns with popup
+2. **`show_column_rename_popup()`** - Interactive column renaming
+
+### Modified Methods
+1. **`__init__()`** - Added new instance variables
+2. **`setup_ui()`** - Added default columns section
+3. **`add_mapping_file()`** - Smart lookup-only detection
+4. **`apply_mappings()`** - Dual-mode mapping logic
+5. **`process_stage2()`** - Integrated new features
+
+---
+
+## Benefits Summary
+
+### 1. Smart Mapping
+✅ **Cleaner Output** - No redundant columns  
+✅ **Flexible Enrichment** - Use any field for lookup  
+✅ **User Control** - Automatic based on Stage 1 selection  
+✅ **Intuitive** - Behaves as expected without configuration  
+
+### 2. Default Columns
+✅ **Metadata Tracking** - Add processing information  
+✅ **Audit Trail** - Track data lineage  
+✅ **Batch Processing** - Identify data batches  
+✅ **No Post-Processing** - Add columns during processing  
+
+### 3. Column Renaming
+✅ **Professional Output** - Clean, meaningful names  
+✅ **Selective** - Rename only what needs renaming  
+✅ **Pre-Export** - See final names before saving  
+✅ **Optional** - Skip if not needed  
+
+---
+
+## Use Case Scenarios
+
+### Scenario 1: Employee Data Enrichment (Lookup-Only)
+**Challenge:** Employee skills data needs department info, but don't want EmployeeID in output
+
+**Solution:**
+1. Load employee file with EmployeeID, Name, Skills
+2. Stage 1: Select only Name, Skills
+3. Add mapping: EmployeeID → Department, Manager [Lookup Only]
+4. Result: Name, Skills, Department, Manager (no EmployeeID!)
+
+---
+
+### Scenario
