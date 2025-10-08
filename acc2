@@ -1,1904 +1,662 @@
-# CSV Dictionary Field Processor
-## Professional Documentation Package
-
----
-
-# Document 1: Executive Summary
-
-## Overview
-The **CSV Dictionary Field Processor** is a sophisticated data transformation tool designed to handle complex CSV files containing dictionary-like fields with nested key-value pairs and multi-valued entries. The tool employs a two-stage processing architecture to provide maximum flexibility and control over data extraction and mapping operations.
-
-## Key Capabilities
-
-### 🎯 Core Utilities
-
-1. **Dictionary Field Expansion**
-   - Automatically detects fields containing dictionary-like data structures
-   - Extracts nested key-value pairs into separate columns
-   - Handles multiple formats: JSON, Python dictionaries, newline-separated pairs
-
-2. **Duplicate Key Handling**
-   - Preserves ALL values when dictionary keys appear multiple times
-   - No data loss - captures every occurrence
-   - Generates Cartesian product of all combinations
-
-3. **Multi-Value Splitting**
-   - Splits comma-separated and semicolon-separated values
-   - Creates individual rows for each value combination
-   - Maintains data integrity through deduplication
-
-4. **Universal Encoding Support**
-   - Automatically detects file encoding (UTF-8, UTF-16, Latin-1, etc.)
-   - Eliminates encoding-related errors
-   - Supports international character sets
-
-5. **Data Mapping Integration**
-   - Maps processed data against external reference files
-   - Enriches output with additional columns
-   - Uses original column names from mapping files
-
-6. **Two-Stage Processing**
-   - Stage 1: Dictionary expansion and multi-value splitting
-   - Stage 2: Mapping application and final output generation
-   - Clear separation enables iterative refinement
-
-## Business Value
-
-### ✅ Time Savings
-- **Manual Processing:** Hours to days
-- **With Tool:** Minutes
-- **Efficiency Gain:** 95%+
-
-### ✅ Data Accuracy
-- Zero data loss from duplicate keys
-- Automatic deduplication
-- Consistent transformation logic
-
-### ✅ Flexibility
-- User controls which fields to process
-- Selective key extraction from dictionaries
-- Optional mapping for data enrichment
-
-### ✅ Scalability
-- Handles files with thousands of rows
-- Processes multiple dictionary fields simultaneously
-- Cartesian product generation for all combinations
-
-## Target Use Cases
-
-1. **Data Migration Projects**
-   - Transform legacy data formats
-   - Extract nested information
-   - Prepare data for new systems
-
-2. **Data Enrichment**
-   - Add reference data from mapping files
-   - Expand abbreviated codes
-   - Enhance data completeness
-
-3. **Report Generation**
-   - Flatten complex nested structures
-   - Create analysis-ready datasets
-   - Generate comprehensive reports
-
-4. **Data Quality Improvement**
-   - Standardize multi-valued fields
-   - Extract all information from text fields
-   - Ensure completeness through duplicate handling
-
-## Technical Specifications
-
-- **Language:** Python 3.7+
-- **Framework:** Tkinter (GUI)
-- **Dependencies:** pandas, chardet, json, ast
-- **Platform:** Windows, macOS, Linux
-- **File Support:** CSV, TXT (tab-delimited)
-- **Export Formats:** CSV, Excel (.xlsx)
-
----
-
-# Document 2: User Manual & Standard Operating Procedure (SOP)
-
-## Installation Instructions
-
-### Prerequisites
-```bash
-# Required Python packages
-pip install pandas
-pip install chardet
-pip install openpyxl  # For Excel export
-```
-
-### Running the Tool
-```bash
-# Navigate to tool directory
-cd /path/to/tool
-
-# Run the application
-python csv_processor.py
-```
-
-## Standard Operating Procedure (SOP)
-
-### Stage 1: File Loading and Field Selection
-
-#### Step 1.1: Load Input File
-1. Click **"Select Input File"** button
-2. Navigate to your CSV/TXT file
-3. Click **"Open"**
-4. Verify status message shows correct row/column count and encoding
-
-**Success Indicator:**
-- Status bar shows: "Loaded file with X rows and Y columns (encoding: utf-8)"
-- Field list populates with all column names
-
-**Troubleshooting:**
-- If file fails to load, check file format (must be CSV or tab-delimited TXT)
-- Ensure file is not open in another application
-- Verify file is not corrupted
-
----
-
-#### Step 1.2: Select Fields for Processing
-1. Review the field list (Section 3)
-2. Click on fields you want to process
-3. Use **Ctrl+Click** (Windows/Linux) or **Cmd+Click** (Mac) for multiple selections
-4. Use **Shift+Click** to select a range
-
-**Best Practices:**
-- Select only fields that need processing (reduces processing time)
-- Include fields with dictionary-like content
-- Include fields with multi-valued entries
-- Include fields needed for mapping operations
-
-**Example Selection:**
-```
-✓ ID
-✓ Name
-✓ ContactDetails  (dictionary field)
-✓ Skills          (multi-valued field)
-✗ CreatedDate     (exclude if not needed)
-✗ Notes           (exclude if not needed)
-```
-
----
-
-### Stage 2: Stage 1 Processing (Dictionary Expansion)
-
-#### Step 2.1: Initiate Stage 1
-1. After selecting fields, click **"Process Stage 1 (Dictionary Expansion)"**
-2. Tool automatically detects dictionary-like fields
-3. For each dictionary field detected, a popup appears
-
-**What Happens:**
-- Tool scans selected fields for dictionary patterns
-- Identifies fields with key-value pairs (format: `key: value` or `key = value`)
-- Detects JSON-formatted dictionaries: `{"key": "value"}`
-
----
-
-#### Step 2.2: Dictionary Key Selection
-When a dictionary field is detected:
-
-**Popup Appearance:**
-```
-┌─────────────────────────────────────────┐
-│ Select keys to include from field       │
-│ 'ContactDetails':                       │
-│ Tip: Click on keys to select them.     │
-│      Hold Ctrl/Cmd to select multiple. │
-│                                         │
-│ ┌─────────────────────────────────────┐ │
-│ │ ☐ Email                             │ │
-│ │ ☐ Phone                             │ │
-│ │ ☐ Address                           │ │
-│ │ ☐ City                              │ │
-│ │ ☐ State                             │ │
-│ │ ☐ ZIP                               │ │
-│ └─────────────────────────────────────┘ │
-│                                         │
-│        0 of 6 keys selected             │
-│                                         │
-│    [Select All]    [Clear All]          │
-│                                         │
-│  [Confirm Selection]    [Cancel]        │
-└─────────────────────────────────────────┘
-```
-
-**Actions:**
-1. **Manual Selection:** Click on individual keys you want to extract
-   - Selection counter updates in real-time
-   - Hold Ctrl/Cmd to select multiple
-
-2. **Select All:** Click to select all available keys quickly
-
-3. **Clear All:** Click to deselect all and start over
-
-4. **Confirm Selection:** Click to proceed with selected keys
-
-5. **Cancel:** Click to skip this dictionary field
-
-**Important Notes:**
-- **Nothing is pre-selected** - you must manually choose keys
-- Select only keys you need in the final output
-- More keys = more output rows (Cartesian product)
-- Selection counter shows "X of Y keys selected"
-
-**Example Selection Strategy:**
-```
-From ContactDetails field with 10 keys:
-✓ Email    (select - needed)
-✓ Phone    (select - needed)
-✓ City     (select - needed)
-✗ Notes    (skip - not needed)
-✗ Internal (skip - internal use only)
-✗ Temp1    (skip - temporary data)
-```
-
----
-
-#### Step 2.3: Complete Stage 1
-1. After all dictionary fields are processed, Stage 1 executes
-2. Status label shows: **"✓ Complete (X rows)"**
-3. Status bar updates with row count
-4. Mapping and Stage 2 buttons become enabled
-
-**Success Indicators:**
-- Green checkmark appears next to Stage 1 button
-- Status shows number of rows generated
-- "Add Mapping File" button is now enabled
-- "Process Stage 2" button is now enabled
-
-**What Happened:**
-- Dictionary fields expanded into separate columns (e.g., `ContactDetails_Email`)
-- Multi-valued fields split into separate rows
-- Cartesian product generated for all combinations
-- Duplicate values removed
-
----
-
-### Stage 3: Mapping File Addition (Optional)
-
-#### Step 3.1: When to Use Mapping
-Use mapping files when you need to:
-- Add descriptive names for codes/IDs
-- Enrich data with additional information
-- Translate values to standard formats
-- Add reference data from external sources
-
-**Example Scenario:**
-```
-Your data has:        You want to add:
-ID: EMP001           → Name: John Smith
-ID: EMP002           → Name: Jane Doe
-
-Mapping File Structure:
-EMP001, John Smith
-EMP002, Jane Doe
-```
-
----
-
-#### Step 3.2: Add Mapping Files
-1. Click **"Add Mapping File"** button
-2. Select your mapping CSV/TXT file
-3. Tool automatically detects common columns
-4. If multiple matches found, choose the correct field
-5. Mapping appears in the listbox
-
-**Mapping File Requirements:**
-- Must have at least 2 columns
-- First column: Key (matches value in your data)
-- Second column: Value (will be added to output)
-- Can use CSV or tab-delimited format
-
-**Example Mapping File:**
-```csv
-EmployeeID,EmployeeName
-EMP001,John Smith
-EMP002,Jane Doe
-EMP003,Bob Johnson
-```
-
-**Auto-Detection:**
-- Tool compares Stage 1 output columns with mapping file columns
-- Automatically suggests matching field
-- If multiple matches, prompts you to choose
-
-**Adding Multiple Mappings:**
-- Click "Add Mapping File" again for additional mappings
-- Each mapping appears in the listbox
-- Can map different fields using different files
-
----
-
-### Stage 4: Stage 2 Processing (Final Output)
-
-#### Step 4.1: Execute Stage 2
-1. Click **"Process Stage 2 (Final Output with Mapping)"**
-2. Tool applies all loaded mappings
-3. Generates final processed dataset
-4. Export button becomes enabled
-
-**What Happens:**
-- Takes Stage 1 output as input
-- Applies each mapping file
-- Adds new columns with original names from mapping files
-- Preserves all existing columns
-- Generates complete final dataset
-
-**Column Naming:**
-- Original fields: Keep their names (e.g., `ID`, `Name`)
-- Expanded dictionary keys: `FieldName_KeyName` (e.g., `ContactDetails_Email`)
-- Mapped fields: Use column name from mapping file (e.g., `EmployeeName`)
-
----
-
-### Stage 5: Export Results
-
-#### Step 5.1: Export Data
-1. Click **"Export Results"** button
-2. Choose save location and filename
-3. Select format: CSV (.csv) or Excel (.xlsx)
-4. Click **"Save"**
-
-**Export Options:**
-- **CSV Format:** Compatible with all systems, smaller file size
-- **Excel Format:** Better formatting, supports multiple sheets
-
-**Success Confirmation:**
-- Popup appears: "Data exported successfully"
-- Status bar shows: "Data exported to [filename]"
-
----
-
-#### Step 5.2: Post-Export Options
-After export, a completion popup appears:
-
-**Options:**
-1. **Continue Working:** Return to tool for additional processing
-2. **Close Application:** Exit the tool
-
-**Best Practice:**
-- Choose "Continue Working" if you want to:
-  - Export in different format
-  - Process another file
-  - Try different field selections
-
----
-
-## Data Processing Examples
-
-### Example 1: Simple Dictionary Expansion
-
-**Input Data:**
-```csv
-ID,Name,Details
-1,John,"Email: john@email.com
-Phone: 555-1234
-City: New York"
-2,Jane,"Email: jane@email.com
-Phone: 555-5678
-City: Boston"
-```
-
-**Selected Fields:** ID, Name, Details
-
-**Stage 1 - Key Selection for "Details":**
-- Select: Email, Phone, City
-
-**Stage 1 Output:**
-```csv
-ID,Name,Details_Email,Details_Phone,Details_City
-1,John,john@email.com,555-1234,New York
-2,Jane,jane@email.com,555-5678,Boston
-```
-
----
-
-### Example 2: Multi-Value Expansion
-
-**Input Data:**
-```csv
-ID,Name,Skills
-1,John,"Python, SQL, Java"
-2,Jane,"Python, R, Excel"
-```
-
-**Selected Fields:** ID, Name, Skills
-
-**Stage 1 Output:**
-```csv
-ID,Name,Skills
-1,John,Python
-1,John,SQL
-1,John,Java
-2,Jane,Python
-2,Jane,R
-2,Jane,Excel
-```
-
----
-
-### Example 3: Dictionary with Duplicate Keys
-
-**Input Data:**
-```csv
-ID,Name,Contacts
-1,John,"Phone: 555-1234
-Phone: 555-5678
-Email: john@email.com
-Phone: 555-9999"
-```
-
-**Selected Fields:** ID, Name, Contacts
-
-**Stage 1 - Key Selection for "Contacts":**
-- Select: Phone, Email
-
-**Stage 1 Output (Cartesian Product):**
-```csv
-ID,Name,Contacts_Phone,Contacts_Email
-1,John,555-1234,john@email.com
-1,John,555-5678,john@email.com
-1,John,555-9999,john@email.com
-```
-
-**All 3 phone numbers preserved!**
-
----
-
-### Example 4: Combined Processing with Mapping
-
-**Input Data:**
-```csv
-EmpID,ContactInfo
-E001,"Email: john@co.com
-Phone: 555-1234"
-E002,"Email: jane@co.com
-Phone: 555-5678"
-```
-
-**Mapping File (employees.csv):**
-```csv
-EmpID,EmployeeName,Department
-E001,John Smith,Engineering
-E002,Jane Doe,Marketing
-```
-
-**Stage 1 Processing:**
-- Select: EmpID, ContactInfo
-- Extract: Email, Phone
-
-**Stage 1 Output:**
-```csv
-EmpID,ContactInfo_Email,ContactInfo_Phone
-E001,john@co.com,555-1234
-E002,jane@co.com,555-5678
-```
-
-**Stage 2 Processing:**
-- Add mapping file: employees.csv
-- Map on: EmpID
-
-**Final Output:**
-```csv
-EmpID,ContactInfo_Email,ContactInfo_Phone,EmployeeName,Department
-E001,john@co.com,555-1234,John Smith,Engineering
-E002,jane@co.com,555-5678,Jane Doe,Marketing
-```
-
----
-
-## Troubleshooting Guide
-
-### Issue 1: File Won't Load
-**Symptoms:** Error message when selecting file
-
-**Solutions:**
-1. Check file format (CSV or tab-delimited TXT only)
-2. Close file if open in Excel or other programs
-3. Verify file is not corrupted
-4. Try saving file with UTF-8 encoding
-5. Check file has proper headers
-
----
-
-### Issue 2: No Dictionary Fields Detected
-**Symptoms:** Stage 1 completes but no popups appear
-
-**Causes:**
-- Selected fields don't contain dictionary-like data
-- Dictionary format not recognized
-
-**Solutions:**
-1. Verify field contains key-value pairs (format: `key: value` or `key = value`)
-2. Check for JSON format: `{"key": "value"}`
-3. Ensure field is selected in field list
-4. Review sample data to confirm structure
-
----
-
-### Issue 3: Too Many Output Rows
-**Symptoms:** Stage 1 generates thousands/millions of rows
-
-**Cause:** Cartesian product of multi-valued fields
-
-**Solution:**
-1. Review selected dictionary keys (fewer keys = fewer rows)
-2. Consider processing fields separately
-3. Pre-filter input data to remove unnecessary values
-4. Use more selective field selection
-
-**Example:**
-```
-3 fields with 10 values each = 10 × 10 × 10 = 1,000 rows
-Reduce to: 3 fields with 5 values each = 5 × 5 × 5 = 125 rows
-```
-
----
-
-### Issue 4: Mapping Not Working
-**Symptoms:** Stage 2 completes but no new columns added
-
-**Solutions:**
-1. Verify mapping file has matching column name with Stage 1 output
-2. Check mapping file has at least 2 columns
-3. Ensure values in mapping file match exactly (case-sensitive)
-4. Confirm mapping file loaded successfully (check listbox)
-
----
-
-### Issue 5: Special Characters Display Incorrectly
-**Symptoms:** Foreign characters or symbols show as ??? or boxes
-
-**Solution:**
-- Tool automatically detects encoding
-- If issues persist, save file as UTF-8 before loading
-
----
-
-## Best Practices
-
-### ✅ Before Processing
-1. **Backup original data** - Always keep original file safe
-2. **Review data structure** - Understand your dictionary fields
-3. **Plan output** - Know which fields and keys you need
-4. **Prepare mapping files** - Have reference data ready
-
-### ✅ During Processing
-1. **Select strategically** - Choose only necessary fields
-2. **Review key selection** - Don't select everything blindly
-3. **Monitor row count** - Watch for Cartesian explosion
-4. **Test with sample** - Process small subset first
-
-### ✅ After Processing
-1. **Verify output** - Check row counts and data integrity
-2. **Review new columns** - Ensure expansions are correct
-3. **Validate mappings** - Confirm mapped data is accurate
-4. **Document process** - Note selections and mappings used
-
----
-
-## Performance Guidelines
-
-### File Size Recommendations
-- **Small (< 1,000 rows):** Instant processing
-- **Medium (1,000 - 10,000 rows):** Seconds to process
-- **Large (10,000 - 100,000 rows):** 1-2 minutes
-- **Very Large (> 100,000 rows):** Consider splitting file
-
-### Optimization Tips
-1. Select fewer fields when possible
-2. Extract only necessary dictionary keys
-3. Process in stages for very large files
-4. Use CSV export for faster performance
-5. Close other applications during processing
-
----
-
-# Document 3: Technical Workflow & Algorithm
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     CSV PROCESSOR TOOL                       │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              INPUT LAYER                            │    │
-│  │  • File Selection (CSV/TXT)                        │    │
-│  │  • Encoding Detection (chardet)                    │    │
-│  │  • DataFrame Loading (pandas)                      │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          ↓                                   │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │         FIELD SELECTION LAYER                       │    │
-│  │  • User selects fields for processing              │    │
-│  │  • Multi-selection support                         │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          ↓                                   │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │          STAGE 1: EXPANSION LAYER                   │    │
-│  │                                                     │    │
-│  │  ┌──────────────────────────────────────────────┐ │    │
-│  │  │  Dictionary Field Detection                  │ │    │
-│  │  │  • Pattern matching (key:value, key=value)  │ │    │
-│  │  │  • JSON detection                            │ │    │
-│  │  │  • Key extraction                            │ │    │
-│  │  └──────────────────────────────────────────────┘ │    │
-│  │                    ↓                                │    │
-│  │  ┌──────────────────────────────────────────────┐ │    │
-│  │  │  User Key Selection                          │ │    │
-│  │  │  • Interactive popup                         │ │    │
-│  │  │  • Manual selection (no pre-selection)       │ │    │
-│  │  │  • Real-time counter                         │ │    │
-│  │  └──────────────────────────────────────────────┘ │    │
-│  │                    ↓                                │    │
-│  │  ┌──────────────────────────────────────────────┐ │    │
-│  │  │  Data Transformation Engine                  │ │    │
-│  │  │  • Parse dictionary values                   │ │    │
-│  │  │  • Handle duplicate keys → lists            │ │    │
-│  │  │  • Split multi-values (comma/semicolon)     │ │    │
-│  │  │  • Generate Cartesian product               │ │    │
-│  │  │  • Deduplicate results                       │ │    │
-│  │  └──────────────────────────────────────────────┘ │    │
-│  │                    ↓                                │    │
-│  │         Stage 1 Output (Intermediate Data)          │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          ↓                                   │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │         MAPPING LAYER (Optional)                    │    │
-│  │  • Load external mapping files                     │    │
-│  │  • Auto-detect common columns                      │    │
-│  │  • Store mapping relationships                     │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          ↓                                   │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │          STAGE 2: MAPPING LAYER                     │    │
-│  │  • Apply mappings to Stage 1 data                  │    │
-│  │  • Add new columns with original names             │    │
-│  │  • Preserve existing columns                       │    │
-│  └────────────────────────────────────────────────────┘    │
-│                          ↓                                   │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              OUTPUT LAYER                           │    │
-│  │  • Export to CSV or Excel                          │    │
-│  │  • User confirmation                               │    │
-│  └────────────────────────────────────────────────────┘    │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Core Algorithms
-
-### Algorithm 1: Dictionary Field Detection
-
-```
-FUNCTION detect_dictionary_fields(selected_fields):
-    dict_fields = {}
-    
-    FOR each field IN selected_fields:
-        IF field exists in dataframe:
-            sample = first 10 non-null values from field
-            dict_count = 0
-            all_keys = empty set
-            
-            FOR each value IN sample:
-                IF is_dictionary_like(value):
-                    dict_count++
-                    parsed = parse_dictionary_value(value)
-                    all_keys.add(keys from parsed)
-            
-            IF dict_count > 50% of sample size:
-                dict_fields[field] = list(all_keys)
-    
-    RETURN dict_fields
-
-FUNCTION is_dictionary_like(value):
-    TRY:
-        IF value is NA or empty:
-            RETURN False
+# Import tkinter for GUI framework - provides window management and user interface components
+import tkinter as tk
+# Import ttk for themed tkinter widgets - provides modern styled GUI elements
+from tkinter import ttk, filedialog, messagebox, simpledialog
+# Import pandas for data manipulation - handles CSV/Excel file reading and DataFrame operations
+import pandas as pd
+# Import json for JSON parsing - attempts to parse dictionary-like strings as JSON objects
+import json
+# Import ast for abstract syntax tree evaluation - safely evaluates Python literal expressions
+import ast
+# Import os for operating system interface - handles file path operations and system interactions
+import os
+# Import typing for type hints - provides static type checking support
+from typing import Dict, List, Any, Optional
+# Import chardet for automatic encoding detection
+import chardet
+
+# Define the main GUI application class that encapsulates all CSV processing functionality
+class CSVProcessorGUI:
+    # Constructor method that initializes the GUI application and sets up initial state
+    def __init__(self, root):
+        # Store reference to the main tkinter root window for later use
+        self.root = root
+        # Set the window title that appears in the title bar
+        self.root.title("CSV Dictionary Field Processor - Enhanced Version")
+        # Set the initial window size (width x height in pixels)
+        self.root.geometry("750x700")
         
-        value_str = convert to string
+        # Initialize empty string to store the path of the selected input file
+        self.input_file_path = ""
+        # Initialize empty dictionary to store mapping between field names and their mapping file paths
+        self.mapping_files = {}
+        # Initialize None to store the loaded pandas DataFrame containing the input data
+        self.df = None
+        # Initialize empty list to store field names selected by the user for processing
+        self.selected_fields = []
+        # Initialize empty dictionary to store fields identified as containing dictionary-like data
+        self.dictionary_fields = {}
+        # Initialize empty dictionary to store user-selected keys for each dictionary field
+        self.selected_keys = {}
+        # Initialize None to store the final processed data after transformation
+        self.processed_data = None
+        # Initialize empty dictionary to store loaded mapping data as DataFrames
+        self.mapping_data = {}
+        # Initialize dictionary to track which mapping fields are lookup-only (not in Stage 1)
+        self.mapping_lookup_only = {}
+        # Initialize None to store stage 1 processed data before mapping
+        self.stage1_data = None
+        # Initialize flag to track if stage 1 processing is complete
+        self.stage1_complete = False
+        # Initialize dictionary to store default columns with their values
+        self.default_columns = {}
+        # Initialize dictionary to store column renames
+        self.column_renames = {}
         
-        IF value_str starts with '{' and ends with '}':
-            RETURN True
+        # Call the UI setup method to create and arrange all GUI components
+        self.setup_ui()
+    
+    # Method to create and configure all GUI elements and their layout
+    def setup_ui(self):
+        # Create the main container frame with padding for visual spacing
+        main_frame = ttk.Frame(self.root, padding="10")
+        # Place the main frame in the root window using grid layout manager
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        IF value_str contains ':' or '=':
-            RETURN True
+        # Configure the root window's first column to expand horizontally when window resizes
+        self.root.columnconfigure(0, weight=1)
+        # Configure the root window's first row to expand vertically when window resizes
+        self.root.rowconfigure(0, weight=1)
+        # Configure the main frame's second column to expand horizontally
+        main_frame.columnconfigure(1, weight=1)
         
-        RETURN False
-    CATCH any error:
-        RETURN False
-```
-
----
-
-### Algorithm 2: Dictionary Value Parsing with Duplicate Key Support
-
-```
-FUNCTION parse_dictionary_value(value):
-    TRY:
-        IF value is NA or empty:
-            RETURN empty dict
-    CATCH ValueError, TypeError:
-        RETURN empty dict
-    
-    value_str = convert to string
-    result = {}
-    
-    # Method 1: Try JSON parsing
-    TRY:
-        IF value_str is JSON format:
-            parsed = json.loads(value_str)
-            FOR each key, val IN parsed:
-                result[key] = [val]  # Store as list
-            RETURN result
-    CATCH:
-        pass
-    
-    # Method 2: Try Python literal evaluation
-    TRY:
-        parsed = ast.literal_eval(value_str)
-        IF parsed is dict:
-            FOR each key, val IN parsed:
-                result[key] = [val]  # Store as list
-            RETURN result
-    CATCH:
-        pass
-    
-    # Method 3: Manual parsing with duplicate support
-    TRY:
-        lines = split value_str by newline, filter empty
+        # Create section header label for file loading with bold font
+        ttk.Label(main_frame, text="1. Load Input File:", font=('TkDefaultFont', 10, 'bold')).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
         
-        FOR each line IN lines:
-            IF line contains ':':
-                key, val = split on first ':'
-                IF key already exists in result:
-                    result[key].append(val)  # Append to list
-                ELSE:
-                    result[key] = [val]      # Create new list
-            
-            ELSE IF line contains '=':
-                key, val = split on first '='
-                IF key already exists in result:
-                    result[key].append(val)
-                ELSE:
-                    result[key] = [val]
-    CATCH:
-        pass
-    
-    RETURN result
-```
-
-**Key Innovation:** Dictionary values stored as lists to preserve duplicate keys
-
----
-
-### Algorithm 3: Single Row Processing with Cartesian Product
-
-```
-FUNCTION process_single_row(row, result_rows):
-    field_expansions = {}
-    
-    # Process regular (non-dictionary) fields
-    FOR each field IN selected_fields:
-        IF field is NOT dictionary field:
-            TRY:
-                field_value = row[field]
-            CATCH KeyError, TypeError:
-                field_value = ""
-            
-            values = split_multi_values(field_value)
-            unique_values = remove_duplicates(values)
-            IF unique_values is empty:
-                unique_values = [""]
-            
-            field_expansions[field] = unique_values
-    
-    # Process dictionary fields with duplicate key support
-    FOR each field IN dictionary_fields:
-        IF field IN selected_keys:
-            TRY:
-                dict_value = row[field]
-            CATCH KeyError, TypeError:
-                dict_value = ""
-            
-            parsed_dict = parse_dictionary_value(dict_value)
-            
-            FOR each key IN selected_keys[field]:
-                IF key IN parsed_dict:
-                    all_key_values = []
-                    
-                    # Iterate through all values (list)
-                    FOR each val IN parsed_dict[key]:
-                        IF val is None:
-                            val = ""
-                        split_values = split_multi_values(val)
-                        all_key_values.extend(split_values)
-                    
-                    unique_values = remove_duplicates(all_key_values)
-                    IF unique_values is empty:
-                        unique_values = [""]
-                    
-                    field_expansions[field + "_" + key] = unique_values
-                ELSE:
-                    field_expansions[field + "_" + key] = [""]
-    
-    # Generate Cartesian product
-    IF field_expansions is not empty:
-        field_names = keys of field_expansions
-        field_values = values of field_expansions
+        # Create button to trigger file selection dialog
+        ttk.Button(main_frame, text="Select Input File", 
+                  command=self.load_input_file).grid(row=1, column=0, sticky=tk.W, pady=(0, 10))
         
-        FOR each combination IN cartesian_product(field_values):
-            new_row = {}
-            FOR each field_name, value IN zip(field_names, combination):
-                new_row[field_name] = value
-            
-            IF new_row not in result_rows:
-                result_rows.append(new_row)
-```
-
-**Cartesian Product Example:**
-```
-Field A: [1, 2]
-Field B: [X, Y, Z]
-
-Output Combinations:
-(1, X), (1, Y), (1, Z), (2, X), (2, Y), (2, Z)
-
-= 2 × 3 = 6 rows
-```
-
----
-
-### Algorithm 4: Multi-Value Splitting
-
-```
-FUNCTION split_multi_values(value):
-    TRY:
-        IF value is NA or None or empty:
-            RETURN [""]
-    CATCH:
-        RETURN [""]
+        # Create label to display the name of the selected input file
+        self.input_file_label = ttk.Label(main_frame, text="No file selected")
+        self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+        
+        # Create section header label for stage 1 processing
+        ttk.Label(main_frame, text="2. Stage 1 Processing:", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create button for stage 1 processing
+        self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", 
+                  command=self.process_stage1, state='disabled')
+        self.stage1_button.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
+        
+        # Create label to show stage 1 status
+        self.stage1_status_label = ttk.Label(main_frame, text="")
+        self.stage1_status_label.grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+        
+        # Create section header label for field selection
+        ttk.Label(main_frame, text="3. Select Fields for Processing:", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create container frame for field selection controls
+        field_frame = ttk.Frame(main_frame)
+        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        field_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(5, weight=1)
+        
+        # Create sub-frame for field listbox with scrollbar
+        field_scroll_frame = ttk.Frame(field_frame)
+        field_scroll_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_scroll_frame.columnconfigure(0, weight=1)
+        field_scroll_frame.rowconfigure(0, weight=1)
+        
+        # Create listbox for field selection with multiple selection enabled
+        self.field_listbox = tk.Listbox(field_scroll_frame, selectmode=tk.MULTIPLE, height=6)
+        field_scrollbar = ttk.Scrollbar(field_scroll_frame, orient="vertical", command=self.field_listbox.yview)
+        self.field_listbox.configure(yscrollcommand=field_scrollbar.set)
+        
+        self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        
+        # Create section header label for mapping files functionality
+        ttk.Label(main_frame, text="4. Load Mapping Files (Optional):", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create sub-frame container for mapping files controls
+        mapping_frame = ttk.Frame(main_frame)
+        mapping_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Create button to add mapping files
+        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", 
+                  command=self.add_mapping_file, state='disabled')
+        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
+        
+        # Create listbox to display loaded mapping files
+        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
+        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        mapping_frame.columnconfigure(0, weight=1)
+        
+        # Create section header for default columns
+        ttk.Label(main_frame, text="5. Add Default Columns (Optional):", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=8, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create button to add default columns
+        self.add_default_button = ttk.Button(main_frame, text="Add Default Column", 
+                  command=self.add_default_column, state='disabled')
+        self.add_default_button.grid(row=9, column=0, sticky=tk.W, pady=(0, 10))
+        
+        # Create listbox to display default columns
+        self.default_listbox = tk.Listbox(main_frame, height=2)
+        self.default_listbox.grid(row=9, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=(0, 10))
+        
+        # Create stage 2 process button with accent styling
+        self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output)", 
+                  command=self.process_stage2, style='Accent.TButton', state='disabled')
+        self.stage2_button.grid(row=10, column=0, columnspan=2, pady=10)
+        
+        # Create export button initially disabled until data is processed
+        self.export_button = ttk.Button(main_frame, text="Export Results", 
+                                       command=self.export_data, state='disabled')
+        self.export_button.grid(row=11, column=0, columnspan=2, pady=5)
+        
+        # Create StringVar to hold status messages for dynamic updates
+        self.status_var = tk.StringVar(value="Ready to load file...")
+        status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
+                              relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.grid(row=12, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
-    value_str = convert to string and trim
+    # Method to detect file encoding automatically
+    def detect_encoding(self, file_path):
+        """Detect the encoding of a file"""
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(100000)
+                result = chardet.detect(raw_data)
+                encoding = result['encoding']
+                return encoding if encoding else 'utf-8'
+        except Exception:
+            return 'utf-8'
     
-    IF value_str is empty after trim:
-        RETURN [""]
-    
-    IF value_str contains ';':
-        values = split by ';' and trim each
-        RETURN filter_empty(values)
-    
-    ELSE IF value_str contains ',':
-        values = split by ',' and trim each
-        RETURN filter_empty(values)
-    
-    ELSE:
-        RETURN [value_str]
-```
-
-**Separator Priority:**
-1. Semicolon (`;`) - Higher priority
-2. Comma (`,`) - Lower priority
-3. No separator - Single value
-
----
-
-### Algorithm 5: Mapping Application
-
-```
-FUNCTION apply_mappings(result_rows):
-    FOR each field, mapping_df IN mapping_data:
-        IF field IN selected_fields:
-            IF mapping_df has at least 2 columns:
-                key_col = first column of mapping_df
-                value_col = second column of mapping_df
+    # Method to handle input file selection and loading
+    def load_input_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Input File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                # Detect file encoding automatically
+                encoding = self.detect_encoding(file_path)
                 
-                # Create lookup dictionary
-                mapping_dict = create dict from (key_col, value_col)
+                if file_path.endswith('.csv'):
+                    self.df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    self.df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
                 
-                FOR each row IN result_rows:
-                    IF field exists in row:
-                        mapped_value = lookup in mapping_dict[row[field]]
-                        IF not found:
-                            mapped_value = ""
-                        
-                        # Use original column name from mapping file
-                        row[value_col] = mapped_value
+                self.input_file_path = file_path
+                self.input_file_label.config(text=os.path.basename(file_path))
+                
+                # Clear field listbox
+                self.field_listbox.delete(0, tk.END)
+                for col in self.df.columns:
+                    self.field_listbox.insert(tk.END, col)
+                
+                self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
+                
+                # Enable field selection and stage 1 button
+                self.stage1_button.config(state='normal')
+                self.stage1_complete = False
+                self.stage1_status_label.config(text="")
+                self.add_mapping_button.config(state='disabled')
+                self.add_default_button.config(state='disabled')
+                self.stage2_button.config(state='disabled')
+                self.export_button.config(state='disabled')
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load file: {str(e)}")
+                self.status_var.set("Error loading file")
     
-    RETURN result_rows
-```
-
-**Mapping Example:**
-```
-Mapping File Columns: [EmployeeID, EmployeeName]
-Input Row: {EmployeeID: "E001", ...}
-Mapping: E001 → John Smith
-Output Row: {EmployeeID: "E001", EmployeeName: "John Smith", ...}
-                                   ↑ Original column name used
-```
-
----
-
-## Data Flow Diagram
-
-```
-┌─────────────┐
-│ Input File  │
-│  (CSV/TXT)  │
-└──────┬──────┘
-       │
-       ↓ [Encoding Detection]
-┌──────────────┐
-│  DataFrame   │
-│   (pandas)   │
-└──────┬───────┘
-       │
-       ↓ [User Selection]
-┌──────────────────┐
-│ Selected Fields  │
-│ [F1, F2, F3]     │
-└──────┬───────────┘
-       │
-       ↓ [Dictionary Detection]
-┌────────────────────────┐
-│ Dictionary Fields      │
-│ F2: [Key1, Key2, Key3] │
-└──────┬─────────────────┘
-       │
-       ↓ [User Key Selection Popup]
-┌────────────────────────┐
-│ Selected Keys          │
-│ F2: [Key1, Key3]       │
-└──────┬─────────────────┘
-       │
-       ↓ [Row-by-Row Processing]
-       ↓
-┌──────────────────────────────┐
-│  For Each Row:               │
-│  1. Parse dictionaries       │
-│  2. Extract selected keys    │
-│  3. Split multi-values       │
-│  4. Generate combinations    │
-│  5. Create output rows       │
-└──────┬───────────────────────┘
-       │
-       ↓ [Deduplication]
-┌──────────────────┐
-│  Stage 1 Output  │
-│  (Intermediate)  │
-└──────┬───────────┘
-       │
-       ├────→ [Optional: Add Mapping Files]
-       │      ↓
-       │   ┌──────────────────┐
-       │   │ Mapping Files    │
-       │   │ [Map1, Map2]     │
-       │   └──────┬───────────┘
-       │          │
-       ↓          ↓
-┌──────────────────────────┐
-│   Stage 2 Processing     │
-│   Apply Mappings         │
-│   Add New Columns        │
-└──────┬───────────────────┘
-       │
-       ↓
-┌──────────────────┐
-│  Final Output    │
-│  (Export Ready)  │
-└──────┬───────────┘
-       │
-       ↓ [Export]
-┌──────────────────┐
-│ CSV / Excel File │
-└──────────────────┘
-```
-
----
-
-## Processing Time Complexity
-
-### Time Complexity Analysis
-
-**Stage 1: Dictionary Expansion**
-- **Dictionary Detection:** O(n × m) where n = rows, m = sample size (10)
-- **Key Extraction:** O(n × k) where k = average keys per dictionary
-- **Row Processing:** O(n × c) where c = Cartesian product size
-- **Overall:** O(n × c) - dominated by Cartesian product
-
-**Stage 2: Mapping Application**
-- **Mapping Lookup:** O(n × p) where n = rows, p = number of mappings
-- **Dictionary Lookup:** O(1) average case (hash table)
-- **Overall:** O(n × p)
-
-**Total Complexity:** O(n × c + n × p)
-
-### Space Complexity
-- **Input Data:** O(n) rows
-- **Intermediate Data:** O(n × c) after expansion
-- **Mapping Data:** O(m) where m = mapping file rows
-- **Total:** O(n × c + m)
-
----
-
-## Error Handling Strategy
-
-```
-┌─────────────────────────────────────┐
-│      Error Handling Layers          │
-├─────────────────────────────────────┤
-│                                     │
-│ Layer 1: Input Validation          │
-│ • File format checks                │
-│ • Encoding detection                │
-│ • DataFrame loading errors          │
-│ • Try-catch with user feedback      │
-│                                     │
-├─────────────────────────────────────┤
-│                                     │
-│ Layer 2: Data Type Safety          │
-│ • pd.isna() wrapped in try-catch    │
-│ • Array comparison protection       │
-│ • None value handling               │
-│ • Type conversion safeguards        │
-│                                     │
-├─────────────────────────────────────┤
-│                                     │
-│ Layer 3: Field Access Safety       │
-│ • KeyError handling                 │
-│ • TypeError handling                │
-│ • Default value fallbacks           │
-│ • Safe dictionary access            │
-│                                     │
-├─────────────────────────────────────┤
-│                                     │
-│ Layer 4: User Interaction          │
-│ • Validation prompts                │
-│ • Confirmation dialogs              │
-│ • Status updates                    │
-│ • Progress indicators               │
-│                                     │
-└─────────────────────────────────────┘
-```
-
----
-
-# Document 4: Tool Utilities & Features Reference
-
-## Complete Feature List
-
-### 🎯 Category 1: Data Loading & Format Support
-
-#### 1.1 Universal File Format Support
-**Utility:** Load various text-based data formats
-- ✅ CSV files (.csv)
-- ✅ Tab-delimited text files (.txt)
-- ✅ Custom delimiter support (comma, tab)
-- ✅ Files with or without headers
-
-**Business Value:** Eliminates format conversion steps
-
----
-
-#### 1.2 Automatic Encoding Detection
-**Utility:** Handle international character sets automatically
-- ✅ Auto-detects UTF-8, UTF-16, Latin-1, ASCII, etc.
-- ✅ Displays detected encoding to user
-- ✅ Prevents garbled character display
-- ✅ Supports 100+ character encodings
-
-**Business Value:** Works with global data sources without manual configuration
-
-**Example:** Chinese characters (你好), Arabic (مرحبا), Cyrillic (Привет) all handled automatically
-
----
-
-### 🎯 Category 2: Dictionary Field Processing
-
-#### 2.1 Multi-Format Dictionary Detection
-**Utility:** Automatically identify dictionary-like fields
-- ✅ JSON format: `{"key": "value", "key2": "value2"}`
-- ✅ Python dict format: `{'key': 'value'}`
-- ✅ Colon-separated: `key: value`
-- ✅ Equals-separated: `key = value`
-- ✅ Newline-separated pairs
-
-**Business Value:** Extracts structured data from unstructured text fields
-
-**Example Recognition:**
-```
-Format 1 (JSON): {"Email": "john@example.com", "Phone": "555-1234"}
-Format 2 (Colon): Email: john@example.com
-                  Phone: 555-1234
-Format 3 (Equals): Email=john@example.com
-                   Phone=555-1234
-
-All automatically detected and parsed!
-```
-
----
-
-#### 2.2 Selective Key Extraction
-**Utility:** Choose specific keys from dictionary fields
-- ✅ Interactive popup for key selection
-- ✅ Manual selection (no pre-selection)
-- ✅ Multi-select support (Ctrl/Cmd+Click)
-- ✅ Real-time selection counter
-- ✅ "Select All" and "Clear All" helpers
-
-**Business Value:** Extract only needed information, reducing data noise
-
-**Example:**
-```
-Dictionary has 20 keys
-You need only 3
-→ Select only those 3
-→ 85% reduction in unnecessary data
-```
-
----
-
-#### 2.3 Duplicate Key Handling (Unique Feature!)
-**Utility:** Preserve ALL values when keys repeat
-- ✅ Collects all duplicate key values
-- ✅ No data loss
-- ✅ Generates all combinations via Cartesian product
-- ✅ Maintains data completeness
-
-**Business Value:** Critical for data integrity when fields have repeated keys
-
-**Example:**
-```
-Input:
-Phone: 555-1234
-Phone: 555-5678
-Phone: 555-9999
-
-Traditional tools: Keep only one (data loss!)
-This tool: Preserves all 3 phone numbers
-```
-
----
-
-#### 2.4 Nested Column Creation
-**Utility:** Creates clear, descriptive column names
-- ✅ Format: `FieldName_KeyName`
-- ✅ Preserves hierarchy
-- ✅ Self-documenting
-- ✅ Easy to understand
-
-**Example:**
-```
-Field: ContactDetails
-Keys: Email, Phone, Address
-
-Output Columns:
-- ContactDetails_Email
-- ContactDetails_Phone
-- ContactDetails_Address
-```
-
----
-
-### 🎯 Category 3: Multi-Value Processing
-
-#### 3.1 Intelligent Value Splitting
-**Utility:** Split comma and semicolon-separated values
-- ✅ Comma separator: `value1, value2, value3`
-- ✅ Semicolon separator: `value1; value2; value3`
-- ✅ Priority: Semicolon > Comma
-- ✅ Automatic whitespace trimming
-- ✅ Empty value filtering
-
-**Business Value:** Converts packed data into normalized rows
-
-**Example:**
-```
-Input: Skills: "Python, SQL, Java"
-Output: 3 separate rows
-Row 1: Skills = Python
-Row 2: Skills = SQL
-Row 3: Skills = Java
-```
-
----
-
-#### 3.2 Cartesian Product Generation
-**Utility:** Generate all possible combinations
-- ✅ Cross-multiplies all multi-valued fields
-- ✅ Creates comprehensive output
-- ✅ Ensures no combination is missed
-- ✅ Automatic deduplication
-
-**Business Value:** Complete data expansion for analysis
-
-**Example:**
-```
-Field A: [X, Y]
-Field B: [1, 2, 3]
-
-Output: 2 × 3 = 6 rows
-(X, 1), (X, 2), (X, 3)
-(Y, 1), (Y, 2), (Y, 3)
-```
-
----
-
-#### 3.3 Automatic Deduplication
-**Utility:** Remove duplicate rows automatically
-- ✅ Compares entire row content
-- ✅ Preserves first occurrence
-- ✅ Prevents data redundancy
-- ✅ Improves data quality
-
-**Business Value:** Clean output without manual deduplication steps
-
----
-
-### 🎯 Category 4: Data Enrichment & Mapping
-
-#### 4.1 External Data Mapping
-**Utility:** Enrich data with external reference files
-- ✅ Load external CSV/TXT mapping files
-- ✅ Auto-detect matching columns
-- ✅ Multiple mapping support
-- ✅ Lookup-based enrichment
-
-**Business Value:** Add context and descriptions to codes/IDs
-
-**Example:**
-```
-Your data: ProductID = "P001"
-Mapping file: P001 → "Laptop Computer"
-Output: ProductID = "P001", ProductName = "Laptop Computer"
-```
-
----
-
-#### 4.2 Smart Column Matching
-**Utility:** Automatically find matching columns
-- ✅ Compares Stage 1 output with mapping file
-- ✅ Identifies common columns
-- ✅ Suggests best match
-- ✅ Handles multiple matches
-
-**Business Value:** Eliminates manual column name matching
-
----
-
-#### 4.3 Original Column Name Preservation
-**Utility:** Use semantic column names from mapping files
-- ✅ Keeps meaningful names from reference data
-- ✅ No generic suffixes (like "_mapped")
-- ✅ Self-documenting output
-- ✅ Better data usability
-
-**Example:**
-```
-Mapping file columns: [EmployeeID, EmployeeName]
-
-Output uses: "EmployeeName" (not "EmployeeID_mapped")
-```
-
----
-
-### 🎯 Category 5: User Interface & Workflow
-
-#### 5.1 Two-Stage Processing Architecture
-**Utility:** Separate expansion and mapping operations
-- ✅ Stage 1: Dictionary expansion & value splitting
-- ✅ Stage 2: Mapping application & enrichment
-- ✅ Review intermediate results
-- ✅ Iterative refinement capability
-
-**Business Value:** Control and visibility at each step
-
----
-
-#### 5.2 Visual Progress Indicators
-**Utility:** Real-time feedback on processing
-- ✅ Status bar with row counts
-- ✅ Stage completion checkmarks (✓)
-- ✅ Encoding information display
-- ✅ Selection counters
-- ✅ File name display
-
-**Business Value:** User confidence and situational awareness
-
----
-
-#### 5.3 Field Selection Control
-**Utility:** Choose which fields to process
-- ✅ Multi-select listbox
-- ✅ Keyboard shortcuts (Ctrl/Cmd, Shift)
-- ✅ Select only needed fields
-- ✅ Reduces processing time
-
-**Business Value:** Focused output with only relevant data
-
----
-
-#### 5.4 Interactive Key Selection
-**Utility:** Granular control over dictionary expansion
-- ✅ Pop-up dialog for each dictionary field
-- ✅ Visual key list with checkboxes
-- ✅ Selection counter
-- ✅ Helper buttons (Select All, Clear All)
-- ✅ Clear instructions
-
-**Business Value:** Precision control over extracted data
-
----
-
-#### 5.5 Workflow State Management
-**Utility:** Intelligent button enabling/disabling
-- ✅ Stage 1 enabled after file load
-- ✅ Mapping enabled after Stage 1
-- ✅ Stage 2 enabled after Stage 1
-- ✅ Export enabled after processing
-- ✅ Prevents out-of-order operations
-
-**Business Value:** Guided workflow prevents errors
-
----
-
-### 🎯 Category 6: Export & Output
-
-#### 6.1 Multiple Export Formats
-**Utility:** Save in different formats
-- ✅ CSV format (.csv) - Universal compatibility
-- ✅ Excel format (.xlsx) - Rich formatting
-- ✅ Preserves all data types
-- ✅ No index columns
-
-**Business Value:** Flexibility for downstream systems
-
----
-
-#### 6.2 Post-Export Workflow Options
-**Utility:** Continue working or close application
-- ✅ "Continue Working" - Process more files
-- ✅ "Close Application" - Exit cleanly
-- ✅ Confirmation dialog
-- ✅ Proper resource cleanup
-
-**Business Value:** Seamless batch processing capability
-
----
-
-### 🎯 Category 7: Data Quality & Safety
-
-#### 7.1 Comprehensive Error Handling
-**Utility:** Robust error management
-- ✅ File loading errors
-- ✅ Encoding errors
-- ✅ Data type errors (array ambiguity fix)
-- ✅ Missing field errors
-- ✅ User-friendly error messages
-
-**Business Value:** Production-ready reliability
-
----
-
-#### 7.2 Input Validation
-**Utility:** Validate user actions
-- ✅ Check file selection
-- ✅ Verify field selection
-- ✅ Validate key selection
-- ✅ Confirm stage completion
-- ✅ Warning dialogs
-
-**Business Value:** Prevents invalid operations
-
----
-
-#### 7.3 Data Type Safety
-**Utility:** Handle all pandas data types
-- ✅ String types
-- ✅ Numeric types
-- ✅ Date/time types
-- ✅ Array types
-- ✅ Categorical types
-- ✅ None/NA values
-
-**Business Value:** Works with real-world messy data
-
----
-
-### 🎯 Category 8: Performance & Scalability
-
-#### 8.1 Efficient Processing
-**Utility:** Optimized algorithms
-- ✅ Row-by-row processing (memory efficient)
-- ✅ Hash-based mapping lookups (O(1))
-- ✅ Incremental result building
-- ✅ Lazy evaluation where possible
-
-**Business Value:** Handles large datasets efficiently
-
----
-
-#### 8.2 Scalable Architecture
-**Utility:** Grows with data size
-- ✅ Supports small files (< 1K rows)
-- ✅ Handles medium files (1K-10K rows)
-- ✅ Processes large files (10K-100K rows)
-- ✅ Memory-conscious design
-
-**Business Value:** One tool for all file sizes
-
----
-
-## Utility Comparison Matrix
-
-| Feature | Manual Excel | Basic CSV Tools | This Tool |
-|---------|--------------|-----------------|-----------|
-| Dictionary Expansion | ❌ Manual | ❌ Not Supported | ✅ Automatic |
-| Duplicate Key Handling | ❌ Data Loss | ❌ Data Loss | ✅ Preserves All |
-| Multi-Value Splitting | ⚠️ Manual Formula | ⚠️ Limited | ✅ Automatic |
-| Encoding Detection | ❌ Manual | ⚠️ Limited | ✅ Automatic |
-| Cartesian Product | ❌ Very Manual | ❌ Not Supported | ✅ Automatic |
-| Data Mapping | ⚠️ VLOOKUP | ⚠️ Manual | ✅ Automatic |
-| User Control | ⚠️ Formula-based | ❌ Limited | ✅ Extensive |
-| Processing Time | Hours | Minutes | Seconds |
-| Error Handling | ❌ Poor | ⚠️ Basic | ✅ Comprehensive |
-| Batch Processing | ❌ Repetitive | ⚠️ Limited | ✅ Supported |
-
----
-
-## Use Case Scenarios
-
-### Scenario 1: Customer Data Migration
-**Challenge:** Legacy CRM exports contacts with all info in one "Details" field
-
-**Input:**
-```csv
-CustomerID,Details
-C001,"Email:john@example.com
-Phone:555-1234
-Address:123 Main St
-City:New York
-State:NY"
-```
-
-**Solution with Tool:**
-1. Load file → Select CustomerID, Details
-2. Stage 1 → Extract: Email, Phone, City, State (skip Address)
-3. Export
-
-**Output:**
-```csv
-CustomerID,Details_Email,Details_Phone,Details_City,Details_State
-C001,john@example.com,555-1234,New York,NY
-```
-
-**Time Saved:** 100 customers = 2 hours manual → 2 minutes with tool
-
----
-
-### Scenario 2: Product Catalog Expansion
-**Challenge:** Products have multiple categories, need separate row per category
-
-**Input:**
-```csv
-ProductID,Name,Categories
-P001,Laptop,"Electronics, Computers, Office"
-P002,Mouse,"Electronics, Accessories"
-```
-
-**Solution with Tool:**
-1. Load file → Select all fields
-2. Stage 1 → Splits Categories automatically
-3. Export
-
-**Output:**
-```csv
-ProductID,Name,Categories
-P001,Laptop,Electronics
-P001,Laptop,Computers
-P001,Laptop,Office
-P002,Mouse,Electronics
-P002,Mouse,Accessories
-```
-
-**Business Value:** Ready for category-based analysis
-
----
-
-### Scenario 3: Employee Skills Matrix
-**Challenge:** Employee records with multiple skills and certifications
-
-**Input:**
-```csv
-EmpID,Skills,Certifications
-E001,"Python, SQL, Java","AWS, PMP"
-E002,"Python, R","AWS, Azure, GCP"
-```
-
-**Solution with Tool:**
-1. Load → Select all fields
-2. Stage 1 → Both fields split automatically
-3. Cartesian product creates all combinations
-
-**Output:**
-```csv
-EmpID,Skills,Certifications
-E001,Python,AWS
-E001,Python,PMP
-E001,SQL,AWS
-E001,SQL,PMP
-E001,Java,AWS
-E001,Java,PMP
-E002,Python,AWS
-E002,Python,Azure
-E002,Python,GCP
-E002,R,AWS
-E002,R,Azure
-E002,R,GCP
-```
-
-**Business Value:** Complete skills-certifications matrix for HR analysis
-
----
-
-### Scenario 4: Medical Records with Duplicate Medications
-**Challenge:** Patient records show medication changes over time
-
-**Input:**
-```csv
-PatientID,Medications
-P001,"Medication: Aspirin
-Dosage: 100mg
-Medication: Ibuprofen
-Dosage: 200mg
-Medication: Aspirin
-Dosage: 150mg"
-```
-
-**Solution with Tool:**
-1. Load → Select PatientID, Medications
-2. Stage 1 → Detects dictionary, select Medication and Dosage keys
-3. Tool preserves ALL medication entries (including duplicate Aspirin)
-
-**Output:**
-```csv
-PatientID,Medications_Medication,Medications_Dosage
-P001,Aspirin,100mg
-P001,Ibuprofen,200mg
-P001,Aspirin,150mg
-```
-
-**Critical Feature:** No data loss - all medication changes preserved!
-
----
-
-### Scenario 5: Sales Data with Product Codes Mapping
-**Challenge:** Sales file has product codes, need product names added
-
-**Input File (sales.csv):**
-```csv
-SaleID,ProductCode,Quantity
-S001,PC001,5
-S002,PC002,3
-```
-
-**Mapping File (products.csv):**
-```csv
-ProductCode,ProductName,Category
-PC001,Laptop,Electronics
-PC002,Mouse,Accessories
-```
-
-**Solution with Tool:**
-1. Load sales.csv → Select all fields
-2. Stage 1 → No dictionaries, just loads data
-3. Add mapping file: products.csv
-4. Stage 2 → Applies mapping
-5. Export
-
-**Output:**
-```csv
-SaleID,ProductCode,Quantity,ProductName,Category
-S001,PC001,5,Laptop,Electronics
-S002,PC002,3,Mouse,Accessories
-```
-
-**Business Value:** Enriched sales data ready for reporting
-
----
-
-## Advanced Features Summary
-
-### 🔧 Technical Capabilities
-1. ✅ **Multi-format parsing** - 5 dictionary formats supported
-2. ✅ **Duplicate preservation** - Unique in market
-3. ✅ **Cartesian expansion** - Mathematical completeness
-4. ✅ **Encoding agnostic** - 100+ encodings
-5. ✅ **Type-safe processing** - Handles pandas arrays
-6. ✅ **Memory efficient** - Streaming row processing
-7. ✅ **Error resilient** - 4-layer error handling
-
-### 🎨 User Experience
-1. ✅ **Visual feedback** - Real-time counters
-2. ✅ **Guided workflow** - Smart button states
-3. ✅ **Clear labeling** - Self-documenting interface
-4. ✅ **Help text** - Contextual tips
-5. ✅ **Keyboard shortcuts** - Power user support
-6. ✅ **Undo-friendly** - Two-stage review
-7. ✅ **Batch-ready** - Continue working option
-
-### 📊 Data Quality
-1. ✅ **No data loss** - Duplicate key handling
-2. ✅ **Automatic deduplication** - Clean output
-3. ✅ **Validation checks** - Pre-process validation
-4. ✅ **Error messages** - Clear guidance
-5. ✅ **Data integrity** - Referential mapping
-6. ✅ **Type preservation** - Maintains data types
-7. ✅ **Completeness** - Cartesian products
-
----
-
-# Document 5: Quick Reference Card
-
-## One-Page Quick Start
-
-### 📋 Prerequisites
-```bash
-pip install pandas chardet openpyxl
-python csv_processor.py
-```
-
-### 🚀 5-Step Workflow
-
-**Step 1:** Load File → Click "Select Input File"
-
-**Step 2:** Select Fields → Click fields to process
-
-**Step 3:** Stage 1 → Click "Process Stage 1", select keys from popups
-
-**Step 4:** [Optional] Mapping → Click "Add Mapping File"
-
-**Step 5:** Stage 2 & Export → Click "Process Stage 2", then "Export"
-
-### ⌨️ Keyboard Shortcuts
-
-| Action | Windows/Linux | macOS |
-|--------|---------------|-------|
-| Multi-select | Ctrl + Click | Cmd + Click |
-| Range select | Shift + Click | Shift + Click |
-| Select all in popup | Ctrl + A | Cmd + A |
-
-### 🎯 Key Features at a Glance
-
-✅ Auto-detect dictionaries  
-✅ Preserve duplicate keys  
-✅ Split multi-values  
-✅ Cartesian product  
-✅ Add mappings  
-✅ Export CSV/Excel  
-
-### ⚠️ Remember
-
-- **Nothing pre-selected** in key popups
-- **Select fewer keys** = fewer output rows
-- **Stage 1 first**, then mapping
-- **Check row count** before export
-
-### 📞 Common Issues
-
-**Too many rows?** → Select fewer dictionary keys
-
-**No popups?** → Ensure fields selected contain dictionaries
-
-**Mapping not applied?** → Check column names match
-
----
-
-# Document 6: Client Presentation Deck Outline
-
-## Slide-by-Slide Breakdown
-
-### Slide 1: Title
-**CSV Dictionary Field Processor**
-*Advanced Data Transformation Tool*
-- Two-Stage Processing Architecture
-- Zero Data Loss Guarantee
-- Production-Ready Solution
-
----
-
-### Slide 2: The Problem
-**Current Challenges:**
-- ❌ Dictionary fields trapped in single columns
-- ❌ Multi-valued entries require manual splitting
-- ❌ Duplicate keys cause data loss
-- ❌ Encoding issues with international data
-- ❌ Manual processing takes hours/days
-- ❌ Error-prone Excel formulas
-
-**Impact:** Delayed projects, incomplete data, frustrated teams
-
----
-
-### Slide 3: The Solution
-**Automated Processing Tool:**
-- ✅ Automatic dictionary detection & expansion
-- ✅ Preserves ALL duplicate key values
-- ✅ Intelligent multi-value splitting
-- ✅ Universal encoding support
-- ✅ Data enrichment via mapping
-- ✅ User-controlled workflow
-
-**Result:** Minutes instead of hours, 100% accuracy
-
----
-
-### Slide 4: Key Differentiators
-**Why This Tool?**
-
-| Feature | Competition | Our Tool |
-|---------|-------------|----------|
-| Duplicate Keys | ❌ Data Loss | ✅ Preserved |
-| User Control | ⚠️ Limited | ✅ Extensive |
-| Encoding | ⚠️ Manual | ✅ Auto |
-| Dictionary Formats | 1-2 | 5+ |
-| Error Handling | ⚠️ Basic | ✅ Robust |
-
----
-
-### Slide 5: Two-Stage Architecture
-**Stage 1: Expansion**
-- Dictionary field detection
-- Key extraction
-- Multi-value splitting
-- Cartesian product generation
-
-**Stage 2: Enrichment**
-- External mapping integration
-- Column addition
-- Data validation
-
-**Benefit:** Review intermediate results, iterate as needed
-
----
-
-### Slide 6: Unique Feature - Duplicate Key Handling
-**The Game Changer:**
-
-**Example:**
-```
-Input: Phone: 555-1234
-       Phone: 555-5678
-       Phone: 555-9999
-
-Traditional: Only keeps last value (555-9999)
-Our Tool: Preserves all 3 values
-
-Result: 3 output rows, zero data loss
-```
-
-**Critical for:** Medical records, contact changes, version history
-
----
-
-### Slide 7: Real-World Impact
-**Case Study Metrics:**
-
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| Processing Time | 4 hours | 5 minutes | 98% faster |
-| Data Completeness | 60% | 100% | +40% |
-| Error Rate | 15% | 0% | -15% |
-| Manual Steps | 50+ | 5 | 90% reduction |
-
----
-
-### Slide 8: Use Cases
-**Perfect For:**
-1. 🏥 Healthcare - Patient records with medication history
-2. 💼 HR - Employee skills and certifications matrix
-3. 📊 Sales - Product catalogs with categories
-4. 🔄 Migration - Legacy system data transformation
-5. 📈 Analytics - Data preparation for BI tools
-
----
-
-### Slide 9: Technical Specifications
-**Enterprise-Ready:**
-- Platform: Windows, macOS, Linux
-- Language: Python 3.7+
-- Dependencies: pandas, chardet (industry standard)
-- File Support: CSV, TXT (tab-delimited)
-- Export: CSV, Excel
-- Encoding: 100+ supported
-- Performance: 10K rows in < 1 minute
-
----
-
-### Slide 10: User Experience
-**Intuitive Interface:**
-- ✅ Visual progress indicators
-- ✅ Real-time selection counters
-- ✅ Clear status messages
-- ✅ Guided workflow
-- ✅ Helpful tooltips
-- ✅ Error prevention
-- ✅ Keyboard shortcuts
-
-**Result:** Minimal training required
-
----
-
-### Slide 11: ROI Calculation
-**Cost Savings Example:**
-
-**Scenario:** 100 files/month, 2 hours each manual
-
-**Manual Cost:**
-- 200 hours/month × $50/hour = $10,000/month
-
-**With Tool:**
-- 100 files × 5 minutes = 8.3 hours/month
-- 8.3 hours × $50/hour = $415/month
-
-**Annual Savings:** $115,020
-
-**ROI:** Pays for itself in first use
-
----
-
-### Slide 12: Next Steps
-**Getting Started:**
-1. ✅ Installation (5 minutes)
-2. ✅ Test with sample data
-3. ✅ Training session (30 minutes)
-4. ✅ Pilot project
-5. ✅ Roll out to team
-
-**Support Included:**
-- Documentation package
-- Training materials
-- Technical support
-- Update roadmap
-
----
-
-### Slide 13: Contact & Demo
-**See It In Action:**
-- Live demonstration available
-- Sample data processing
-- Q&A session
-- Custom use case discussion
-
-**Contact Information:**
-[Your contact details]
-
----
-
-## Summary
-
-This comprehensive documentation package provides everything needed for professional client presentation:
-
-✅ **Executive Summary** - High-level overview  
-✅ **User Manual/SOP** - Step-by-step instructions  
-✅ **Technical Documentation** - Algorithms and architecture  
-✅ **Features Reference** - Complete utility list  
-✅ **Quick Reference** - One-page cheat sheet  
-✅ **Presentation Deck** - Client-ready slides  
-
-**Total Pages:** ~50+ pages of professional documentation
-
-**Formats Recommended:**
-- PDF for distribution
-- PowerPoint for presentation deck
-- HTML for online reference
-- Printed manual for training sessions
-
-This package positions the tool as an enterprise-grade solution with clear value proposition, comprehensive support materials, and professional presentation.
+    # Method to perform stage 1 processing - dictionary expansion
+    def process_stage1(self):
+        if self.df is None:
+            messagebox.showwarning("Warning", "Please load an input file first")
+            return
+        
+        # Get user's field selections from the listbox
+        selected_indices = self.field_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Warning", "Please select at least one field")
+            return
+        
+        # Convert selection indices to field names
+        self.selected_fields = [self.field_listbox.get(i) for i in selected_indices]
+        
+        try:
+            # Detect dictionary fields only in selected fields
+            self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
+            
+            # Initialize dictionary to store user's key selections
+            self.selected_keys = {}
+            
+            # If dictionary fields are found in selected fields, show popup for key selection
+            if self.dictionary_fields:
+                for field, available_keys in self.dictionary_fields.items():
+                    if available_keys:
+                        selected = self.show_key_selection_popup(field, available_keys)
+                        if selected:
+                            self.selected_keys[field] = selected
+                        else:
+                            # If user cancels, ask if they want to skip this field
+                            response = messagebox.askyesno("Skip Field?", 
+                                f"No keys selected for field '{field}'.\n\n"
+                                f"Do you want to keep this field without dictionary expansion?")
+                            if not response:
+                                # Remove from selected fields if user doesn't want to keep it
+                                self.selected_fields.remove(field)
+            
+            # Process stage 1 data
+            self.stage1_data = self.process_stage1_dataframe()
+            
+            # Get column names from stage 1 data (only from selected fields processing)
+            if self.stage1_data:
+                stage1_columns = set()
+                for row in self.stage1_data:
+                    stage1_columns.update(row.keys())
+                
+                # Update the selected_fields to match stage 1 output columns
+                self.selected_fields = list(stage1_columns)
+            
+            # Mark stage 1 as complete
+            self.stage1_complete = True
+            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
+            
+            # Enable mapping file addition and stage 2 processing
+            self.add_mapping_button.config(state='normal')
+            self.add_default_button.config(state='normal')
+            self.stage2_button.config(state='normal')
+            
+            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated from selected fields. You can now add mapping files or proceed to Stage 2.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
+            self.status_var.set("Stage 1 processing failed")
+    
+    # Method to process dataframe for stage 1
+    def process_stage1_dataframe(self):
+        """Process the dataframe for stage 1 - dictionary expansion and multi-value splitting"""
+        result_rows = []
+        
+        for index, row in self.df.iterrows():
+            self.process_single_row(row, result_rows)
+        
+        return result_rows
+    
+    # Method to handle addition of mapping files with enhanced logic
+    def add_mapping_file(self):
+        if not self.stage1_complete:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Mapping File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                encoding = self.detect_encoding(file_path)
+                
+                if file_path.endswith('.csv'):
+                    mapping_df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                
+                # Get column names from ORIGINAL input file (not stage 1 data)
+                if self.df is not None:
+                    input_fields = set(self.df.columns)
+                else:
+                    messagebox.showwarning("Warning", "No input data available")
+                    return
+                
+                mapping_fields = set(mapping_df.columns)
+                
+                common_fields = input_fields.intersection(mapping_fields)
+                
+                if not common_fields:
+                    messagebox.showwarning("Warning", 
+                        f"No matching columns found between input file and mapping file.\n"
+                        f"Input file columns: {list(input_fields)}\n"
+                        f"Mapping file columns: {list(mapping_fields)}")
+                    return
+                
+                field_to_map = list(common_fields)[0]
+                
+                if len(common_fields) > 1:
+                    field_to_map = simpledialog.askstring(
+                        "Multiple Matches Found",
+                        f"Multiple matching columns found: {list(common_fields)}\n"
+                        f"Enter the field name to use for mapping:",
+                        initialvalue=field_to_map
+                    )
+                    
+                    if not field_to_map or field_to_map not in common_fields:
+                        messagebox.showwarning("Warning", "Invalid field selection")
+                        return
+                
+                # Determine if this field was selected in Stage 1
+                is_lookup_only = field_to_map not in self.selected_fields
+                
+                self.mapping_files[field_to_map] = file_path
+                self.mapping_data[field_to_map] = mapping_df
+                self.mapping_lookup_only[field_to_map] = is_lookup_only
+                
+                # Update display with indicator
+                if is_lookup_only:
+                    self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)} [Lookup Only]")
+                else:
+                    self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)}")
+                
+                self.status_var.set(f"Added mapping for field '{field_to_map}' ({'lookup-only' if is_lookup_only else 'with original column'})")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
+    
+    # Method to add default column with user-specified name and value
+    def add_default_column(self):
+        if not self.stage1_complete:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        # Create popup for default column input
+        popup = tk.Toplevel(self.root)
+        popup.title("Add Default Column")
+        popup.geometry("400x200")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Enter default column details:", 
+                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+        
+        # Frame for column name
+        name_frame = ttk.Frame(popup)
+        name_frame.pack(pady=5, padx=20, fill=tk.X)
+        ttk.Label(name_frame, text="Column Name:").pack(side=tk.LEFT)
+        name_entry = ttk.Entry(name_frame, width=30)
+        name_entry.pack(side=tk.LEFT, padx=10)
+        
+        # Frame for column value
+        value_frame = ttk.Frame(popup)
+        value_frame.pack(pady=5, padx=20, fill=tk.X)
+        ttk.Label(value_frame, text="Column Value:").pack(side=tk.LEFT)
+        value_entry = ttk.Entry(value_frame, width=30)
+        value_entry.pack(side=tk.LEFT, padx=10)
+        
+        result = {'confirmed': False}
+        
+        def on_confirm():
+            col_name = name_entry.get().strip()
+            col_value = value_entry.get().strip()
+            
+            if not col_name:
+                messagebox.showwarning("Warning", "Column name cannot be empty")
+                return
+            
+            self.default_columns[col_name] = col_value
+            self.default_listbox.insert(tk.END, f"{col_name} = {col_value}")
+            result['confirmed'] = True
+            popup.destroy()
+        
+        def on_cancel():
+            popup.destroy()
+        
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(pady=20)
+        
+        ttk.Button(button_frame, text="Add Column", command=on_confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        
+        if result['confirmed']:
+            self.status_var.set(f"Added default column '{list(self.default_columns.keys())[-1]}'")
+    
+    # Method to split multi-valued strings
+    def split_multi_values(self, value):
+        """Split comma or semicolon separated values"""
+        if pd.isna(value) or value == "" or value is None:
+            return [""]
+        
+        # Convert to string to handle any data type
+        value_str = str(value).strip()
+        
+        # Handle empty string after conversion
+        if not value_str:
+            return [""]
+        
+        if ';' in value_str:
+            return [v.strip() for v in value_str.split(';') if v.strip()]
+        elif ',' in value_str:
+            return [v.strip() for v in value_str.split(',') if v.strip()]
+        else:
+            return [value_str]
+    
+    # Method to detect if a value contains dictionary-like data
+    def is_dictionary_like(self, value):
+        """Check if a value looks like a dictionary"""
+        # Handle pandas NA, None, and empty values
+        try:
+            if pd.isna(value):
+                return False
+        except (ValueError, TypeError):
+            # Handle cases where pd.isna raises an error (e.g., with arrays)
+            if value is None:
+                return False
+        
+        if value == "":
+            return False
+        
+        value_str = str(value).strip()
+        
+        if value_str.startswith('{') and value_str.endswith('}'):
+            return True
+        
+        if ':' in value_str or '=' in value_str:
+            return True
+        
+        return False
+    
+    # Method to parse dictionary-like strings
+    def parse_dictionary_value(self, value):
+        """Parse dictionary-like value into key-value pairs, handling duplicate keys by collecting all values"""
+        # Handle pandas NA, None, and empty values
+        try:
+            if pd.isna(value):
+                return {}
+        except (ValueError, TypeError):
+            # Handle cases where pd.isna raises an error
+            if value is None:
+                return {}
+        
+        if value == "":
+            return {}
+
+        value_str = str(value).strip()
+        result = {}
+
+        # Try JSON parsing
+        try:
+            if value_str.startswith('{') and value_str.endswith('}'):
+                parsed = json.loads(value_str)
+                # Convert to list values to handle duplicates uniformly
+                for k, v in parsed.items():
+                    result[k] = [v] if not isinstance(v, list) else v
+                return result
+        except:
+            pass
+
+        # Try literal eval
+        try:
+            parsed = ast.literal_eval(value_str)
+            if isinstance(parsed, dict):
+                # Convert to list values to handle duplicates uniformly
+                for k, v in parsed.items():
+                    result[k] = [v] if not isinstance(v, list) else v
+                return result
+        except:
+            pass
+
+        # Manual parsing for newline-separated key-value pairs with duplicate key support
+        try:
+            lines = [line.strip() for line in value_str.split('\n') if line.strip()]
+
+            for line in lines:
+                if ':' in line:
+                    key, val = line.split(':', 1)
+                    key = key.strip()
+                    val = val.strip()
+                    # If key already exists, append to list; otherwise create new list
+                    if key in result:
+                        result[key].append(val)
+                    else:
+                        result[key] = [val]
+                elif '=' in line:
+                    key, val = line.split('=', 1)
+                    key = key.strip()
+                    val = val.strip()
+                    # If key already exists, append to list; otherwise create new list
+                    if key in result:
+                        result[key].append(val)
+                    else:
+                        result[key] = [val]
+                else:
+                    # Store line as key with empty value
+                    if line in result:
+                        result[line].append("")
+                    else:
+                        result[line] = [""]
+
+        except Exception:
+            pass
+
+        return result
+    
+    # Method to detect dictionary fields
+    def detect_dictionary_fields(self, selected_fields):
+        """Detect which fields contain dictionary-like values and collect all unique keys including duplicates"""
+        dict_fields = {}
+        
+        for field in selected_fields:
+            if field in self.df.columns:
+                sample_values = self.df[field].dropna().head(10)
+                
+                dict_count = 0
+                all_keys = set()
+                
+                for value in sample_values:
+                    if self.is_dictionary_like(value):
+                        dict_count += 1
+                        parsed = self.parse_dictionary_value(value)
+                        # Now parsed dict has lists as values, just get the keys
+                        all_keys.update(parsed.keys())
+                
+                if dict_count > len(sample_values) * 0.5:
+                    dict_fields[field] = list(all_keys)
+        
+        return dict_fields
+    
+    # Method to show key selection popup
+    def show_key_selection_popup(self, field, available_keys):
+        """Show popup for key selection in dictionary fields with manual selection (nothing pre-selected)"""
+        # Create popup window as child of main window
+        popup = tk.Toplevel(self.root)
+        # Set popup title with field name
+        popup.title(f"Select Keys for Field: {field}")
+        # Set popup dimensions - larger for better visibility
+        popup.geometry("450x350")
+        # Make popup transient to main window (stays on top)
+        popup.transient(self.root)
+        # Make popup modal (blocks interaction with parent)
+        popup.grab_set()
+        
+        # Header frame with title and instructions
+        header_frame = ttk.Frame(popup)
+        header_frame.pack(pady=10, padx=10, fill=tk.X)
+        
+        # Main instruction label with bold formatting
+        ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
+                 font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
+        
+        # Helpful tip for users about multi-selection
+        ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
+                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
+        
+        # Key selection frame with listbox and scrollbar
+        key_frame = ttk.Frame(popup)
+        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create listbox for multiple key selection
+        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
+        # Create scrollbar for the key listbox
+        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
+        # Connect scrollbar to listbox
+        key_listbox.configure(yscrollcommand=key_scrollbar.set)
+        
+        # Pack listbox to fill available space
+        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Pack scrollbar on right side
+        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Populate listbox with available keys from dictionary field
+        for key in available_keys:
+            key_listbox.insert(tk.END, key)
+        
+        # IMPORTANT: DO NOT pre-select any keys - let user select manually
+        # This line is intentionally commented out to show the change:
+        # key_listbox.select_set(0, tk.END)  # REMOVED: No default selection
+        
+        # Status label to show real-time selection count
+        status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
+                                foreground='blue')
+        status_label.pack(pady=(0, 5))
+        
+        # Function to update status label when selection changes
+        def update_status(event=None):
+            """Update the selection counter display"""
+            count = len(key_listbox.curselection())
+            status_label.config(text=f"{count} of {len(available_keys)} keys selected")
+        
+        # Bind listbox selection event to update function
+        key_listbox.bind('<<ListboxSelect>>', update_status)
+        
+        # Initialize list to store user's key selections
+        selected_keys = []
+        
+        # Function to select all keys at once
+        def on_select_all():
+            """Select all keys in the listbox"""
+            key_listbox.select_set(0, tk.END)
+            update_status()
+        
+        # Function to clear all selections
+        def on_clear_all():
+            """Clear all selections in the listbox"""
+            key_listbox.selection_clear(0, tk.END)
+            update_status()
+        
+        # Function to handle confirm button click
+        def on_confirm():
+            """Confirm selection and return selected keys"""
+            # Access outer scope variable
+            nonlocal selected_keys
+            # Get indices of selected items
+            selected_indices = key_listbox.curselection()
+            # Convert indices to actual key names
+            selected_keys = [available_keys[i] for i in selected_indices]
+            # Close popup window
+            popup.destroy()
