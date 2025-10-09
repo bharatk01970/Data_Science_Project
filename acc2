@@ -46,12 +46,6 @@ class CSVProcessorGUI:
         self.stage1_data = None
         # Initialize flag to track if stage 1 processing is complete
         self.stage1_complete = False
-        # Initialize dictionary for column renaming
-        self.column_rename_map = {}
-        # Initialize list for column sequence
-        self.column_sequence = []
-        # Initialize dictionary for default columns
-        self.default_columns = {}
         
         # Call the UI setup method to create and arrange all GUI components
         self.setup_ui()
@@ -145,21 +139,16 @@ class CSVProcessorGUI:
                   command=self.process_stage2, style='Accent.TButton', state='disabled')
         self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
         
-        # Create export configuration button
-        self.config_export_button = ttk.Button(main_frame, text="Configure Export Options", 
-                                              command=self.configure_export, state='disabled')
-        self.config_export_button.grid(row=9, column=0, columnspan=2, pady=5)
-        
         # Create export button initially disabled until data is processed
         self.export_button = ttk.Button(main_frame, text="Export Results", 
                                        command=self.export_data, state='disabled')
-        self.export_button.grid(row=10, column=0, columnspan=2, pady=5)
+        self.export_button.grid(row=9, column=0, columnspan=2, pady=5)
         
         # Create StringVar to hold status messages for dynamic updates
         self.status_var = tk.StringVar(value="Ready to load file...")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                               relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=11, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
     # Method to detect file encoding automatically
     def detect_encoding(self, file_path):
@@ -206,7 +195,6 @@ class CSVProcessorGUI:
                 self.stage1_status_label.config(text="")
                 self.add_mapping_button.config(state='disabled')
                 self.stage2_button.config(state='disabled')
-                self.config_export_button.config(state='disabled')
                 self.export_button.config(state='disabled')
                 
             except Exception as e:
@@ -316,30 +304,17 @@ class CSVProcessorGUI:
                     messagebox.showwarning("Warning", "No stage 1 data available")
                     return
                 
-                # Also check original input file columns
-                original_columns = set(self.df.columns)
-                
                 input_fields = stage1_columns
                 mapping_fields = set(mapping_df.columns)
                 
-                # First check stage 1 columns
                 common_fields = input_fields.intersection(mapping_fields)
                 
-                # If not found in stage 1, check original input columns
                 if not common_fields:
-                    common_fields = original_columns.intersection(mapping_fields)
-                    if common_fields:
-                        # Store flag to indicate mapping key is from original file
-                        mapping_source = "original"
-                    else:
-                        messagebox.showwarning("Warning", 
-                            f"No matching columns found between stage 1 data/original file and mapping file.\n"
-                            f"Stage 1 columns: {list(input_fields)}\n"
-                            f"Original columns: {list(original_columns)}\n"
-                            f"Mapping file columns: {list(mapping_fields)}")
-                        return
-                else:
-                    mapping_source = "stage1"
+                    messagebox.showwarning("Warning", 
+                        f"No matching columns found between stage 1 data and mapping file.\n"
+                        f"Stage 1 columns: {list(input_fields)}\n"
+                        f"Mapping file columns: {list(mapping_fields)}")
+                    return
                 
                 field_to_map = list(common_fields)[0]
                 
@@ -355,16 +330,12 @@ class CSVProcessorGUI:
                         messagebox.showwarning("Warning", "Invalid field selection")
                         return
                 
-                self.mapping_files[field_to_map] = {
-                    'path': file_path,
-                    'source': mapping_source
-                }
+                self.mapping_files[field_to_map] = file_path
                 self.mapping_data[field_to_map] = mapping_df
                 
-                source_text = "Stage 1 output" if mapping_source == "stage1" else "Original file"
-                self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)} (from {source_text})")
+                self.mapping_listbox.insert(tk.END, f"{field_to_map}: {os.path.basename(file_path)}")
                 
-                self.status_var.set(f"Added mapping for field '{field_to_map}' (from {source_text})")
+                self.status_var.set(f"Added mapping for field '{field_to_map}' (auto-detected)")
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
@@ -516,128 +487,85 @@ class CSVProcessorGUI:
     # Method to show key selection popup
     def show_key_selection_popup(self, field, available_keys):
         """Show popup for key selection in dictionary fields with manual selection (nothing pre-selected)"""
-        # Create popup window as child of main window
         popup = tk.Toplevel(self.root)
-        # Set popup title with field name
         popup.title(f"Select Keys for Field: {field}")
-        # Set popup dimensions - larger for better visibility
         popup.geometry("450x350")
-        # Make popup transient to main window (stays on top)
         popup.transient(self.root)
-        # Make popup modal (blocks interaction with parent)
         popup.grab_set()
         
-        # Header frame with title and instructions
         header_frame = ttk.Frame(popup)
         header_frame.pack(pady=10, padx=10, fill=tk.X)
         
-        # Main instruction label with bold formatting
         ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
                  font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
         
-        # Helpful tip for users about multi-selection
         ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
         
-        # Key selection frame with listbox and scrollbar
         key_frame = ttk.Frame(popup)
         key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Create listbox for multiple key selection
         key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
-        # Create scrollbar for the key listbox
         key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
-        # Connect scrollbar to listbox
         key_listbox.configure(yscrollcommand=key_scrollbar.set)
         
-        # Pack listbox to fill available space
         key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # Pack scrollbar on right side
         key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Populate listbox with available keys from dictionary field
         for key in available_keys:
             key_listbox.insert(tk.END, key)
         
-        # Status label to show real-time selection count
         status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
                                 foreground='blue')
         status_label.pack(pady=(0, 5))
         
-        # Function to update status label when selection changes
         def update_status(event=None):
-            """Update the selection counter display"""
             count = len(key_listbox.curselection())
             status_label.config(text=f"{count} of {len(available_keys)} keys selected")
         
-        # Bind listbox selection event to update function
         key_listbox.bind('<<ListboxSelect>>', update_status)
         
-        # Initialize list to store user's key selections
         selected_keys = []
         
-        # Function to select all keys at once
         def on_select_all():
-            """Select all keys in the listbox"""
             key_listbox.select_set(0, tk.END)
             update_status()
         
-        # Function to clear all selections
         def on_clear_all():
-            """Clear all selections in the listbox"""
             key_listbox.selection_clear(0, tk.END)
             update_status()
         
-        # Function to handle confirm button click
         def on_confirm():
-            """Confirm selection and return selected keys"""
-            # Access outer scope variable
             nonlocal selected_keys
-            # Get indices of selected items
             selected_indices = key_listbox.curselection()
-            # Convert indices to actual key names
             selected_keys = [available_keys[i] for i in selected_indices]
-            # Close popup window
             popup.destroy()
         
-        # Function to handle cancel button click
         def on_cancel():
-            """Cancel selection and return empty list"""
-            # Access outer scope variable
             nonlocal selected_keys
-            # Clear selection list
             selected_keys = []
-            # Close popup window
             popup.destroy()
         
-        # Helper button frame for Select All and Clear All buttons
         helper_button_frame = ttk.Frame(popup)
         helper_button_frame.pack(pady=(5, 5))
         
-        # Create "Select All" button for quick full selection
         ttk.Button(helper_button_frame, text="Select All", 
                   command=on_select_all).pack(side=tk.LEFT, padx=5)
         
-        # Create "Clear All" button for quick deselection
         ttk.Button(helper_button_frame, text="Clear All", 
                   command=on_clear_all).pack(side=tk.LEFT, padx=5)
         
-        # Main action button frame
         button_frame = ttk.Frame(popup)
         button_frame.pack(pady=10)
         
-        # Create confirm button with descriptive label
         ttk.Button(button_frame, text="Confirm Selection", 
                   command=on_confirm).pack(side=tk.LEFT, padx=5)
         
-        # Create cancel button
         ttk.Button(button_frame, text="Cancel", 
                   command=on_cancel).pack(side=tk.LEFT, padx=5)
         
-        # Wait for popup window to be closed before continuing
         popup.wait_window()
         
-        # Return user's key selections (empty list if cancelled or nothing selected)
         return selected_keys
     
     # Method to orchestrate stage 2 processing
@@ -654,7 +582,6 @@ class CSVProcessorGUI:
             else:
                 self.processed_data = self.stage1_data.copy()
             
-            self.config_export_button.config(state='normal')
             self.export_button.config(state='normal')
             self.status_var.set(f"Stage 2 complete. {len(self.processed_data)} rows ready for export.")
             
@@ -672,7 +599,6 @@ class CSVProcessorGUI:
         # Process regular fields
         for field in self.selected_fields:
             if field not in self.dictionary_fields:
-                # Get the value, handling potential None/NA
                 try:
                     field_value = row[field]
                 except (KeyError, TypeError):
@@ -690,7 +616,6 @@ class CSVProcessorGUI:
         # Process dictionary fields with duplicate key support
         for field in self.dictionary_fields:
             if field in self.selected_keys:
-                # Get the dictionary field value
                 try:
                     dict_value = row[field]
                 except (KeyError, TypeError):
@@ -700,17 +625,13 @@ class CSVProcessorGUI:
                 
                 for key in self.selected_keys[field]:
                     if key in parsed_dict:
-                        # parsed_dict[key] is now a list of values (including duplicates)
                         all_key_values = []
                         for val in parsed_dict[key]:
-                            # Handle None values in the list
                             if val is None:
                                 val = ""
-                            # Split each value for multi-values (comma/semicolon separated)
                             split_values = self.split_multi_values(val)
                             all_key_values.extend(split_values)
                         
-                        # Remove duplicates while preserving order
                         unique_values = []
                         for val in all_key_values:
                             if val and val not in unique_values:
@@ -736,240 +657,331 @@ class CSVProcessorGUI:
     
     # Method to apply mappings
     def apply_mappings(self, result_rows):
-        """Apply mapping files to add additional columns, keeping or excluding mapping key column based on source"""
+        """Apply mapping files to add additional columns with original column names"""
         for field, mapping_df in self.mapping_data.items():
-            mapping_info = self.mapping_files.get(field, {})
-            mapping_source = mapping_info.get('source', 'stage1')
-            
-            if len(mapping_df.columns) >= 2:
-                key_col = mapping_df.columns[0]
-                value_col = mapping_df.columns[1]
-                
-                mapping_dict = dict(zip(mapping_df[key_col], mapping_df[value_col]))
-                
-                # If mapping key is from stage 1 output, keep it in final output
-                if mapping_source == "stage1" and field in self.selected_fields:
+            if field in self.selected_fields:
+                if len(mapping_df.columns) >= 2:
+                    key_col = mapping_df.columns[0]
+                    value_col = mapping_df.columns[1]
+                    
+                    mapping_dict = dict(zip(mapping_df[key_col], mapping_df[value_col]))
+                    
                     for row in result_rows:
                         if field in row:
                             mapped_value = mapping_dict.get(row[field], "")
                             row[value_col] = mapped_value
-                
-                # If mapping key is from original file but not in stage 1 output
-                else:
-                    # Need to add mapping values by looking up from original data
-                    for i, row in enumerate(result_rows):
-                        # Get the corresponding original row
-                        if i < len(self.df):
-                            original_value = self.df.iloc[i].get(field, "")
-                            mapped_value = mapping_dict.get(original_value, "")
-                            row[value_col] = mapped_value
-                            # Don't include the mapping key column in output
         
         return result_rows
     
-    # Method to configure export options
-    def configure_export(self):
-        """Show dialog for configuring export options: renaming, sequencing, and default columns"""
-        if not self.processed_data:
-            messagebox.showwarning("Warning", "No processed data available")
-            return
+    # NEW METHOD: Manage default columns - add new and remove existing
+    def manage_default_columns(self, df):
+        """Step A: Add default columns and remove existing columns"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Manage Default Columns")
+        popup.geometry("600x500")
+        popup.transient(self.root)
+        popup.grab_set()
         
-        # Create configuration popup
-        config_popup = tk.Toplevel(self.root)
-        config_popup.title("Configure Export Options")
-        config_popup.geometry("700x600")
-        config_popup.transient(self.root)
-        config_popup.grab_set()
+        # Instructions
+        ttk.Label(popup, text="Step A: Add Default Columns & Remove Existing Columns", 
+                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
         
-        # Create notebook for tabs
-        notebook = ttk.Notebook(config_popup)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        notebook = ttk.Notebook(popup)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Tab 1: Column Renaming
-        rename_frame = ttk.Frame(notebook)
-        notebook.add(rename_frame, text="Rename Columns")
+        # Tab 1: Add Default Columns
+        add_frame = ttk.Frame(notebook)
+        notebook.add(add_frame, text="Add Default Columns")
         
-        ttk.Label(rename_frame, text="Rename columns (leave blank for original name or empty header):", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+        ttk.Label(add_frame, text="Add new columns with default values based on existing columns:", 
+                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Get current columns
-        current_columns = list(self.processed_data[0].keys()) if self.processed_data else []
+        # Frame for column additions
+        add_list_frame = ttk.Frame(add_frame)
+        add_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Create scrollable frame for rename entries
-        rename_canvas = tk.Canvas(rename_frame)
-        rename_scrollbar = ttk.Scrollbar(rename_frame, orient="vertical", command=rename_canvas.yview)
-        rename_scrollable = ttk.Frame(rename_canvas)
+        add_listbox = tk.Listbox(add_list_frame, height=10)
+        add_scrollbar = ttk.Scrollbar(add_list_frame, orient="vertical", command=add_listbox.yview)
+        add_listbox.configure(yscrollcommand=add_scrollbar.set)
+        add_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        add_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        rename_scrollable.bind(
-            "<Configure>",
-            lambda e: rename_canvas.configure(scrollregion=rename_canvas.bbox("all"))
-        )
-        
-        rename_canvas.create_window((0, 0), window=rename_scrollable, anchor="nw")
-        rename_canvas.configure(yscrollcommand=rename_scrollbar.set)
-        
-        rename_entries = {}
-        for i, col in enumerate(current_columns):
-            frame = ttk.Frame(rename_scrollable)
-            frame.pack(fill=tk.X, padx=10, pady=2)
-            
-            ttk.Label(frame, text=f"{col}:", width=30, anchor=tk.W).pack(side=tk.LEFT)
-            entry = ttk.Entry(frame, width=30)
-            entry.insert(0, self.column_rename_map.get(col, col))
-            entry.pack(side=tk.LEFT, padx=5)
-            rename_entries[col] = entry
-        
-        rename_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=10)
-        rename_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10, padx=(0, 10))
-        
-        # Tab 2: Column Sequence
-        sequence_frame = ttk.Frame(notebook)
-        notebook.add(sequence_frame, text="Column Sequence")
-        
-        ttk.Label(sequence_frame, text="Arrange column order (drag to reorder):", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-        
-        # Create listbox for column sequencing
-        seq_list_frame = ttk.Frame(sequence_frame)
-        seq_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        sequence_listbox = tk.Listbox(seq_list_frame, selectmode=tk.SINGLE)
-        seq_scrollbar = ttk.Scrollbar(seq_list_frame, orient="vertical", command=sequence_listbox.yview)
-        sequence_listbox.configure(yscrollcommand=seq_scrollbar.set)
-        
-        sequence_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        seq_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Populate with current sequence or default
-        if self.column_sequence:
-            for col in self.column_sequence:
-                if col in current_columns:
-                    sequence_listbox.insert(tk.END, col)
-        else:
-            for col in current_columns:
-                sequence_listbox.insert(tk.END, col)
-        
-        # Buttons for moving columns
-        seq_button_frame = ttk.Frame(sequence_frame)
-        seq_button_frame.pack(pady=10)
-        
-        def move_up():
-            selection = sequence_listbox.curselection()
-            if selection and selection[0] > 0:
-                idx = selection[0]
-                item = sequence_listbox.get(idx)
-                sequence_listbox.delete(idx)
-                sequence_listbox.insert(idx - 1, item)
-                sequence_listbox.select_set(idx - 1)
-        
-        def move_down():
-            selection = sequence_listbox.curselection()
-            if selection and selection[0] < sequence_listbox.size() - 1:
-                idx = selection[0]
-                item = sequence_listbox.get(idx)
-                sequence_listbox.delete(idx)
-                sequence_listbox.insert(idx + 1, item)
-                sequence_listbox.select_set(idx + 1)
-        
-        ttk.Button(seq_button_frame, text="Move Up ↑", command=move_up).pack(side=tk.LEFT, padx=5)
-        ttk.Button(seq_button_frame, text="Move Down ↓", command=move_down).pack(side=tk.LEFT, padx=5)
-        
-        # Tab 3: Default Columns
-        default_frame = ttk.Frame(notebook)
-        notebook.add(default_frame, text="Default Columns")
-        
-        ttk.Label(default_frame, text="Add default columns with values based on existing columns:", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-        
-        # Create frame for default column entries
-        default_canvas = tk.Canvas(default_frame)
-        default_scrollbar = ttk.Scrollbar(default_frame, orient="vertical", command=default_canvas.yview)
-        default_scrollable = ttk.Frame(default_canvas)
-        
-        default_scrollable.bind(
-            "<Configure>",
-            lambda e: default_canvas.configure(scrollregion=default_canvas.bbox("all"))
-        )
-        
-        default_canvas.create_window((0, 0), window=default_scrollable, anchor="nw")
-        default_canvas.configure(yscrollcommand=default_scrollbar.set)
-        
-        default_entries = []
+        default_columns = []  # Store (new_col_name, source_col, mapping_dict)
         
         def add_default_column():
-            frame = ttk.Frame(default_scrollable)
-            frame.pack(fill=tk.X, padx=10, pady=5)
+            # Dialog to get new column details
+            detail_popup = tk.Toplevel(popup)
+            detail_popup.title("Add Default Column")
+            detail_popup.geometry("500x400")
+            detail_popup.transient(popup)
+            detail_popup.grab_set()
             
-            ttk.Label(frame, text="New Column Name:", width=20).pack(side=tk.LEFT)
-            name_entry = ttk.Entry(frame, width=20)
-            name_entry.pack(side=tk.LEFT, padx=5)
+            ttk.Label(detail_popup, text="New Column Name:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
+            new_col_entry = ttk.Entry(detail_popup, width=30)
+            new_col_entry.grid(row=0, column=1, padx=10, pady=5)
             
-            ttk.Label(frame, text="Based on Column:", width=15).pack(side=tk.LEFT, padx=(10, 0))
-            based_on_combo = ttk.Combobox(frame, values=current_columns, width=20, state='readonly')
-            based_on_combo.pack(side=tk.LEFT, padx=5)
+            ttk.Label(detail_popup, text="Source Column:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
+            source_var = tk.StringVar()
+            source_combo = ttk.Combobox(detail_popup, textvariable=source_var, width=28, state='readonly')
+            source_combo['values'] = list(df.columns)
+            source_combo.grid(row=1, column=1, padx=10, pady=5)
             
-            ttk.Label(frame, text="Value/Formula:", width=15).pack(side=tk.LEFT, padx=(10, 0))
-            value_entry = ttk.Entry(frame, width=25)
-            value_entry.pack(side=tk.LEFT, padx=5)
+            ttk.Label(detail_popup, text="Value Mapping (format: source_value=default_value, one per line):", 
+                     font=('TkDefaultFont', 9)).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
             
-            def remove_entry():
-                frame.destroy()
-                default_entries.remove((name_entry, based_on_combo, value_entry))
+            mapping_text = tk.Text(detail_popup, height=10, width=50)
+            mapping_text.grid(row=3, column=0, columnspan=2, padx=10, pady=5)
             
-            ttk.Button(frame, text="Remove", command=remove_entry).pack(side=tk.LEFT, padx=5)
+            ttk.Label(detail_popup, text="Example:\nValue1=DefaultA\nValue2=DefaultB\n*=DefaultForAll", 
+                     font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10)
             
-            default_entries.append((name_entry, based_on_combo, value_entry))
-        
-        # Load existing default columns
-        for col_name, col_info in self.default_columns.items():
-            add_default_column()
-            default_entries[-1][0].insert(0, col_name)
-            default_entries[-1][1].set(col_info.get('based_on', ''))
-            default_entries[-1][2].insert(0, col_info.get('value', ''))
-        
-        default_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=10)
-        default_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10, padx=(0, 10))
-        
-        ttk.Button(default_frame, text="Add Default Column", command=add_default_column).pack(pady=10)
-        
-        ttk.Label(default_frame, text="Tip: Use {column_value} in formula to reference the based-on column value", 
-                 font=('TkDefaultFont', 8), foreground='gray').pack(pady=5)
-        
-        # Save button
-        def save_configuration():
-            # Save rename map
-            self.column_rename_map = {}
-            for orig_col, entry in rename_entries.items():
-                new_name = entry.get().strip()
-                if new_name != orig_col:  # Only store if different from original
-                    self.column_rename_map[orig_col] = new_name
-            
-            # Save sequence
-            self.column_sequence = []
-            for i in range(sequence_listbox.size()):
-                self.column_sequence.append(sequence_listbox.get(i))
-            
-            # Save default columns
-            self.default_columns = {}
-            for name_entry, based_combo, value_entry in default_entries:
-                col_name = name_entry.get().strip()
-                based_on = based_combo.get()
-                value = value_entry.get().strip()
+            def save_mapping():
+                new_col = new_col_entry.get().strip()
+                source_col = source_var.get().strip()
                 
-                if col_name and based_on:
-                    self.default_columns[col_name] = {
-                        'based_on': based_on,
-                        'value': value
-                    }
+                if not new_col:
+                    messagebox.showwarning("Warning", "Please enter a new column name")
+                    return
+                if not source_col:
+                    messagebox.showwarning("Warning", "Please select a source column")
+                    return
+                
+                # Parse mapping
+                mapping_dict = {}
+                mapping_lines = mapping_text.get("1.0", tk.END).strip().split('\n')
+                for line in mapping_lines:
+                    if '=' in line:
+                        key, val = line.split('=', 1)
+                        mapping_dict[key.strip()] = val.strip()
+                
+                if not mapping_dict:
+                    messagebox.showwarning("Warning", "Please provide at least one value mapping")
+                    return
+                
+                default_columns.append((new_col, source_col, mapping_dict))
+                add_listbox.insert(tk.END, f"{new_col} ← {source_col}")
+                detail_popup.destroy()
             
-            messagebox.showinfo("Success", "Export configuration saved!")
-            config_popup.destroy()
+            ttk.Button(detail_popup, text="Save", command=save_mapping).grid(row=5, column=0, columnspan=2, pady=10)
         
-        button_frame = ttk.Frame(config_popup)
+        def remove_default_column():
+            selection = add_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                add_listbox.delete(idx)
+                default_columns.pop(idx)
+        
+        button_frame1 = ttk.Frame(add_frame)
+        button_frame1.pack(pady=5)
+        ttk.Button(button_frame1, text="Add Column", command=add_default_column).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame1, text="Remove Selected", command=remove_default_column).pack(side=tk.LEFT, padx=5)
+        
+        # Tab 2: Remove Columns
+        remove_frame = ttk.Frame(notebook)
+        notebook.add(remove_frame, text="Remove Columns")
+        
+        ttk.Label(remove_frame, text="Select columns to remove from final output:", 
+                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+        
+        remove_list_frame = ttk.Frame(remove_frame)
+        remove_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        remove_listbox = tk.Listbox(remove_list_frame, selectmode=tk.MULTIPLE, height=15)
+        remove_scrollbar = ttk.Scrollbar(remove_list_frame, orient="vertical", command=remove_listbox.yview)
+        remove_listbox.configure(yscrollcommand=remove_scrollbar.set)
+        remove_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        remove_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for col in df.columns:
+            remove_listbox.insert(tk.END, col)
+        
+        result = {'default_columns': [], 'remove_columns': []}
+        
+        def confirm():
+            result['default_columns'] = default_columns
+            selected_indices = remove_listbox.curselection()
+            result['remove_columns'] = [df.columns[i] for i in selected_indices]
+            popup.destroy()
+        
+        def cancel():
+            popup.destroy()
+        
+        # Bottom buttons
+        bottom_frame = ttk.Frame(popup)
+        bottom_frame.pack(pady=10)
+        ttk.Button(bottom_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result
+    
+    # NEW METHOD: Rename columns including blank headers
+    def rename_columns(self, df):
+        """Step B: Rename columns (including blank/null headers)"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Rename Columns")
+        popup.geometry("600x500")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Step B: Rename Columns", 
+                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
+        
+        ttk.Label(popup, text="Current columns (double-click to rename, leave blank for empty header):", 
+                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+        
+        # Create frame with listbox
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Treeview for better display
+        tree = ttk.Treeview(list_frame, columns=('Original', 'New'), show='headings', height=15)
+        tree.heading('Original', text='Original Name')
+        tree.heading('New', text='New Name (double-click to edit)')
+        tree.column('Original', width=250)
+        tree.column('New', width=250)
+        
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        rename_map = {}
+        for col in df.columns:
+            tree.insert('', tk.END, values=(col, col))
+            rename_map[col] = col
+        
+        def on_double_click(event):
+            item = tree.selection()[0]
+            column = tree.identify_column(event.x)
+            
+            if column == '#2':  # New Name column
+                original_name = tree.item(item)['values'][0]
+                current_new_name = tree.item(item)['values'][1]
+                
+                new_name = simpledialog.askstring("Rename Column", 
+                    f"Enter new name for column '{original_name}':\n(Leave blank for empty header)",
+                    initialvalue=current_new_name)
+                
+                if new_name is not None:  # User didn't cancel
+                    rename_map[original_name] = new_name
+                    tree.item(item, values=(original_name, new_name if new_name else "[Empty]"))
+        
+        tree.bind('<Double-1>', on_double_click)
+        
+        result = {}
+        
+        def confirm():
+            result['rename_map'] = rename_map
+            popup.destroy()
+        
+        def cancel():
+            popup.destroy()
+        
+        # Buttons
+        button_frame = ttk.Frame(popup)
         button_frame.pack(pady=10)
+        ttk.Button(button_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(button_frame, text="Save Configuration", command=save_configuration).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=config_popup.destroy).pack(side=tk.LEFT, padx=5)
+        popup.wait_window()
+        return result
+    
+    # NEW METHOD: Sequence columns
+    def sequence_columns(self, df):
+        """Step C: Set column sequence"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Sequence Columns")
+        popup.geometry("500x550")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Step C: Set Column Sequence", 
+                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
+        
+        ttk.Label(popup, text="Arrange columns in desired order (use buttons to move):", 
+                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+        
+        # Create frame with listbox
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        column_listbox = tk.Listbox(list_frame, height=18)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=column_listbox.yview)
+        column_listbox.configure(yscrollcommand=scrollbar.set)
+        column_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for col in df.columns:
+            column_listbox.insert(tk.END, col)
+        
+        def move_up():
+            selection = column_listbox.curselection()
+            if selection and selection[0] > 0:
+                idx = selection[0]
+                item = column_listbox.get(idx)
+                column_listbox.delete(idx)
+                column_listbox.insert(idx - 1, item)
+                column_listbox.selection_set(idx - 1)
+        
+        def move_down():
+            selection = column_listbox.curselection()
+            if selection and selection[0] < column_listbox.size() - 1:
+                idx = selection[0]
+                item = column_listbox.get(idx)
+                column_listbox.delete(idx)
+                column_listbox.insert(idx + 1, item)
+                column_listbox.selection_set(idx + 1)
+        
+        def move_top():
+            selection = column_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                item = column_listbox.get(idx)
+                column_listbox.delete(idx)
+                column_listbox.insert(0, item)
+                column_listbox.selection_set(0)
+        
+        def move_bottom():
+            selection = column_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                item = column_listbox.get(idx)
+                column_listbox.delete(idx)
+                column_listbox.insert(tk.END, item)
+                column_listbox.selection_set(column_listbox.size() - 1)
+        
+        # Movement buttons
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(pady=5)
+        
+        ttk.Button(button_frame, text="↑ Move Up", command=move_up, width=15).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="↓ Move Down", command=move_down, width=15).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="⇈ Move to Top", command=move_top, width=15).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="⇊ Move to Bottom", command=move_bottom, width=15).pack(side=tk.LEFT, padx=2)
+        
+        result = {}
+        
+        def use_default():
+            result['sequence'] = None  # Use default order
+            popup.destroy()
+        
+        def confirm():
+            result['sequence'] = [column_listbox.get(i) for i in range(column_listbox.size())]
+            popup.destroy()
+        
+        def cancel():
+            popup.destroy()
+        
+        # Confirm buttons
+        confirm_frame = ttk.Frame(popup)
+        confirm_frame.pack(pady=10)
+        ttk.Button(confirm_frame, text="Use Default Order", command=use_default).pack(side=tk.LEFT, padx=5)
+        ttk.Button(confirm_frame, text="Apply Custom Order", command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(confirm_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result
     
     # Method to show completion popup
     def show_completion_popup(self):
@@ -1000,12 +1012,65 @@ class CSVProcessorGUI:
         ttk.Button(button_frame, text="Close Application", 
                   command=close_application).pack(side=tk.LEFT, padx=10)
     
-    # Method to export data
+    # UPDATED METHOD: Export data with column management
     def export_data(self):
         if not self.processed_data:
             messagebox.showwarning("Warning", "No processed data to export")
             return
         
+        # Convert to DataFrame for easier manipulation
+        df_export = pd.DataFrame(self.processed_data)
+        
+        # Step A: Manage default columns (add new, remove existing)
+        step_a_result = self.manage_default_columns(df_export)
+        
+        if not step_a_result:  # User cancelled
+            return
+        
+        # Apply default column additions
+        for new_col, source_col, mapping_dict in step_a_result['default_columns']:
+            if source_col in df_export.columns:
+                def map_value(val):
+                    val_str = str(val) if pd.notna(val) else ""
+                    # Check for exact match
+                    if val_str in mapping_dict:
+                        return mapping_dict[val_str]
+                    # Check for wildcard
+                    elif '*' in mapping_dict:
+                        return mapping_dict['*']
+                    else:
+                        return ""
+                
+                df_export[new_col] = df_export[source_col].apply(map_value)
+        
+        # Remove columns marked for removal
+        if step_a_result['remove_columns']:
+            df_export = df_export.drop(columns=step_a_result['remove_columns'], errors='ignore')
+        
+        # Remove duplicate rows after column removal
+        df_export = df_export.drop_duplicates()
+        
+        # Step B: Rename columns
+        step_b_result = self.rename_columns(df_export)
+        
+        if not step_b_result:  # User cancelled
+            return
+        
+        if 'rename_map' in step_b_result:
+            rename_map = step_b_result['rename_map']
+            df_export = df_export.rename(columns=rename_map)
+        
+        # Step C: Sequence columns
+        step_c_result = self.sequence_columns(df_export)
+        
+        if not step_c_result:  # User cancelled
+            return
+        
+        if 'sequence' in step_c_result and step_c_result['sequence']:
+            # Reorder columns according to user preference
+            df_export = df_export[step_c_result['sequence']]
+        
+        # Now proceed with file export
         file_path = filedialog.asksaveasfilename(
             title="Save Processed Data",
             defaultextension=".csv",
@@ -1014,83 +1079,21 @@ class CSVProcessorGUI:
         
         if file_path:
             try:
-                # Apply transformations
-                export_data = self.apply_export_transformations(self.processed_data)
-                
-                df_export = pd.DataFrame(export_data)
-                
                 if file_path.endswith('.xlsx'):
                     df_export.to_excel(file_path, index=False)
                 else:
                     df_export.to_csv(file_path, index=False)
                 
-                messagebox.showinfo("Success", f"Data exported successfully to {os.path.basename(file_path)}")
+                messagebox.showinfo("Success", 
+                    f"Data exported successfully to {os.path.basename(file_path)}\n"
+                    f"Total rows: {len(df_export)}\n"
+                    f"Total columns: {len(df_export.columns)}")
                 self.status_var.set(f"Data exported to {os.path.basename(file_path)}")
                 
                 self.show_completion_popup()
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to export data: {str(e)}")
-    
-    # Method to apply export transformations
-    def apply_export_transformations(self, data):
-        """Apply renaming, sequencing, and default columns to export data"""
-        transformed_data = []
-        
-        for row in data:
-            new_row = {}
-            
-            # First, add default columns
-            for col_name, col_info in self.default_columns.items():
-                based_on = col_info['based_on']
-                value_template = col_info['value']
-                
-                if based_on in row:
-                    based_value = row[based_on]
-                    # Replace placeholder with actual value
-                    if '{column_value}' in value_template:
-                        new_value = value_template.replace('{column_value}', str(based_value))
-                    else:
-                        new_value = value_template
-                    new_row[col_name] = new_value
-                else:
-                    new_row[col_name] = value_template
-            
-            # Add existing columns with renaming
-            for orig_col, value in row.items():
-                new_col_name = self.column_rename_map.get(orig_col, orig_col)
-                new_row[new_col_name] = value
-            
-            transformed_data.append(new_row)
-        
-        # Apply column sequencing if specified
-        if self.column_sequence:
-            sequenced_data = []
-            for row in transformed_data:
-                sequenced_row = {}
-                
-                # First add columns in specified sequence
-                for col in self.column_sequence:
-                    # Check both original and renamed columns
-                    if col in row:
-                        sequenced_row[col] = row[col]
-                    else:
-                        # Check if this is a renamed column
-                        for orig, renamed in self.column_rename_map.items():
-                            if renamed == col and orig in row:
-                                sequenced_row[col] = row[orig]
-                                break
-                
-                # Then add any remaining columns not in sequence (including default columns)
-                for col, value in row.items():
-                    if col not in sequenced_row:
-                        sequenced_row[col] = value
-                
-                sequenced_data.append(sequenced_row)
-            
-            return sequenced_data
-        
-        return transformed_data
 
 # Main function
 def main():
