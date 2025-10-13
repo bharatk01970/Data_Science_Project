@@ -46,6 +46,8 @@ class CSVProcessorGUI:
         self.stage1_data = None
         # Initialize flag to track if stage 1 processing is complete
         self.stage1_complete = False
+        # Initialize dictionary to store checkbox variables for field selection
+        self.field_checkboxes = {}
         
         # Call the UI setup method to create and arrange all GUI components
         self.setup_ui()
@@ -87,19 +89,23 @@ class CSVProcessorGUI:
         field_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(3, weight=1)
         
-        # Create sub-frame for field listbox with scrollbar
-        field_scroll_frame = ttk.Frame(field_frame)
-        field_scroll_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        field_scroll_frame.columnconfigure(0, weight=1)
-        field_scroll_frame.rowconfigure(0, weight=1)
+        # Create canvas with scrollbar for checkboxes
+        field_canvas = tk.Canvas(field_frame, height=150, highlightthickness=0)
+        field_scrollbar = ttk.Scrollbar(field_frame, orient="vertical", command=field_canvas.yview)
+        self.field_checkbox_frame = ttk.Frame(field_canvas)
         
-        # Create listbox for field selection with multiple selection enabled
-        self.field_listbox = tk.Listbox(field_scroll_frame, selectmode=tk.MULTIPLE, height=6)
-        field_scrollbar = ttk.Scrollbar(field_scroll_frame, orient="vertical", command=self.field_listbox.yview)
-        self.field_listbox.configure(yscrollcommand=field_scrollbar.set)
+        self.field_checkbox_frame.bind(
+            "<Configure>",
+            lambda e: field_canvas.configure(scrollregion=field_canvas.bbox("all"))
+        )
         
-        self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_canvas.create_window((0, 0), window=self.field_checkbox_frame, anchor="nw")
+        field_canvas.configure(yscrollcommand=field_scrollbar.set)
+        
+        field_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        
+        field_frame.rowconfigure(0, weight=1)
         
         # Create section header label for stage 1 processing
         ttk.Label(main_frame, text="3. Stage 1 Processing:", 
@@ -150,6 +156,61 @@ class CSVProcessorGUI:
                               relief=tk.SUNKEN, anchor=tk.W)
         status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
+    # Method to get sample values from a column
+    def get_sample_values(self, column_name, max_samples=2):
+        """Get up to max_samples non-null unique sample values from a column"""
+        try:
+            samples = self.df[column_name].dropna().unique()[:max_samples]
+            # Convert to strings and truncate if too long
+            sample_strs = []
+            for s in samples:
+                s_str = str(s)
+                if len(s_str) > 30:
+                    s_str = s_str[:27] + "..."
+                sample_strs.append(s_str)
+            return sample_strs
+        except:
+            return []
+    
+    # Method to populate field checkboxes with sample values
+    def populate_field_checkboxes(self):
+        """Populate the field selection area with checkboxes and sample values"""
+        # Clear existing checkboxes
+        for widget in self.field_checkbox_frame.winfo_children():
+            widget.destroy()
+        self.field_checkboxes.clear()
+        
+        # Add select all / deselect all buttons
+        button_frame = ttk.Frame(self.field_checkbox_frame)
+        button_frame.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        
+        def select_all():
+            for var in self.field_checkboxes.values():
+                var.set(True)
+        
+        def deselect_all():
+            for var in self.field_checkboxes.values():
+                var.set(False)
+        
+        ttk.Button(button_frame, text="Select All", command=select_all, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Deselect All", command=deselect_all, width=12).pack(side=tk.LEFT, padx=2)
+        
+        # Create checkboxes for each column
+        for idx, col in enumerate(self.df.columns, start=1):
+            var = tk.BooleanVar(value=False)
+            self.field_checkboxes[col] = var
+            
+            # Get sample values
+            samples = self.get_sample_values(col)
+            sample_text = f" (e.g., {', '.join(samples)})" if samples else ""
+            
+            cb = ttk.Checkbutton(
+                self.field_checkbox_frame, 
+                text=f"{col}{sample_text}",
+                variable=var
+            )
+            cb.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=2)
+    
     # Method to detect file encoding automatically
     def detect_encoding(self, file_path):
         """Detect the encoding of a file"""
@@ -182,10 +243,8 @@ class CSVProcessorGUI:
                 self.input_file_path = file_path
                 self.input_file_label.config(text=os.path.basename(file_path))
                 
-                # Clear field listbox
-                self.field_listbox.delete(0, tk.END)
-                for col in self.df.columns:
-                    self.field_listbox.insert(tk.END, col)
+                # Populate checkboxes with sample values
+                self.populate_field_checkboxes()
                 
                 self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
                 
@@ -201,20 +260,50 @@ class CSVProcessorGUI:
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
                 self.status_var.set("Error loading file")
     
+    # Method to show selected columns popup
+    def show_selected_columns_popup(self, columns):
+        """Show popup displaying selected columns after Stage 1"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Stage 1 - Selected Columns")
+        popup.geometry("500x400")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Stage 1 Processing Complete!", 
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+        
+        ttk.Label(popup, text=f"Total columns in output: {len(columns)}", 
+                 font=('TkDefaultFont', 10)).pack(pady=5)
+        
+        # Create frame with listbox
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        listbox = tk.Listbox(list_frame)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for col in sorted(columns):
+            listbox.insert(tk.END, col)
+        
+        ttk.Button(popup, text="OK", command=popup.destroy).pack(pady=10)
+        
+        popup.wait_window()
+    
     # Method to perform stage 1 processing - dictionary expansion
     def process_stage1(self):
         if self.df is None:
             messagebox.showwarning("Warning", "Please load an input file first")
             return
         
-        # Get user's field selections from the listbox
-        selected_indices = self.field_listbox.curselection()
-        if not selected_indices:
+        # Get selected fields from checkboxes
+        self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
+        
+        if not self.selected_fields:
             messagebox.showwarning("Warning", "Please select at least one field")
             return
-        
-        # Convert selection indices to field names
-        self.selected_fields = [self.field_listbox.get(i) for i in selected_indices]
         
         try:
             # Detect dictionary fields only in selected fields
@@ -250,6 +339,9 @@ class CSVProcessorGUI:
                 
                 # Update the selected_fields to match stage 1 output columns
                 self.selected_fields = list(stage1_columns)
+                
+                # Show popup with selected columns
+                self.show_selected_columns_popup(stage1_columns)
             
             # Mark stage 1 as complete
             self.stage1_complete = True
@@ -484,9 +576,9 @@ class CSVProcessorGUI:
         
         return dict_fields
     
-    # Method to show key selection popup
+    # Method to show key selection popup with checkboxes
     def show_key_selection_popup(self, field, available_keys):
-        """Show popup for key selection in dictionary fields with manual selection (nothing pre-selected)"""
+        """Show popup for key selection in dictionary fields with checkboxes"""
         popup = tk.Toplevel(self.root)
         popup.title(f"Select Keys for Field: {field}")
         popup.geometry("450x350")
@@ -499,46 +591,61 @@ class CSVProcessorGUI:
         ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
                  font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
         
-        ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
+        ttk.Label(header_frame, text="Tip: Check the boxes for keys you want to include.", 
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
         
+        # Create scrollable frame for checkboxes
         key_frame = ttk.Frame(popup)
         key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
-        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
-        key_listbox.configure(yscrollcommand=key_scrollbar.set)
+        canvas = tk.Canvas(key_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
         
-        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
         
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create checkboxes for each key
+        key_vars = {}
         for key in available_keys:
-            key_listbox.insert(tk.END, key)
+            var = tk.BooleanVar(value=False)
+            key_vars[key] = var
+            cb = ttk.Checkbutton(scrollable_frame, text=key, variable=var)
+            cb.pack(anchor=tk.W, padx=5, pady=2)
         
         status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
                                 foreground='blue')
         status_label.pack(pady=(0, 5))
         
-        def update_status(event=None):
-            count = len(key_listbox.curselection())
+        def update_status():
+            count = sum(1 for var in key_vars.values() if var.get())
             status_label.config(text=f"{count} of {len(available_keys)} keys selected")
         
-        key_listbox.bind('<<ListboxSelect>>', update_status)
+        # Update status when checkboxes change
+        for var in key_vars.values():
+            var.trace('w', lambda *args: update_status())
         
         selected_keys = []
         
         def on_select_all():
-            key_listbox.select_set(0, tk.END)
-            update_status()
+            for var in key_vars.values():
+                var.set(True)
         
         def on_clear_all():
-            key_listbox.selection_clear(0, tk.END)
-            update_status()
+            for var in key_vars.values():
+                var.set(False)
         
         def on_confirm():
             nonlocal selected_keys
-            selected_indices = key_listbox.curselection()
-            selected_keys = [available_keys[i] for i in selected_indices]
+            selected_keys = [key for key, var in key_vars.items() if var.get()]
             popup.destroy()
         
         def on_cancel():
@@ -673,9 +780,9 @@ class CSVProcessorGUI:
         
         return result_rows
     
-    # NEW METHOD: Manage default columns - add new and remove existing
+    # NEW METHOD: Manage default columns - add new and remove existing (with checkboxes)
     def manage_default_columns(self, df):
-        """Step A: Add default columns and remove existing columns"""
+        """Step A: Add default columns and remove existing columns using checkboxes"""
         popup = tk.Toplevel(self.root)
         popup.title("Manage Default Columns")
         popup.geometry("600x500")
@@ -776,31 +883,59 @@ class CSVProcessorGUI:
         ttk.Button(button_frame1, text="Add Column", command=add_default_column).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame1, text="Remove Selected", command=remove_default_column).pack(side=tk.LEFT, padx=5)
         
-        # Tab 2: Remove Columns
+        # Tab 2: Remove Columns (with checkboxes)
         remove_frame = ttk.Frame(notebook)
         notebook.add(remove_frame, text="Remove Columns")
         
-        ttk.Label(remove_frame, text="Select columns to remove from final output:", 
+        ttk.Label(remove_frame, text="Check columns to remove from final output:", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        remove_list_frame = ttk.Frame(remove_frame)
-        remove_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create scrollable frame for checkboxes
+        remove_canvas_frame = ttk.Frame(remove_frame)
+        remove_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        remove_listbox = tk.Listbox(remove_list_frame, selectmode=tk.MULTIPLE, height=15)
-        remove_scrollbar = ttk.Scrollbar(remove_list_frame, orient="vertical", command=remove_listbox.yview)
-        remove_listbox.configure(yscrollcommand=remove_scrollbar.set)
-        remove_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        remove_canvas = tk.Canvas(remove_canvas_frame, highlightthickness=0)
+        remove_scrollbar = ttk.Scrollbar(remove_canvas_frame, orient="vertical", command=remove_canvas.yview)
+        remove_scrollable = ttk.Frame(remove_canvas)
+        
+        remove_scrollable.bind(
+            "<Configure>",
+            lambda e: remove_canvas.configure(scrollregion=remove_canvas.bbox("all"))
+        )
+        
+        remove_canvas.create_window((0, 0), window=remove_scrollable, anchor="nw")
+        remove_canvas.configure(yscrollcommand=remove_scrollbar.set)
+        
+        remove_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         remove_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # Create checkboxes for columns to remove
+        remove_vars = {}
+        
+        def select_all_remove():
+            for var in remove_vars.values():
+                var.set(True)
+        
+        def deselect_all_remove():
+            for var in remove_vars.values():
+                var.set(False)
+        
+        button_frame_remove = ttk.Frame(remove_scrollable)
+        button_frame_remove.pack(anchor=tk.W, padx=5, pady=5)
+        ttk.Button(button_frame_remove, text="Select All", command=select_all_remove, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame_remove, text="Deselect All", command=deselect_all_remove, width=12).pack(side=tk.LEFT, padx=2)
+        
         for col in df.columns:
-            remove_listbox.insert(tk.END, col)
+            var = tk.BooleanVar(value=False)
+            remove_vars[col] = var
+            cb = ttk.Checkbutton(remove_scrollable, text=col, variable=var)
+            cb.pack(anchor=tk.W, padx=5, pady=2)
         
         result = {'default_columns': [], 'remove_columns': []}
         
         def confirm():
             result['default_columns'] = default_columns
-            selected_indices = remove_listbox.curselection()
-            result['remove_columns'] = [df.columns[i] for i in selected_indices]
+            result['remove_columns'] = [col for col, var in remove_vars.items() if var.get()]
             popup.destroy()
         
         def cancel():
