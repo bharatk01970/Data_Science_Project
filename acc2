@@ -30,223 +30,7 @@ class CSVProcessorGUI:
         self.input_file_path = ""
         # Initialize empty dictionary to store mapping between field names and their mapping file paths
         self.mapping_files = {}
-        # Initialize     # NEW METHOD: Insert missing rows for key values
-    def insert_missing_key_rows(self, df):
-        """Step D: Insert rows for missing key values"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Insert Missing Key Rows")
-        popup.geometry("700x600")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Step D: Insert Missing Key Rows", 
-                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
-        
-        ttk.Label(popup, text="Select a key column and provide all expected values to ensure complete data.", 
-                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-        
-        # Main content frame
-        content_frame = ttk.Frame(popup)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Key column selection
-        key_frame = ttk.LabelFrame(content_frame, text="1. Select Key Column", padding=10)
-        key_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(key_frame, text="Choose the column that acts as unique identifier:").pack(anchor=tk.W, pady=(0, 5))
-        
-        key_var = tk.StringVar()
-        key_combo = ttk.Combobox(key_frame, textvariable=key_var, width=40, state='readonly')
-        key_combo['values'] = list(df.columns)
-        key_combo.pack(fill=tk.X, pady=5)
-        
-        # Show current unique values
-        current_values_label = ttk.Label(key_frame, text="", foreground='blue', wraplength=600)
-        current_values_label.pack(anchor=tk.W, pady=(5, 0))
-        
-        def on_key_select(event):
-            selected_key = key_var.get()
-            if selected_key:
-                unique_vals = df[selected_key].dropna().unique()
-                current_values_label.config(
-                    text=f"Current unique values ({len(unique_vals)}): {', '.join(map(str, sorted(unique_vals)[:10]))}"
-                         f"{' ...' if len(unique_vals) > 10 else ''}")
-        
-        key_combo.bind('<<ComboboxSelected>>', on_key_select)
-        
-        # Input method selection
-        method_frame = ttk.LabelFrame(content_frame, text="2. Provide Expected Key Values", padding=10)
-        method_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        method_var = tk.StringVar(value="manual")
-        
-        ttk.Radiobutton(method_frame, text="Manual Entry (comma or line-separated)", 
-                       variable=method_var, value="manual").pack(anchor=tk.W, pady=5)
-        
-        # Manual entry text area
-        manual_frame = ttk.Frame(method_frame)
-        manual_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
-        
-        ttk.Label(manual_frame, text="Enter expected values (one per line or comma-separated):", 
-                 font=('TkDefaultFont', 8)).pack(anchor=tk.W)
-        
-        text_frame = ttk.Frame(manual_frame)
-        text_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        values_text = tk.Text(text_frame, height=10, width=60)
-        text_scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=values_text.yview)
-        values_text.configure(yscrollcommand=text_scrollbar.set)
-        values_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        ttk.Label(manual_frame, text="Example: ID001, ID002, ID003 or one per line", 
-                 font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
-        
-        ttk.Radiobutton(method_frame, text="Load from File (CSV/TXT with one column)", 
-                       variable=method_var, value="file").pack(anchor=tk.W, pady=(10, 5))
-        
-        # File selection
-        file_frame = ttk.Frame(method_frame)
-        file_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        file_path_var = tk.StringVar(value="No file selected")
-        ttk.Label(file_frame, textvariable=file_path_var, foreground='gray').pack(side=tk.LEFT, padx=(0, 10))
-        
-        def browse_file():
-            file_path = filedialog.askopenfilename(
-                title="Select Key Values File",
-                filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-            )
-            if file_path:
-                file_path_var.set(os.path.basename(file_path))
-                file_frame.file_path = file_path
-        
-        ttk.Button(file_frame, text="Browse...", command=browse_file).pack(side=tk.LEFT)
-        file_frame.file_path =         # Tab 2: Remove Columns
-        remove_frame = ttk.Frame(notebook)
-        notebook.add(remove_frame, text="Remove Columns")
-        
-        ttk.Label(remove_frame, text="Check columns to remove from final output:", 
-                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-        
-        # Create canvas with scrollbar for checkboxes
-        remove_canvas_frame = ttk.Frame(remove_frame)
-        remove_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        remove_canvas = tk.Canvas(remove_canvas_frame, highlightthickness=0)
-        remove_scrollbar = ttk.Scrollbar(remove_canvas_frame, orient="vertical", command=remove_canvas.yview)
-        remove_scrollable_frame = ttk.Frame(remove_canvas)
-        
-        remove_scrollable_frame.bind(
-            "<Configure>",
-            lambda e: remove_canvas.configure(scrollregion=remove_canvas.bbox("all"))
-        )
-        
-        remove_canvas.create_window((0, 0), window=remove_scrollable_frame, anchor="nw")
-        remove_canvas.configure(yscrollcommand=remove_scrollbar.set)
-        
-        # Store checkbox variables for removal
-        remove_checkboxes = {}
-        
-        # Create checkbox for each column
-        for col in df.columns:
-            var = tk.BooleanVar(value=False)
-            cb_frame = ttk.Frame(remove_scrollable_frame)
-            cb_frame.pack(fill=tk.X, padx=5, pady=2)
-            
-            checkbox =
-        
-        # Options frame
-        options_frame = ttk.LabelFrame(content_frame, text="3. Options", padding=10)
-        options_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        fill_empty_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Fill other columns with empty/blank values for new rows", 
-                       variable=fill_empty_var).pack(anchor=tk.W)
-        
-        skip_existing_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Skip if key value already exists in data", 
-                       variable=skip_existing_var).pack(anchor=tk.W)
-        
-        result = {}
-        
-        def confirm():
-            key_column = key_var.get()
-            if not key_column:
-                messagebox.showwarning("Warning", "Please select a key column")
-                return
-            
-            expected_values = []
-            
-            # Get values based on method
-            if method_var.get() == "manual":
-                content = values_text.get("1.0", tk.END).strip()
-                if not content:
-                    messagebox.showwarning("Warning", "Please enter expected key values")
-                    return
-                
-                # Parse comma-separated or line-separated
-                if ',' in content:
-                    expected_values = [v.strip() for v in content.split(',') if v.strip()]
-                else:
-                    expected_values = [v.strip() for v in content.split('\n') if v.strip()]
-            
-            elif method_var.get() == "file":
-                if not file_frame.file_path:
-                    messagebox.showwarning("Warning", "Please select a file")
-                    return
-                
-                try:
-                    # Try to detect encoding
-                    encoding = self.detect_encoding(file_frame.file_path)
-                    
-                    if file_frame.file_path.endswith('.csv'):
-                        temp_df = pd.read_csv(file_frame.file_path, encoding=encoding)
-                    else:
-                        temp_df = pd.read_csv(file_frame.file_path, delimiter='\t', encoding=encoding, header=None)
-                    
-                    # Get first column values
-                    expected_values = temp_df.iloc[:, 0].dropna().astype(str).tolist()
-                    
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to load file: {str(e)}")
-                    return
-            
-            if not expected_values:
-                messagebox.showwarning("Warning", "No key values provided")
-                return
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_expected = []
-            for val in expected_values:
-                if val not in seen:
-                    seen.add(val)
-                    unique_expected.append(val)
-            
-            result['key_column'] = key_column
-            result['expected_values'] = unique_expected
-            result['fill_empty'] = fill_empty_var.get()
-            result['skip_existing'] = skip_existing_var.get()
-            popup.destroy()
-        
-        def skip():
-            """Skip this step"""
-            result['skip'] = True
-            popup.destroy()
-        
-        def cancel():
-            popup.destroy()
-        
-        # Buttons
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
-        ttk.Button(button_frame, text="Skip This Step", command=skip).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Apply", command=confirm, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-        return result to store the loaded pandas DataFrame containing the input data
+        # Initialize None to store the loaded pandas DataFrame containing the input data
         self.df = None
         # Initialize empty list to store field names selected by the user for processing
         self.selected_fields = []
@@ -292,31 +76,53 @@ class CSVProcessorGUI:
         self.input_file_label = ttk.Label(main_frame, text="No file selected")
         self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
         
-        # Initialize column checkboxes storage
-        self.column_checkboxes = {}
-        
-        # Create section header label for stage 1 processing
-        ttk.Label(main_frame, text="2. Stage 1 Processing:", 
+        # Create section header label for field selection
+        ttk.Label(main_frame, text="2. Select Fields for Processing:", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
             row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        
+        # Create container frame for field selection controls
+        field_frame = ttk.Frame(main_frame)
+        field_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        field_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+        
+        # Create sub-frame for field listbox with scrollbar
+        field_scroll_frame = ttk.Frame(field_frame)
+        field_scroll_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_scroll_frame.columnconfigure(0, weight=1)
+        field_scroll_frame.rowconfigure(0, weight=1)
+        
+        # Create listbox for field selection with multiple selection enabled
+        self.field_listbox = tk.Listbox(field_scroll_frame, selectmode=tk.MULTIPLE, height=6)
+        field_scrollbar = ttk.Scrollbar(field_scroll_frame, orient="vertical", command=self.field_listbox.yview)
+        self.field_listbox.configure(yscrollcommand=field_scrollbar.set)
+        
+        self.field_listbox.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        
+        # Create section header label for stage 1 processing
+        ttk.Label(main_frame, text="3. Stage 1 Processing:", 
+                 font=('TkDefaultFont', 10, 'bold')).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
         # Create button for stage 1 processing
         self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", 
                   command=self.process_stage1, state='disabled')
-        self.stage1_button.grid(row=3, column=0, sticky=tk.W, pady=(0, 10))
+        self.stage1_button.grid(row=5, column=0, sticky=tk.W, pady=(0, 10))
         
         # Create label to show stage 1 status
         self.stage1_status_label = ttk.Label(main_frame, text="")
-        self.stage1_status_label.grid(row=3, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+        self.stage1_status_label.grid(row=5, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
         
         # Create section header label for mapping files functionality
-        ttk.Label(main_frame, text="3. Load Mapping Files (Optional):", 
+        ttk.Label(main_frame, text="4. Load Mapping Files (Optional):", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
         # Create sub-frame container for mapping files controls
         mapping_frame = ttk.Frame(main_frame)
-        mapping_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        mapping_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Create button to add mapping files
         self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", 
@@ -331,18 +137,18 @@ class CSVProcessorGUI:
         # Create stage 2 process button with accent styling
         self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output with Mapping)", 
                   command=self.process_stage2, style='Accent.TButton', state='disabled')
-        self.stage2_button.grid(row=6, column=0, columnspan=2, pady=10)
+        self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
         
         # Create export button initially disabled until data is processed
         self.export_button = ttk.Button(main_frame, text="Export Results", 
                                        command=self.export_data, state='disabled')
-        self.export_button.grid(row=7, column=0, columnspan=2, pady=5)
+        self.export_button.grid(row=9, column=0, columnspan=2, pady=5)
         
         # Create StringVar to hold status messages for dynamic updates
         self.status_var = tk.StringVar(value="Ready to load file...")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                               relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
     # Method to detect file encoding automatically
     def detect_encoding(self, file_path):
@@ -376,12 +182,14 @@ class CSVProcessorGUI:
                 self.input_file_path = file_path
                 self.input_file_label.config(text=os.path.basename(file_path))
                 
-                # Show column selection popup with sample values
-                self.show_column_selection_popup()
+                # Clear field listbox
+                self.field_listbox.delete(0, tk.END)
+                for col in self.df.columns:
+                    self.field_listbox.insert(tk.END, col)
                 
                 self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
                 
-                # Enable stage 1 button
+                # Enable field selection and stage 1 button
                 self.stage1_button.config(state='normal')
                 self.stage1_complete = False
                 self.stage1_status_label.config(text="")
@@ -393,157 +201,20 @@ class CSVProcessorGUI:
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
                 self.status_var.set("Error loading file")
     
-    # NEW METHOD: Show column selection popup with checkboxes and sample values
-    def show_column_selection_popup(self):
-        """Show popup for column selection with checkboxes and sample values"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Select Columns for Processing")
-        popup.geometry("800x600")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Select Columns for Processing", 
-                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
-        
-        ttk.Label(popup, text="Check the columns you want to include in processing. Sample values are shown for reference.", 
-                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-        
-        # Create canvas with scrollbar for checkboxes
-        canvas_frame = ttk.Frame(popup)
-        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        canvas = tk.Canvas(canvas_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        # Header
-        header_frame = ttk.Frame(scrollable_frame, relief=tk.RIDGE, borderwidth=2)
-        header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2, pady=2)
-        
-        ttk.Label(header_frame, text="Select", font=('TkDefaultFont', 9, 'bold'), 
-                 width=8, anchor=tk.CENTER, background='#e0e0e0').grid(row=0, column=0, padx=5, pady=5)
-        ttk.Label(header_frame, text="Column Name", font=('TkDefaultFont', 9, 'bold'), 
-                 width=30, anchor=tk.W, background='#e0e0e0').grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
-        ttk.Label(header_frame, text="Sample Values", font=('TkDefaultFont', 9, 'bold'), 
-                 width=50, anchor=tk.W, background='#e0e0e0').grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
-        
-        # Store checkbox variables
-        self.column_checkboxes = {}
-        
-        # Create rows for each column
-        for idx, col in enumerate(self.df.columns, start=1):
-            row_frame = ttk.Frame(scrollable_frame)
-            row_frame.grid(row=idx, column=0, sticky=(tk.W, tk.E), padx=2, pady=2)
-            
-            # Checkbox
-            var = tk.BooleanVar(value=False)
-            checkbox = ttk.Checkbutton(row_frame, variable=var)
-            checkbox.grid(row=0, column=0, padx=20, pady=5)
-            self.column_checkboxes[col] = var
-            
-            # Column name
-            col_label = ttk.Label(row_frame, text=col, width=30, anchor=tk.W)
-            col_label.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
-            
-            # Sample values (up to 2 non-null values)
-            sample_values = self.df[col].dropna().head(2).tolist()
-            sample_text = ", ".join([str(v)[:50] for v in sample_values])  # Limit each value to 50 chars
-            if len(sample_text) > 100:
-                sample_text = sample_text[:100] + "..."
-            
-            sample_label = ttk.Label(row_frame, text=sample_text, width=50, anchor=tk.W, 
-                                    foreground='gray', font=('TkDefaultFont', 8))
-            sample_label.grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
-            
-            row_frame.columnconfigure(1, weight=1)
-            row_frame.columnconfigure(2, weight=2)
-        
-        scrollable_frame.columnconfigure(0, weight=1)
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Enable mouse wheel scrolling
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
-        # Selection info
-        info_frame = ttk.Frame(popup)
-        info_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        selection_count_label = ttk.Label(info_frame, text="0 columns selected", 
-                                         font=('TkDefaultFont', 9), foreground='blue')
-        selection_count_label.pack(side=tk.LEFT)
-        
-        def update_count():
-            count = sum(1 for var in self.column_checkboxes.values() if var.get())
-            selection_count_label.config(text=f"{count} column(s) selected")
-        
-        # Update count when any checkbox changes
-        for var in self.column_checkboxes.values():
-            var.trace('w', lambda *args: update_count())
-        
-        def select_all():
-            for var in self.column_checkboxes.values():
-                var.set(True)
-        
-        def clear_all():
-            for var in self.column_checkboxes.values():
-                var.set(False)
-        
-        def confirm():
-            selected = [col for col, var in self.column_checkboxes.items() if var.get()]
-            if not selected:
-                messagebox.showwarning("Warning", "Please select at least one column")
-                return
-            canvas.unbind_all("<MouseWheel>")
-            popup.destroy()
-        
-        def cancel():
-            # Clear all selections
-            for var in self.column_checkboxes.values():
-                var.set(False)
-            canvas.unbind_all("<MouseWheel>")
-            popup.destroy()
-        
-        # Buttons
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
-        
-        ttk.Button(button_frame, text="Select All", command=select_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Clear All", command=clear_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Confirm Selection", command=confirm, 
-                  style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-    
     # Method to perform stage 1 processing - dictionary expansion
     def process_stage1(self):
         if self.df is None:
             messagebox.showwarning("Warning", "Please load an input file first")
             return
         
-        # Get user's field selections from checkboxes
-        if not self.column_checkboxes:
-            messagebox.showwarning("Warning", "Please load a file first")
-            return
-        
-        self.selected_fields = [col for col, var in self.column_checkboxes.items() if var.get()]
-        
-        if not self.selected_fields:
+        # Get user's field selections from the listbox
+        selected_indices = self.field_listbox.curselection()
+        if not selected_indices:
             messagebox.showwarning("Warning", "Please select at least one field")
             return
+        
+        # Convert selection indices to field names
+        self.selected_fields = [self.field_listbox.get(i) for i in selected_indices]
         
         try:
             # Detect dictionary fields only in selected fields
@@ -584,9 +255,6 @@ class CSVProcessorGUI:
             self.stage1_complete = True
             self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
             
-            # Show Stage 1 completion popup with selected columns
-            self.show_stage1_completion_popup()
-            
             # Enable mapping file addition and stage 2 processing
             self.add_mapping_button.config(state='normal')
             self.stage2_button.config(state='normal')
@@ -596,62 +264,6 @@ class CSVProcessorGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
             self.status_var.set("Stage 1 processing failed")
-    
-    # NEW METHOD: Show Stage 1 completion popup
-    def show_stage1_completion_popup(self):
-        """Show popup with Stage 1 results and selected columns"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Stage 1 Processing Complete")
-        popup.geometry("600x450")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        # Header
-        header_frame = ttk.Frame(popup, relief=tk.RIDGE, borderwidth=2)
-        header_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(header_frame, text="✓ Stage 1 Processing Complete", 
-                 font=('TkDefaultFont', 12, 'bold'), foreground='green').pack(pady=10)
-        
-        # Summary frame
-        summary_frame = ttk.LabelFrame(popup, text="Processing Summary", padding=10)
-        summary_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        
-        ttk.Label(summary_frame, text=f"Total rows generated: {len(self.stage1_data)}", 
-                 font=('TkDefaultFont', 10)).pack(anchor=tk.W, pady=2)
-        ttk.Label(summary_frame, text=f"Total columns: {len(self.selected_fields)}", 
-                 font=('TkDefaultFont', 10)).pack(anchor=tk.W, pady=2)
-        
-        # Selected columns frame
-        columns_frame = ttk.LabelFrame(popup, text="Selected Columns After Stage 1", padding=10)
-        columns_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-        
-        ttk.Label(columns_frame, text="The following columns are available for Stage 2:", 
-                 font=('TkDefaultFont', 9)).pack(anchor=tk.W, pady=(0, 5))
-        
-        # Listbox with scrollbar
-        list_frame = ttk.Frame(columns_frame)
-        list_frame.pack(fill=tk.BOTH, expand=True)
-        
-        listbox = tk.Listbox(list_frame, height=12)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
-        listbox.configure(yscrollcommand=scrollbar.set)
-        
-        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Populate listbox with column names
-        for idx, col in enumerate(sorted(self.selected_fields), start=1):
-            listbox.insert(tk.END, f"{idx}. {col}")
-        
-        # Button
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
-        
-        ttk.Button(button_frame, text="Continue", command=popup.destroy, 
-                  style='Accent.TButton', width=15).pack()
-        
-        popup.wait_window()
     
     # Method to process dataframe for stage 1
     def process_stage1_dataframe(self):
@@ -874,10 +486,10 @@ class CSVProcessorGUI:
     
     # Method to show key selection popup
     def show_key_selection_popup(self, field, available_keys):
-        """Show popup for key selection in dictionary fields with checkboxes"""
+        """Show popup for key selection in dictionary fields with manual selection (nothing pre-selected)"""
         popup = tk.Toplevel(self.root)
         popup.title(f"Select Keys for Field: {field}")
-        popup.geometry("550x450")
+        popup.geometry("450x350")
         popup.transient(self.root)
         popup.grab_set()
         
@@ -887,80 +499,51 @@ class CSVProcessorGUI:
         ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
                  font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
         
-        ttk.Label(header_frame, text="Tip: Check the boxes for keys you want to extract.", 
+        ttk.Label(header_frame, text="Tip: Click on keys to select them. Hold Ctrl/Cmd to select multiple.", 
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
         
-        # Create canvas with scrollbar for checkboxes
-        canvas_frame = ttk.Frame(popup)
-        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        key_frame = ttk.Frame(popup)
+        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        canvas = tk.Canvas(canvas_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        key_listbox = tk.Listbox(key_frame, selectmode=tk.MULTIPLE)
+        key_scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=key_listbox.yview)
+        key_listbox.configure(yscrollcommand=key_scrollbar.set)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
+        key_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        for key in available_keys:
+            key_listbox.insert(tk.END, key)
         
-        # Store checkbox variables
-        key_checkboxes = {}
-        
-        # Create checkbox for each key
-        for idx, key in enumerate(available_keys):
-            var = tk.BooleanVar(value=False)
-            cb_frame = ttk.Frame(scrollable_frame)
-            cb_frame.pack(fill=tk.X, padx=5, pady=2)
-            
-            checkbox = ttk.Checkbutton(cb_frame, text=key, variable=var)
-            checkbox.pack(anchor=tk.W)
-            key_checkboxes[key] = var
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Enable mouse wheel scrolling
-        def on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        canvas.bind_all("<MouseWheel>", on_mousewheel)
-        
-        # Status label
         status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
                                 foreground='blue')
         status_label.pack(pady=(0, 5))
         
-        def update_status():
-            count = sum(1 for var in key_checkboxes.values() if var.get())
+        def update_status(event=None):
+            count = len(key_listbox.curselection())
             status_label.config(text=f"{count} of {len(available_keys)} keys selected")
         
-        # Update count when any checkbox changes
-        for var in key_checkboxes.values():
-            var.trace('w', lambda *args: update_status())
+        key_listbox.bind('<<ListboxSelect>>', update_status)
         
         selected_keys = []
         
         def on_select_all():
-            for var in key_checkboxes.values():
-                var.set(True)
+            key_listbox.select_set(0, tk.END)
+            update_status()
         
         def on_clear_all():
-            for var in key_checkboxes.values():
-                var.set(False)
+            key_listbox.selection_clear(0, tk.END)
+            update_status()
         
         def on_confirm():
             nonlocal selected_keys
-            selected_keys = [key for key, var in key_checkboxes.items() if var.get()]
-            canvas.unbind_all("<MouseWheel>")
+            selected_indices = key_listbox.curselection()
+            selected_keys = [available_keys[i] for i in selected_indices]
             popup.destroy()
         
         def on_cancel():
             nonlocal selected_keys
             selected_keys = []
-            canvas.unbind_all("<MouseWheel>")
             popup.destroy()
         
         helper_button_frame = ttk.Frame(popup)
@@ -1197,84 +780,30 @@ class CSVProcessorGUI:
         remove_frame = ttk.Frame(notebook)
         notebook.add(remove_frame, text="Remove Columns")
         
-        ttk.Label(remove_frame, text="Check columns to remove from final output:", 
+        ttk.Label(remove_frame, text="Select columns to remove from final output:", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Create canvas with scrollbar for checkboxes
-        remove_canvas_frame = ttk.Frame(remove_frame)
-        remove_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        remove_list_frame = ttk.Frame(remove_frame)
+        remove_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        remove_canvas = tk.Canvas(remove_canvas_frame, highlightthickness=0)
-        remove_scrollbar = ttk.Scrollbar(remove_canvas_frame, orient="vertical", command=remove_canvas.yview)
-        remove_scrollable_frame = ttk.Frame(remove_canvas)
-        
-        remove_scrollable_frame.bind(
-            "<Configure>",
-            lambda e: remove_canvas.configure(scrollregion=remove_canvas.bbox("all"))
-        )
-        
-        remove_canvas.create_window((0, 0), window=remove_scrollable_frame, anchor="nw")
-        remove_canvas.configure(yscrollcommand=remove_scrollbar.set)
-        
-        # Store checkbox variables for removal
-        remove_checkboxes = {}
-        
-        # Create checkbox for each column
-        for col in df.columns:
-            var = tk.BooleanVar(value=False)
-            cb_frame = ttk.Frame(remove_scrollable_frame)
-            cb_frame.pack(fill=tk.X, padx=5, pady=2)
-            
-            checkbox = ttk.Checkbutton(cb_frame, text=col, variable=var)
-            checkbox.pack(anchor=tk.W)
-            remove_checkboxes[col] = var
-        
-        remove_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        remove_listbox = tk.Listbox(remove_list_frame, selectmode=tk.MULTIPLE, height=15)
+        remove_scrollbar = ttk.Scrollbar(remove_list_frame, orient="vertical", command=remove_listbox.yview)
+        remove_listbox.configure(yscrollcommand=remove_scrollbar.set)
+        remove_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         remove_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Enable mouse wheel scrolling for remove tab
-        def on_remove_mousewheel(event):
-            remove_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        remove_canvas.bind_all("<MouseWheel>", on_remove_mousewheel)
-        
-        # Selection count for remove tab
-        remove_count_label = ttk.Label(remove_frame, text="0 columns marked for removal", 
-                                      font=('TkDefaultFont', 9), foreground='red')
-        remove_count_label.pack(pady=5)
-        
-        def update_remove_count():
-            count = sum(1 for var in remove_checkboxes.values() if var.get())
-            remove_count_label.config(text=f"{count} column(s) marked for removal")
-        
-        # Update count when any checkbox changes
-        for var in remove_checkboxes.values():
-            var.trace('w', lambda *args: update_remove_count())
-        
-        def select_all_remove():
-            for var in remove_checkboxes.values():
-                var.set(True)
-        
-        def clear_all_remove():
-            for var in remove_checkboxes.values():
-                var.set(False)
-        
-        # Helper buttons for remove tab
-        remove_button_frame = ttk.Frame(remove_frame)
-        remove_button_frame.pack(pady=5)
-        ttk.Button(remove_button_frame, text="Select All", command=select_all_remove).pack(side=tk.LEFT, padx=5)
-        ttk.Button(remove_button_frame, text="Clear All", command=clear_all_remove).pack(side=tk.LEFT, padx=5)
+        for col in df.columns:
+            remove_listbox.insert(tk.END, col)
         
         result = {'default_columns': [], 'remove_columns': []}
         
         def confirm():
             result['default_columns'] = default_columns
-            result['remove_columns'] = [col for col, var in remove_checkboxes.items() if var.get()]
-            remove_canvas.unbind_all("<MouseWheel>")
+            selected_indices = remove_listbox.curselection()
+            result['remove_columns'] = [df.columns[i] for i in selected_indices]
             popup.destroy()
         
         def cancel():
-            remove_canvas.unbind_all("<MouseWheel>")
             popup.destroy()
         
         # Bottom buttons
