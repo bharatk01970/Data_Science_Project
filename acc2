@@ -107,6 +107,11 @@ class CSVProcessorGUI:
         
         field_frame.rowconfigure(0, weight=1)
         
+        # Enable mouse wheel scrolling for field canvas
+        def on_field_mousewheel(event):
+            field_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        field_canvas.bind_all("<MouseWheel>", on_field_mousewheel)
+        
         # Create section header label for stage 1 processing
         ttk.Label(main_frame, text="3. Stage 1 Processing:", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
