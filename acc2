@@ -1,25 +1,400 @@
-def combine_selected_keys(self, field_expansions, combine_info):
-    import itertools
-    keys = combine_info['keys']
-    char_limits = combine_info['char_limits']
-    new_col = combine_info['new_col']
-    key_value_lists = []
+# Import tkinter for GUI framework
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+import pandas as pd
+import json
+import ast
+import os
+import chardet
 
-    for key in keys:
-        vals = field_expansions.get(key, [""])
-        limit = char_limits.get(key, '*')
-        if limit != '*':
+class CSVProcessorGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("CSV Dictionary Field Processor - Two-Stage Processing")
+        self.root.geometry("750x600")
+        self.input_file_path = ""
+        self.mapping_files = {}
+        self.df = None
+        self.selected_fields = []
+        self.dictionary_fields = {}
+        self.selected_keys = {}
+        self.processed_data = None
+        self.mapping_data = {}
+        self.stage1_data = None
+        self.stage1_complete = False
+        self.field_checkboxes = {}
+        self.combined_key_info = {}  # To store combine configuration
+        self.setup_ui()
+
+    # ----------------------------------------
+    # NEW POPUP for combine keys
+    def show_combine_keys_popup(self, field, available_keys):
+        popup = tk.Toplevel(self.root)
+        popup.title(f"Combine Keys from Field: {field}")
+        popup.geometry("450x450")
+        popup.transient(self.root)
+        popup.grab_set()
+
+        ttk.Label(popup, text=f"Select keys to combine from field '{field}':", font=('TkDefaultFont', 10, 'bold')).pack(pady=5)
+        key_vars = {}
+        for key in available_keys:
+            var = tk.BooleanVar(value=False)
+            key_vars[key] = var
+            ttk.Checkbutton(popup, text=key, variable=var).pack(anchor=tk.W)
+
+        ttk.Label(popup, text="Enter new column name:").pack(pady=(10, 2))
+        new_col_name_entry = ttk.Entry(popup, width=30)
+        new_col_name_entry.pack()
+
+        ttk.Label(popup, text="Character limits for selected keys (*=all):", font=('TkDefaultFont', 9, 'bold')).pack(pady=(10, 2))
+        char_limits = {}
+        for key in available_keys:
+            ttk.Label(popup, text=f"{key}:").pack(pady=(2, 0))
+            limit_entry = ttk.Entry(popup, width=10)
+            limit_entry.insert(0, '*')
+            limit_entry.pack()
+            char_limits[key] = limit_entry
+
+        confirm_data = {}
+
+        def on_confirm():
+            selected = [k for k, v in key_vars.items() if v.get()]
+            new_col = new_col_name_entry.get().strip()
+            if len(selected) < 2:
+                messagebox.showwarning("Warning", "Select at least two keys to combine.")
+                return
+            if not new_col:
+                messagebox.showwarning("Warning", "Please specify a name for the new column.")
+                return
+            confirm_data['keys'] = selected
+            confirm_data['new_col'] = new_col
+            confirm_data['char_limits'] = {k: (char_limits[k].get().strip() or '*') for k in selected}
+            popup.destroy()
+
+        ttk.Button(popup, text="Confirm", command=on_confirm).pack(pady=10)
+        popup.wait_window()
+        return confirm_data if confirm_data else None
+
+    # Helper for combining keys: truncation + stacking
+    def expand_combined_keys(self, field_expansions, combine_info):
+        import itertools
+        new_col = combine_info['new_col']
+        keys = combine_info['keys']
+        char_limits = combine_info['char_limits']
+
+        # Apply truncation to each key's values
+        truncated_lists = []
+        for key in keys:
+            vals = field_expansions.get(key, [""])
+            limit = char_limits.get(key, '*')
+            if limit != '*':
+                try:
+                    limit_int = int(limit)
+                    vals = [v[:limit_int] if v else "" for v in vals]
+                except:
+                    pass
+            truncated_lists.append(vals)
+
+        # Stack all truncated values vertically
+        combined_values = []
+        for vals in truncated_lists:
+            combined_values.extend(vals)
+        return new_col, combined_values
+
+    # ----------------------------------------
+    def setup_ui(self):
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+
+        # File load
+        ttk.Label(main_frame, text="1. Load Input File:", font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        ttk.Button(main_frame, text="Select Input File", command=self.load_input_file).grid(row=1, column=0, sticky=tk.W, pady=(0, 10))
+        self.input_file_label = ttk.Label(main_frame, text="No file selected")
+        self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+
+        # Field selection
+        ttk.Label(main_frame, text="2. Select Fields for Processing:", font=('TkDefaultFont', 10, 'bold')).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        field_frame = ttk.Frame(main_frame)
+        field_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        field_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+
+        field_canvas = tk.Canvas(field_frame, height=150, highlightthickness=0)
+        field_scrollbar = ttk.Scrollbar(field_frame, orient="vertical", command=field_canvas.yview)
+        self.field_checkbox_frame = ttk.Frame(field_canvas)
+        self.field_checkbox_frame.bind("<Configure>", lambda e: field_canvas.configure(scrollregion=field_canvas.bbox("all")))
+        field_canvas.create_window((0, 0), window=self.field_checkbox_frame, anchor="nw")
+        field_canvas.configure(yscrollcommand=field_scrollbar.set)
+        field_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        def on_field_mousewheel(event):
+            field_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        field_canvas.bind_all("<MouseWheel>", on_field_mousewheel)
+
+        # Stage 1
+        ttk.Label(main_frame, text="3. Stage 1 Processing:", font=('TkDefaultFont', 10, 'bold')).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        self.stage1_button = ttk.Button(main_frame, text="Process Stage 1 (Dictionary Expansion)", command=self.process_stage1, state='disabled')
+        self.stage1_button.grid(row=5, column=0, sticky=tk.W, pady=(0, 10))
+        self.stage1_status_label = ttk.Label(main_frame, text="")
+        self.stage1_status_label.grid(row=5, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+
+        # Mappings
+        ttk.Label(main_frame, text="4. Load Mapping Files (Optional):", font=('TkDefaultFont', 10, 'bold')).grid(row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+        mapping_frame = ttk.Frame(main_frame)
+        mapping_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Mapping File", command=self.add_mapping_file, state='disabled')
+        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
+        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
+        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        mapping_frame.columnconfigure(0, weight=1)
+
+        # Stage 2
+        self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output with Mapping)", command=self.process_stage2, style='Accent.TButton', state='disabled')
+        self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
+
+        # Export
+        self.export_button = ttk.Button(main_frame, text="Export Results", command=self.export_data, state='disabled')
+        self.export_button.grid(row=9, column=0, columnspan=2, pady=5)
+
+        # Status
+        self.status_var = tk.StringVar(value="Ready to load file...")
+        status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+    
+    def get_sample_values(self, column_name, max_samples=2):
+        try:
+            samples = self.df[column_name].dropna().unique()[:max_samples]
+            sample_strs = []
+            for s in samples:
+                s_str = str(s)
+                if len(s_str) > 30:
+                    s_str = s_str[:27] + "..."
+                sample_strs.append(s_str)
+            return sample_strs
+        except:
+            return []
+
+    def populate_field_checkboxes(self):
+        for widget in self.field_checkbox_frame.winfo_children():
+            widget.destroy()
+        self.field_checkboxes.clear()
+        button_frame = ttk.Frame(self.field_checkbox_frame)
+        button_frame.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+        def select_all():
+            for var in self.field_checkboxes.values():
+                var.set(True)
+        def deselect_all():
+            for var in self.field_checkboxes.values():
+                var.set(False)
+        ttk.Button(button_frame, text="Select All", command=select_all, width=12).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Deselect All", command=deselect_all, width=12).pack(side=tk.LEFT, padx=2)
+        for idx, col in enumerate(self.df.columns, start=1):
+            var = tk.BooleanVar(value=False)
+            self.field_checkboxes[col] = var
+            samples = self.get_sample_values(col)
+            sample_text = f" (e.g., {', '.join(samples)})" if samples else ""
+            cb = ttk.Checkbutton(
+                self.field_checkbox_frame, 
+                text=f"{col}{sample_text}",
+                variable=var
+            )
+            cb.grid(row=idx, column=0, sticky=tk.W, padx=5, pady=2)
+
+    def detect_encoding(self, file_path):
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(100000)
+                result = chardet.detect(raw_data)
+                encoding = result['encoding']
+                return encoding if encoding else 'utf-8'
+        except Exception:
+            return 'utf-8'
+
+    def load_input_file(self):
+        file_path = filedialog.askopenfilename(
+            title="Select Input File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if file_path:
             try:
-                limit_int = int(limit)
-                # Truncate each value to limit before combination
-                vals = [v[:limit_int] if v else "" for v in vals]
-            except Exception:
-                pass
-        key_value_lists.append(vals)
+                encoding = self.detect_encoding(file_path)
+                if file_path.endswith('.csv'):
+                    self.df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    self.df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                self.input_file_path = file_path
+                self.input_file_label.config(text=os.path.basename(file_path))
+                self.populate_field_checkboxes()
+                self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
+                self.stage1_button.config(state='normal')
+                self.stage1_complete = False
+                self.stage1_status_label.config(text="")
+                self.add_mapping_button.config(state='disabled')
+                self.stage2_button.config(state='disabled')
+                self.export_button.config(state='disabled')
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load file: {str(e)}")
+                self.status_var.set("Error loading file")
+    
+    def show_selected_columns_popup(self, columns):
+        popup = tk.Toplevel(self.root)
+        popup.title("Stage 1 - Selected Columns")
+        popup.geometry("500x400")
+        popup.transient(self.root)
+        popup.grab_set()
+        ttk.Label(popup, text="Stage 1 Processing Complete!", font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+        ttk.Label(popup, text=f"Total columns in output: {len(columns)}", font=('TkDefaultFont', 10)).pack(pady=5)
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        listbox = tk.Listbox(list_frame)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        for col in sorted(columns):
+            listbox.insert(tk.END, col)
+        ttk.Button(popup, text="OK", command=popup.destroy).pack(pady=10)
+        popup.wait_window()
 
-    combined_values = []
-    # Combine truncated values via Cartesian product
-    for combo in itertools.product(*key_value_lists):
-        combined_values.append("".join(combo))
+    # --- KEY CHANGES START HERE ---
+    def process_stage1(self):
+        if self.df is None:
+            messagebox.showwarning("Warning", "Please load an input file first")
+            return
+        self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
+        if not self.selected_fields:
+            messagebox.showwarning("Warning", "Please select at least one field")
+            return
+        try:
+            self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
+            self.selected_keys = {}
+            # New: ask if combine is desired for each dict field
+            self.combined_key_info = {}
+            if self.dictionary_fields:
+                for field, available_keys in self.dictionary_fields.items():
+                    if available_keys:
+                        selected = self.show_key_selection_popup(field, available_keys)
+                        if selected:
+                            # Ask to combine keys
+                            resp = messagebox.askyesno("Combine Keys?", f"Combine keys from '{field}'?")
+                            if resp:
+                                combine_info = self.show_combine_keys_popup(field, available_keys)
+                                if combine_info:
+                                    # update keys with expanded names
+                                    combine_info['keys'] = [f"{field}_{k}" for k in combine_info['keys']]
+                                    self.combined_key_info[field] = combine_info
+                            self.selected_keys[field] = selected
+                        else:
+                            response = messagebox.askyesno("Skip Field?", f"No keys selected for '{field}'.")
+                            if not response:
+                                self.selected_fields.remove(field)
+            self.stage1_data = self.process_stage1_dataframe()
+            if self.stage1_data:
+                stage1_columns = set()
+                for row in self.stage1_data:
+                    stage1_columns.update(row.keys())
+                self.selected_fields = list(stage1_columns)
+                self.show_selected_columns_popup(stage1_columns)
+            self.stage1_complete = True
+            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
+            self.add_mapping_button.config(state='normal')
+            self.stage2_button.config(state='normal')
+            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
+            self.status_var.set("Stage 1 processing failed")
+    
+    def process_stage1_dataframe(self):
+        result_rows = []
+        for index, row in self.df.iterrows():
+            self.process_single_row(row, result_rows)
+        return result_rows
+    
+    def process_single_row(self, row, result_rows):
+        import itertools
+        field_expansions = {}
+        # Expand fields not dictionary
+        for field in self.selected_fields:
+            if field not in self.dictionary_fields:
+                try:
+                    field_value = row[field]
+                except (KeyError, TypeError):
+                    field_value = ""
+                values = self.split_multi_values(field_value)
+                unique_values = []
+                for val in values:
+                    if val and val not in unique_values:
+                        unique_values.append(val)
+                if not unique_values:
+                    unique_values = [""]
+                field_expansions[field] = unique_values
 
-    return new_col, combined_values
+        # Expand dictionary keys
+        for field in self.dictionary_fields:
+            if field in self.selected_keys:
+                try:
+                    dict_value = row[field]
+                except (KeyError, TypeError):
+                    dict_value = ""
+                parsed_dict = self.parse_dictionary_value(dict_value)
+                for key in self.selected_keys[field]:
+                    if key in parsed_dict:
+                        all_key_values = []
+                        for val in parsed_dict[key]:
+                            if val is None:
+                                val = ""
+                            split_values = self.split_multi_values(val)
+                            all_key_values.extend(split_values)
+                        unique_values = []
+                        for val in all_key_values:
+                            if val and val not in unique_values:
+                                unique_values.append(val)
+                        if not unique_values:
+                            unique_values = [""]
+                        field_expansions[f"{field}_{key}"] = unique_values
+                    else:
+                        field_expansions[f"{field}_{key}"] = [""]
+
+        # Handle combined keys as stacked values
+        if hasattr(self, 'combined_key_info') and self.combined_key_info:
+            for field, combo_info in self.combined_key_info.items():
+                new_col, combined_values = self.expand_combined_keys(field_expansions, combo_info)
+                # Remove individual keys involved
+                for key in combo_info['keys']:
+                    if key in field_expansions:
+                        field_expansions.pop(key, None)
+                # Add combined stack
+                field_expansions[new_col] = combined_values
+
+        # Determine max length
+        lengths = [len(v) for v in field_expansions.values()]
+        max_len = max(lengths) if lengths else 1
+
+        # Repeat shorter lists to match max length for proper row alignment
+        aligned_expansions = {}
+        for k, v in field_expansions.items():
+            if len(v) == max_len:
+                aligned_expansions[k] = v
+            else:
+                repeats = (max_len // len(v)) + 1
+                extended = (v * repeats)[:max_len]
+                aligned_expansions[k] = extended
+
+        # Generate Cartesian product rows
+        for i in range(max_len):
+            new_row = {k: aligned_expansions[k][i] for k in aligned_expansions}
+            result_rows.append(new_row)
+
+    # --- END OF KEY CHANGES ---
+
+    # ... [all other methods like add_mapping_file, export, detect_dictionary_fields, etc., remain unchanged] ...
+
+
+# To run:
+# if __name__ == "__main__":
+#     root = tk.Tk()
+#     app = CSVProcessorGUI(root)
+#     root.mainloop()
