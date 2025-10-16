@@ -14,6 +14,12 @@ import os
 from typing import Dict, List, Any, Optional
 # Import chardet for automatic encoding detection
 import chardet
+# Import copy for deep copying data structures
+import copy
+# Import collections for grouping operations
+from collections import defaultdict
+# Import itertools for Cartesian product operations
+import itertools
 
 # Define the main GUI application class that encapsulates all CSV processing functionality
 class CSVProcessorGUI:
@@ -22,9 +28,9 @@ class CSVProcessorGUI:
         # Store reference to the main tkinter root window for later use
         self.root = root
         # Set the window title that appears in the title bar
-        self.root.title("CSV Dictionary Field Processor - Enhanced Multi-Stage Processing")
+        self.root.title("CSV Dictionary Field Processor - Enhanced Dynamic Mapping")
         # Set the initial window size (width x height in pixels)
-        self.root.geometry("800x700")
+        self.root.geometry("850x700")
         
         # Initialize empty string to store the path of the selected input file
         self.input_file_path = ""
@@ -47,13 +53,13 @@ class CSVProcessorGUI:
         # Initialize dictionary to store checkbox variables for field selection
         self.field_checkboxes = {}
         
-        # NEW: Initialize current working dataframe (updates after each mapping)
-        self.current_working_df = None
-        # NEW: Initialize list to track mapping sequence and configurations
+        # NEW: Store the current working dataframe (updated after each mapping)
+        self.current_working_data = None
+        # NEW: List to track mapping operations in sequence
         self.mapping_sequence = []
-        # NEW: Store processed data after each mapping step
-        self.intermediate_data = None
-        # NEW: Track the final processed data
+        # NEW: Store row addition mappings
+        self.row_addition_mappings = []
+        # NEW: Store processed data after each step
         self.processed_data = None
         
         # Call the UI setup method to create and arrange all GUI components
@@ -97,7 +103,7 @@ class CSVProcessorGUI:
         main_frame.rowconfigure(3, weight=1)
         
         # Create canvas with scrollbar for checkboxes
-        field_canvas = tk.Canvas(field_frame, height=150, highlightthickness=0)
+        field_canvas = tk.Canvas(field_frame, height=120, highlightthickness=0)
         field_scrollbar = ttk.Scrollbar(field_frame, orient="vertical", command=field_canvas.yview)
         self.field_checkbox_frame = ttk.Frame(field_canvas)
         
@@ -133,40 +139,46 @@ class CSVProcessorGUI:
         self.stage1_status_label = ttk.Label(main_frame, text="")
         self.stage1_status_label.grid(row=5, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
         
-        # Create section header label for mapping files functionality
-        ttk.Label(main_frame, text="4. Dynamic Mapping Integration:", 
+        # NEW: Create section for dynamic mapping management
+        ttk.Label(main_frame, text="4. Dynamic Mapping Management:", 
                  font=('TkDefaultFont', 10, 'bold')).grid(
             row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
         
-        # Create sub-frame container for mapping files controls
+        # Create sub-frame container for mapping operations
         mapping_frame = ttk.Frame(main_frame)
         mapping_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
-        # Create button to add mapping files
-        self.add_mapping_button = ttk.Button(mapping_frame, text="Add Column Mapping", 
-                  command=self.add_mapping_file, state='disabled')
-        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # NEW: Buttons for different mapping operations
+        button_row1 = ttk.Frame(mapping_frame)
+        button_row1.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
         
-        # NEW: Add button for row addition mapping
-        self.add_row_mapping_button = ttk.Button(mapping_frame, text="Add Row Mapping", 
-                  command=self.add_row_mapping, state='disabled')
-        self.add_row_mapping_button.grid(row=0, column=1, sticky=tk.W)
+        self.add_column_mapping_button = ttk.Button(button_row1, text="Add Column Mapping", 
+                  command=self.add_column_mapping_file, state='disabled')
+        self.add_column_mapping_button.pack(side=tk.LEFT, padx=(0, 5))
         
-        # Create listbox to display loaded mapping files
-        self.mapping_listbox = tk.Listbox(mapping_frame, height=5)
-        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        self.add_row_mapping_button = ttk.Button(button_row1, text="Add Row Mapping", 
+                  command=self.add_row_mapping_file, state='disabled')
+        self.add_row_mapping_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.clear_mappings_button = ttk.Button(button_row1, text="Clear All Mappings", 
+                  command=self.clear_all_mappings, state='disabled')
+        self.clear_mappings_button.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Create listbox to display mapping sequence
+        mapping_label = ttk.Label(mapping_frame, text="Mapping Sequence:")
+        mapping_label.grid(row=1, column=0, sticky=tk.W, pady=(5, 2))
+        
+        self.mapping_listbox = tk.Listbox(mapping_frame, height=4)
+        self.mapping_listbox.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         mapping_frame.columnconfigure(0, weight=1)
         
-        # NEW: Add button to remove selected mapping
-        ttk.Button(mapping_frame, text="Remove Selected Mapping", 
-                  command=self.remove_mapping).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
-        
-        # NEW: Add button to view current columns
-        ttk.Button(mapping_frame, text="View Current Columns", 
-                  command=self.view_current_columns).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
+        # Current columns display
+        self.current_columns_label = ttk.Label(mapping_frame, text="Current columns: None", 
+                                               font=('TkDefaultFont', 8), foreground='blue')
+        self.current_columns_label.grid(row=3, column=0, columnspan=2, sticky=tk.W)
         
         # Create stage 2 process button with accent styling
-        self.stage2_button = ttk.Button(main_frame, text="Finalize & Prepare for Export", 
+        self.stage2_button = ttk.Button(main_frame, text="Process Stage 2 (Final Output)", 
                   command=self.process_stage2, style='Accent.TButton', state='disabled')
         self.stage2_button.grid(row=8, column=0, columnspan=2, pady=10)
         
@@ -181,12 +193,361 @@ class CSVProcessorGUI:
                               relief=tk.SUNKEN, anchor=tk.W)
         status_bar.grid(row=10, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
+    # NEW METHOD: Clear all mappings
+    def clear_all_mappings(self):
+        """Clear all mapping operations and reset to stage 1 data"""
+        response = messagebox.askyesno("Clear Mappings", 
+            "Are you sure you want to clear all mapping operations?\n"
+            "This will reset to Stage 1 processed data.")
+        
+        if response:
+            self.mapping_files.clear()
+            self.mapping_data.clear()
+            self.mapping_sequence.clear()
+            self.row_addition_mappings.clear()
+            self.mapping_listbox.delete(0, tk.END)
+            self.current_working_data = copy.deepcopy(self.stage1_data)
+            self.update_current_columns_display()
+            self.status_var.set("All mappings cleared. Reset to Stage 1 data.")
+    
+    # NEW METHOD: Add column mapping file (Feature A)
+    def add_column_mapping_file(self):
+        """Add a mapping file to add new columns to the current working data"""
+        if not self.stage1_complete or not self.current_working_data:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Column Mapping File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                encoding = self.detect_encoding(file_path)
+                
+                if file_path.endswith('.csv'):
+                    mapping_df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                
+                # Get current column names
+                current_columns = set()
+                for row in self.current_working_data:
+                    current_columns.update(row.keys())
+                
+                mapping_columns = set(mapping_df.columns)
+                common_fields = current_columns.intersection(mapping_columns)
+                
+                if not common_fields:
+                    messagebox.showwarning("Warning", 
+                        f"No matching columns found.\n"
+                        f"Current columns: {sorted(list(current_columns))}\n"
+                        f"Mapping columns: {sorted(list(mapping_columns))}")
+                    return
+                
+                # Select key column
+                field_to_map = list(common_fields)[0]
+                
+                if len(common_fields) > 1:
+                    field_to_map = simpledialog.askstring(
+                        "Multiple Matches Found",
+                        f"Multiple matching columns found: {list(common_fields)}\n"
+                        f"Enter the key column name for mapping:",
+                        initialvalue=field_to_map
+                    )
+                    
+                    if not field_to_map or field_to_map not in common_fields:
+                        messagebox.showwarning("Warning", "Invalid field selection")
+                        return
+                
+                # Apply the mapping immediately to current working data
+                new_columns = [col for col in mapping_df.columns if col != field_to_map]
+                
+                # Create mapping dictionary for each new column
+                for new_col in new_columns:
+                    mapping_dict = dict(zip(mapping_df[field_to_map].astype(str), 
+                                           mapping_df[new_col]))
+                    
+                    # Add new column to each row
+                    for row in self.current_working_data:
+                        key_value = str(row.get(field_to_map, ""))
+                        row[new_col] = mapping_dict.get(key_value, "")
+                
+                # Store the mapping operation
+                self.mapping_sequence.append({
+                    'type': 'column_mapping',
+                    'key_field': field_to_map,
+                    'file': os.path.basename(file_path),
+                    'new_columns': new_columns
+                })
+                
+                self.mapping_listbox.insert(tk.END, 
+                    f"[Column] {field_to_map} → {', '.join(new_columns)} ({os.path.basename(file_path)})")
+                
+                self.update_current_columns_display()
+                self.status_var.set(f"Column mapping applied: Added {len(new_columns)} column(s)")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
+    
+    # NEW METHOD: Add row mapping file (Feature B & C)
+    def add_row_mapping_file(self):
+        """Add a mapping file to add rows based on mapping logic"""
+        if not self.stage1_complete or not self.current_working_data:
+            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
+            return
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Row Addition Mapping File",
+            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                encoding = self.detect_encoding(file_path)
+                
+                if file_path.endswith('.csv'):
+                    mapping_df = pd.read_csv(file_path, encoding=encoding)
+                else:
+                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
+                
+                # Show configuration dialog
+                config = self.show_row_mapping_config(mapping_df)
+                
+                if not config:
+                    return
+                
+                # Apply row addition mapping
+                self.apply_row_addition_mapping(mapping_df, config)
+                
+                # Store the mapping operation
+                self.mapping_sequence.append({
+                    'type': 'row_mapping',
+                    'file': os.path.basename(file_path),
+                    'config': config
+                })
+                
+                self.mapping_listbox.insert(tk.END, 
+                    f"[Row] {config['source_col']} → {config['new_col']} ({os.path.basename(file_path)})")
+                
+                self.update_current_columns_display()
+                self.status_var.set(f"Row mapping applied from {os.path.basename(file_path)}")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to apply row mapping: {str(e)}")
+    
+    # NEW METHOD: Show row mapping configuration dialog
+    def show_row_mapping_config(self, mapping_df):
+        """Show dialog to configure row addition mapping"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Configure Row Addition Mapping")
+        popup.geometry("550x450")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Configure Row Addition Mapping", 
+                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
+        
+        # Get current columns
+        current_columns = set()
+        for row in self.current_working_data:
+            current_columns.update(row.keys())
+        
+        config_frame = ttk.Frame(popup)
+        config_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Source column (from mapping file)
+        ttk.Label(config_frame, text="Source Column (from mapping file):").grid(
+            row=0, column=0, sticky=tk.W, pady=5)
+        source_var = tk.StringVar()
+        source_combo = ttk.Combobox(config_frame, textvariable=source_var, width=30, state='readonly')
+        source_combo['values'] = list(mapping_df.columns)
+        if len(mapping_df.columns) > 0:
+            source_combo.current(0)
+        source_combo.grid(row=0, column=1, pady=5, padx=(5, 0))
+        
+        # Target column (from mapping file)
+        ttk.Label(config_frame, text="Target Column (from mapping file):").grid(
+            row=1, column=0, sticky=tk.W, pady=5)
+        target_var = tk.StringVar()
+        target_combo = ttk.Combobox(config_frame, textvariable=target_var, width=30, state='readonly')
+        target_combo['values'] = list(mapping_df.columns)
+        if len(mapping_df.columns) > 1:
+            target_combo.current(1)
+        target_combo.grid(row=1, column=1, pady=5, padx=(5, 0))
+        
+        # Match column (existing column to match against)
+        ttk.Label(config_frame, text="Match Column (existing data):").grid(
+            row=2, column=0, sticky=tk.W, pady=5)
+        match_var = tk.StringVar()
+        match_combo = ttk.Combobox(config_frame, textvariable=match_var, width=30, state='readonly')
+        match_combo['values'] = sorted(list(current_columns))
+        if len(current_columns) > 0:
+            match_combo.current(0)
+        match_combo.grid(row=2, column=1, pady=5, padx=(5, 0))
+        
+        # Group column (column to group by for row additions)
+        ttk.Label(config_frame, text="Group By Column (for row additions):").grid(
+            row=3, column=0, sticky=tk.W, pady=5)
+        group_var = tk.StringVar()
+        group_combo = ttk.Combobox(config_frame, textvariable=group_var, width=30, state='readonly')
+        group_combo['values'] = [''] + sorted(list(current_columns))
+        group_combo.current(0)
+        group_combo.grid(row=3, column=1, pady=5, padx=(5, 0))
+        
+        # Blank on match option
+        blank_on_match_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(config_frame, text="Leave target column blank when match occurs", 
+                       variable=blank_on_match_var).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=10)
+        
+        # Info text
+        info_text = tk.Text(config_frame, height=8, width=60, wrap=tk.WORD)
+        info_text.grid(row=5, column=0, columnspan=2, pady=10)
+        info_text.insert(tk.END, 
+            "How Row Addition Works:\n\n"
+            "1. Source Column: Value from mapping file to match against existing data\n"
+            "2. Target Column: New column to add with mapped values\n"
+            "3. Match Column: Existing column to compare with source values\n"
+            "4. Group By Column: If specified, adds one row per unique value in this column\n"
+            "5. Blank on Match: If checked, leaves target blank where match column = source value")
+        info_text.config(state='disabled')
+        
+        result = {}
+        
+        def confirm():
+            source_col = source_var.get()
+            target_col = target_var.get()
+            match_col = match_var.get()
+            group_col = group_var.get()
+            
+            if not source_col or not target_col or not match_col:
+                messagebox.showwarning("Warning", "Please fill all required fields")
+                return
+            
+            if source_col == target_col:
+                messagebox.showwarning("Warning", "Source and target columns must be different")
+                return
+            
+            result['source_col'] = source_col
+            result['new_col'] = target_col
+            result['match_col'] = match_col
+            result['group_col'] = group_col if group_col else None
+            result['blank_on_match'] = blank_on_match_var.get()
+            popup.destroy()
+        
+        def cancel():
+            popup.destroy()
+        
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(pady=10)
+        ttk.Button(button_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result if result else None
+    
+    # NEW METHOD: Apply row addition mapping
+    def apply_row_addition_mapping(self, mapping_df, config):
+        """Apply row addition mapping to current working data"""
+        source_col = config['source_col']
+        new_col = config['new_col']
+        match_col = config['match_col']
+        group_col = config['group_col']
+        blank_on_match = config['blank_on_match']
+        
+        # Create mapping dictionary
+        mapping_dict = dict(zip(mapping_df[source_col].astype(str), 
+                               mapping_df[new_col]))
+        
+        new_rows = []
+        
+        if group_col:
+            # Group-based row addition (Feature B)
+            grouped_data = defaultdict(list)
+            
+            for row in self.current_working_data:
+                group_value = row.get(group_col, "")
+                grouped_data[group_value].append(row)
+            
+            # For each group, add mapped rows
+            for group_value, group_rows in grouped_data.items():
+                # Add original rows
+                for row in group_rows:
+                    new_row = copy.deepcopy(row)
+                    match_value = str(row.get(match_col, ""))
+                    if match_value in mapping_dict:
+                        if blank_on_match and match_value == row.get(match_col, ""):
+                            new_row[new_col] = ""
+                        else:
+                            new_row[new_col] = mapping_dict[match_value]
+                    else:
+                        new_row[new_col] = ""
+                    new_rows.append(new_row)
+                
+                # Add new rows for each mapping entry
+                for map_source, map_target in mapping_dict.items():
+                    exists = any(str(row.get(match_col, "")) == map_source for row in group_rows)
+                    
+                    if not exists and group_rows:
+                        base_row = group_rows[0]
+                        new_row = copy.deepcopy(base_row)
+                        new_row[match_col] = map_source
+                        new_row[new_col] = "" if blank_on_match else map_target
+                        new_rows.append(new_row)
+        else:
+            # Simple row addition without grouping
+            for row in self.current_working_data:
+                new_row = copy.deepcopy(row)
+                match_value = str(row.get(match_col, ""))
+                
+                if match_value in mapping_dict:
+                    if blank_on_match:
+                        new_row[new_col] = ""
+                    else:
+                        new_row[new_col] = mapping_dict[match_value]
+                else:
+                    new_row[new_col] = ""
+                
+                new_rows.append(new_row)
+            
+            # Add new rows for unmapped values
+            existing_values = {str(row.get(match_col, "")) for row in self.current_working_data}
+            for map_source, map_target in mapping_dict.items():
+                if map_source not in existing_values and self.current_working_data:
+                    new_row = copy.deepcopy(self.current_working_data[0])
+                    for key in new_row.keys():
+                        new_row[key] = ""
+                    new_row[match_col] = map_source
+                    new_row[new_col] = map_target
+                    new_rows.append(new_row)
+        
+        self.current_working_data = new_rows
+    
+    # NEW METHOD: Update current columns display
+    def update_current_columns_display(self):
+        """Update the display showing current columns"""
+        if self.current_working_data:
+            current_columns = set()
+            for row in self.current_working_data:
+                current_columns.update(row.keys())
+            
+            col_list = sorted(list(current_columns))
+            col_text = ', '.join(col_list[:10])
+            if len(col_list) > 10:
+                col_text += f"... ({len(col_list)} total)"
+            
+            self.current_columns_label.config(
+                text=f"Current columns ({len(col_list)}): {col_text}")
+        else:
+            self.current_columns_label.config(text="Current columns: None")
+    
     # Method to get sample values from a column
     def get_sample_values(self, column_name, max_samples=2):
         """Get up to max_samples non-null unique sample values from a column"""
         try:
             samples = self.df[column_name].dropna().unique()[:max_samples]
-            # Convert to strings and truncate if too long
             sample_strs = []
             for s in samples:
                 s_str = str(s)
@@ -200,12 +561,10 @@ class CSVProcessorGUI:
     # Method to populate field checkboxes with sample values
     def populate_field_checkboxes(self):
         """Populate the field selection area with checkboxes and sample values"""
-        # Clear existing checkboxes
         for widget in self.field_checkbox_frame.winfo_children():
             widget.destroy()
         self.field_checkboxes.clear()
         
-        # Add select all / deselect all buttons
         button_frame = ttk.Frame(self.field_checkbox_frame)
         button_frame.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
         
@@ -220,12 +579,10 @@ class CSVProcessorGUI:
         ttk.Button(button_frame, text="Select All", command=select_all, width=12).pack(side=tk.LEFT, padx=2)
         ttk.Button(button_frame, text="Deselect All", command=deselect_all, width=12).pack(side=tk.LEFT, padx=2)
         
-        # Create checkboxes for each column
         for idx, col in enumerate(self.df.columns, start=1):
             var = tk.BooleanVar(value=False)
             self.field_checkboxes[col] = var
             
-            # Get sample values
             samples = self.get_sample_values(col)
             sample_text = f" (e.g., {', '.join(samples)})" if samples else ""
             
@@ -257,7 +614,6 @@ class CSVProcessorGUI:
         
         if file_path:
             try:
-                # Detect file encoding automatically
                 encoding = self.detect_encoding(file_path)
                 
                 if file_path.endswith('.csv'):
@@ -268,24 +624,28 @@ class CSVProcessorGUI:
                 self.input_file_path = file_path
                 self.input_file_label.config(text=os.path.basename(file_path))
                 
-                # Populate checkboxes with sample values
                 self.populate_field_checkboxes()
                 
                 self.status_var.set(f"Loaded file with {len(self.df)} rows and {len(self.df.columns)} columns (encoding: {encoding})")
                 
-                # Reset state
-                self.stage1_complete = False
-                self.stage1_status_label.config(text="")
-                self.current_working_df = None
-                self.mapping_sequence = []
-                self.mapping_listbox.delete(0, tk.END)
-                
                 # Enable field selection and stage 1 button
                 self.stage1_button.config(state='normal')
-                self.add_mapping_button.config(state='disabled')
+                self.stage1_complete = False
+                self.stage1_status_label.config(text="")
+                self.add_column_mapping_button.config(state='disabled')
                 self.add_row_mapping_button.config(state='disabled')
+                self.clear_mappings_button.config(state='disabled')
                 self.stage2_button.config(state='disabled')
                 self.export_button.config(state='disabled')
+                
+                # Clear mapping data
+                self.mapping_files.clear()
+                self.mapping_data.clear()
+                self.mapping_sequence.clear()
+                self.row_addition_mappings.clear()
+                self.mapping_listbox.delete(0, tk.END)
+                self.current_working_data = None
+                self.update_current_columns_display()
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
@@ -306,7 +666,6 @@ class CSVProcessorGUI:
         ttk.Label(popup, text=f"Total columns in output: {len(columns)}", 
                  font=('TkDefaultFont', 10)).pack(pady=5)
         
-        # Create frame with listbox
         list_frame = ttk.Frame(popup)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
@@ -329,7 +688,6 @@ class CSVProcessorGUI:
             messagebox.showwarning("Warning", "Please load an input file first")
             return
         
-        # Get selected fields from checkboxes
         self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
         
         if not self.selected_fields:
@@ -337,13 +695,10 @@ class CSVProcessorGUI:
             return
         
         try:
-            # Detect dictionary fields only in selected fields
             self.dictionary_fields = self.detect_dictionary_fields(self.selected_fields)
             
-            # Initialize dictionary to store user's key selections
             self.selected_keys = {}
             
-            # If dictionary fields are found in selected fields, show popup for key selection
             if self.dictionary_fields:
                 for field, available_keys in self.dictionary_fields.items():
                     if available_keys:
@@ -351,42 +706,40 @@ class CSVProcessorGUI:
                         if selected:
                             self.selected_keys[field] = selected
                         else:
-                            # If user cancels, ask if they want to skip this field
                             response = messagebox.askyesno("Skip Field?", 
                                 f"No keys selected for field '{field}'.\n\n"
                                 f"Do you want to keep this field without dictionary expansion?")
                             if not response:
-                                # Remove from selected fields if user doesn't want to keep it
                                 self.selected_fields.remove(field)
             
-            # Process stage 1 data
             self.stage1_data = self.process_stage1_dataframe()
             
-            # NEW: Initialize current working dataframe from stage 1 data
-            self.current_working_df = pd.DataFrame(self.stage1_data)
-            
-            # Get column names from stage 1 data (only from selected fields processing)
             if self.stage1_data:
                 stage1_columns = set()
                 for row in self.stage1_data:
                     stage1_columns.update(row.keys())
                 
-                # Update the selected_fields to match stage 1 output columns
                 self.selected_fields = list(stage1_columns)
                 
-                # Show popup with selected columns
                 self.show_selected_columns_popup(stage1_columns)
             
             # Mark stage 1 as complete
             self.stage1_complete = True
-            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows, {len(self.current_working_df.columns)} cols)")
+            self.stage1_status_label.config(text=f"✓ Complete ({len(self.stage1_data)} rows)")
+            
+            # NEW: Initialize current working data with stage 1 results
+            self.current_working_data = copy.deepcopy(self.stage1_data)
             
             # Enable mapping file addition and stage 2 processing
-            self.add_mapping_button.config(state='normal')
+            self.add_column_mapping_button.config(state='normal')
             self.add_row_mapping_button.config(state='normal')
+            self.clear_mappings_button.config(state='normal')
             self.stage2_button.config(state='normal')
             
-            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated. Add mappings or proceed to finalize.")
+            # Update columns display
+            self.update_current_columns_display()
+            
+            self.status_var.set(f"Stage 1 complete. {len(self.stage1_data)} rows generated from selected fields. You can now add mappings or proceed to Stage 2.")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
@@ -402,414 +755,14 @@ class CSVProcessorGUI:
         
         return result_rows
     
-    # NEW METHOD: Handle addition of column mapping files with immediate processing
-    def add_mapping_file(self):
-        if not self.stage1_complete:
-            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
-            return
-        
-        file_path = filedialog.askopenfilename(
-            title="Select Column Mapping File",
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        
-        if file_path:
-            try:
-                encoding = self.detect_encoding(file_path)
-                
-                if file_path.endswith('.csv'):
-                    mapping_df = pd.read_csv(file_path, encoding=encoding)
-                else:
-                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
-                
-                # Get current column names
-                current_columns = set(self.current_working_df.columns)
-                mapping_fields = set(mapping_df.columns)
-                
-                common_fields = current_columns.intersection(mapping_fields)
-                
-                if not common_fields:
-                    messagebox.showwarning("Warning", 
-                        f"No matching columns found.\n"
-                        f"Current columns: {list(current_columns)}\n"
-                        f"Mapping file columns: {list(mapping_fields)}")
-                    return
-                
-                field_to_map = list(common_fields)[0]
-                
-                if len(common_fields) > 1:
-                    field_to_map = simpledialog.askstring(
-                        "Multiple Matches Found",
-                        f"Multiple matching columns found: {list(common_fields)}\n"
-                        f"Enter the field name to use for mapping:",
-                        initialvalue=field_to_map
-                    )
-                    
-                    if not field_to_map or field_to_map not in common_fields:
-                        messagebox.showwarning("Warning", "Invalid field selection")
-                        return
-                
-                # NEW: Apply mapping immediately and update working dataframe
-                new_cols = [col for col in mapping_df.columns if col != field_to_map]
-                
-                # Merge the mapping
-                self.current_working_df = self.current_working_df.merge(
-                    mapping_df, 
-                    on=field_to_map, 
-                    how='left'
-                )
-                
-                # Store mapping info
-                mapping_info = {
-                    'type': 'column',
-                    'file': file_path,
-                    'key_field': field_to_map,
-                    'new_columns': new_cols
-                }
-                self.mapping_sequence.append(mapping_info)
-                
-                self.mapping_listbox.insert(tk.END, 
-                    f"[Col] {field_to_map} → {', '.join(new_cols)} ({os.path.basename(file_path)})")
-                
-                self.status_var.set(
-                    f"Added column mapping. Current: {len(self.current_working_df)} rows, "
-                    f"{len(self.current_working_df.columns)} columns")
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
-    
-    # NEW METHOD: Add row mapping functionality
-    def add_row_mapping(self):
-        if not self.stage1_complete:
-            messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
-            return
-        
-        file_path = filedialog.askopenfilename(
-            title="Select Row Mapping File",
-            filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        
-        if file_path:
-            try:
-                encoding = self.detect_encoding(file_path)
-                
-                if file_path.endswith('.csv'):
-                    mapping_df = pd.read_csv(file_path, encoding=encoding)
-                else:
-                    mapping_df = pd.read_csv(file_path, delimiter='\t', encoding=encoding)
-                
-                # Show configuration dialog
-                config = self.show_row_mapping_config(mapping_df)
-                
-                if not config:
-                    return
-                
-                # Apply row mapping based on configuration
-                self.apply_row_mapping(mapping_df, config)
-                
-                # Store mapping info
-                mapping_info = {
-                    'type': 'row',
-                    'file': file_path,
-                    'config': config
-                }
-                self.mapping_sequence.append(mapping_info)
-                
-                self.mapping_listbox.insert(tk.END, 
-                    f"[Row] {config['source_col']} → {config['target_col']} ({os.path.basename(file_path)})")
-                
-                self.status_var.set(
-                    f"Added row mapping. Current: {len(self.current_working_df)} rows, "
-                    f"{len(self.current_working_df.columns)} columns")
-                
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to process row mapping: {str(e)}")
-    
-    # NEW METHOD: Show row mapping configuration dialog
-    def show_row_mapping_config(self, mapping_df):
-        """Show dialog to configure row mapping parameters"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Configure Row Mapping")
-        popup.geometry("550x450")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Row Mapping Configuration", 
-                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
-        
-        config_frame = ttk.Frame(popup)
-        config_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        # Source column selection
-        ttk.Label(config_frame, text="Source Column (from mapping file):").grid(
-            row=0, column=0, sticky=tk.W, pady=5)
-        source_var = tk.StringVar()
-        source_combo = ttk.Combobox(config_frame, textvariable=source_var, width=25, state='readonly')
-        source_combo['values'] = list(mapping_df.columns)
-        if len(mapping_df.columns) > 0:
-            source_combo.current(0)
-        source_combo.grid(row=0, column=1, pady=5, padx=(10, 0))
-        
-        # Target column selection
-        ttk.Label(config_frame, text="Target Column (new column name):").grid(
-            row=1, column=0, sticky=tk.W, pady=5)
-        target_var = tk.StringVar()
-        target_combo = ttk.Combobox(config_frame, textvariable=target_var, width=25, state='readonly')
-        target_combo['values'] = list(mapping_df.columns)
-        if len(mapping_df.columns) > 1:
-            target_combo.current(1)
-        target_combo.grid(row=1, column=1, pady=5, padx=(10, 0))
-        
-        # Match column selection
-        ttk.Label(config_frame, text="Match Column (existing data):").grid(
-            row=2, column=0, sticky=tk.W, pady=5)
-        match_var = tk.StringVar()
-        match_combo = ttk.Combobox(match_var, textvariable=match_var, width=25, state='readonly')
-        match_combo['values'] = list(self.current_working_df.columns)
-        if len(self.current_working_df.columns) > 0:
-            match_combo.current(0)
-        match_combo.grid(row=2, column=1, pady=5, padx=(10, 0))
-        
-        # Grouping column
-        ttk.Label(config_frame, text="Grouping Column (for row repetition):").grid(
-            row=3, column=0, sticky=tk.W, pady=5)
-        group_var = tk.StringVar()
-        group_combo = ttk.Combobox(config_frame, textvariable=group_var, width=25, state='readonly')
-        group_combo['values'] = ['None'] + list(self.current_working_df.columns)
-        group_combo.current(0)
-        group_combo.grid(row=3, column=1, pady=5, padx=(10, 0))
-        
-        # Blank target for match value
-        ttk.Label(config_frame, text="Blank target when match value equals:").grid(
-            row=4, column=0, sticky=tk.W, pady=5)
-        blank_entry = ttk.Entry(config_frame, width=27)
-        blank_entry.grid(row=4, column=1, pady=5, padx=(10, 0))
-        
-        # Other column handling
-        ttk.Label(config_frame, text="Other columns in new rows:").grid(
-            row=5, column=0, sticky=tk.W, pady=5)
-        other_var = tk.StringVar(value="retain")
-        ttk.Radiobutton(config_frame, text="Retain values", variable=other_var, 
-                       value="retain").grid(row=5, column=1, sticky=tk.W, padx=(10, 0))
-        ttk.Radiobutton(config_frame, text="Blank values", variable=other_var, 
-                       value="blank").grid(row=6, column=1, sticky=tk.W, padx=(10, 0))
-        ttk.Radiobutton(config_frame, text="Copy from previous", variable=other_var, 
-                       value="copy").grid(row=7, column=1, sticky=tk.W, padx=(10, 0))
-        
-        result = {}
-        
-        def confirm():
-            source = source_var.get()
-            target = target_var.get()
-            match = match_var.get()
-            group = group_var.get() if group_var.get() != 'None' else None
-            blank_value = blank_entry.get().strip()
-            
-            if not source or not target or not match:
-                messagebox.showwarning("Warning", "Please fill all required fields")
-                return
-            
-            result['source_col'] = source
-            result['target_col'] = target
-            result['match_col'] = match
-            result['group_col'] = group
-            result['blank_when_equals'] = blank_value if blank_value else None
-            result['other_cols'] = other_var.get()
-            popup.destroy()
-        
-        def cancel():
-            popup.destroy()
-        
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=15)
-        ttk.Button(button_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-        return result if result else None
-    
-    # NEW METHOD: Apply row mapping to current working dataframe
-    def apply_row_mapping(self, mapping_df, config):
-        """Apply row mapping - adds new rows based on mapping configuration"""
-        new_rows = []
-        
-        # Create mapping dictionary
-        mapping_dict = dict(zip(
-            mapping_df[config['source_col']], 
-            mapping_df[config['target_col']]
-        ))
-        
-        if config['group_col']:
-            # Group by specified column
-            grouped = self.current_working_df.groupby(config['group_col'])
-            
-            for group_val, group_df in grouped:
-                # Get unique match values in this group
-                match_values = group_df[config['match_col']].unique()
-                
-                # For each match value, check if there's a mapping
-                for match_val in match_values:
-                    if match_val in mapping_dict:
-                        # Get rows with this match value
-                        matching_rows = group_df[group_df[config['match_col']] == match_val]
-                        
-                        # Add new row for each occurrence
-                        for idx, row in matching_rows.iterrows():
-                            new_row = row.copy()
-                            
-                            # Set the target column value
-                            target_value = mapping_dict[match_val]
-                            
-                            # Check if we should blank the target
-                            if config['blank_when_equals'] and str(match_val) == str(config['blank_when_equals']):
-                                new_row[config['target_col']] = ""
-                            else:
-                                new_row[config['target_col']] = target_value
-                            
-                            # Handle other columns based on configuration
-                            if config['other_cols'] == 'blank':
-                                for col in new_row.index:
-                                    if col not in [config['target_col'], config['group_col'], config['match_col']]:
-                                        new_row[col] = ""
-                            elif config['other_cols'] == 'retain':
-                                pass  # Keep original values
-                            
-                            new_rows.append(new_row)
-        else:
-            # No grouping - process all rows
-            for idx, row in self.current_working_df.iterrows():
-                match_val = row[config['match_col']]
-                
-                if match_val in mapping_dict:
-                    new_row = row.copy()
-                    
-                    # Set the target column value
-                    target_value = mapping_dict[match_val]
-                    
-                    # Check if we should blank the target
-                    if config['blank_when_equals'] and str(match_val) == str(config['blank_when_equals']):
-                        new_row[config['target_col']] = ""
-                    else:
-                        new_row[config['target_col']] = target_value
-                    
-                    # Handle other columns
-                    if config['other_cols'] == 'blank':
-                        for col in new_row.index:
-                            if col not in [config['target_col'], config['match_col']]:
-                                new_row[col] = ""
-                    
-                    new_rows.append(new_row)
-        
-        # Add new rows to working dataframe
-        if new_rows:
-            new_df = pd.DataFrame(new_rows)
-            self.current_working_df = pd.concat([self.current_working_df, new_df], ignore_index=True)
-    
-    # NEW METHOD: Remove selected mapping
-    def remove_mapping(self):
-        """Remove selected mapping and reprocess from stage 1"""
-        selection = self.mapping_listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Warning", "Please select a mapping to remove")
-            return
-        
-        idx = selection[0]
-        
-        response = messagebox.askyesno("Confirm Removal", 
-            "Removing this mapping will reprocess all subsequent mappings.\n\n"
-            "Do you want to continue?")
-        
-        if response:
-            # Remove from sequence
-            self.mapping_sequence.pop(idx)
-            self.mapping_listbox.delete(idx)
-            
-            # Reprocess all mappings from stage 1
-            self.reprocess_mappings()
-    
-    # NEW METHOD: Reprocess all mappings from stage 1
-    def reprocess_mappings(self):
-        """Reprocess all mappings in sequence from stage 1 data"""
-        try:
-            # Reset to stage 1 data
-            self.current_working_df = pd.DataFrame(self.stage1_data)
-            
-            # Reapply all mappings in sequence
-            for mapping_info in self.mapping_sequence:
-                if mapping_info['type'] == 'column':
-                    # Reload and reapply column mapping
-                    encoding = self.detect_encoding(mapping_info['file'])
-                    if mapping_info['file'].endswith('.csv'):
-                        mapping_df = pd.read_csv(mapping_info['file'], encoding=encoding)
-                    else:
-                        mapping_df = pd.read_csv(mapping_info['file'], delimiter='\t', encoding=encoding)
-                    
-                    self.current_working_df = self.current_working_df.merge(
-                        mapping_df,
-                        on=mapping_info['key_field'],
-                        how='left'
-                    )
-                
-                elif mapping_info['type'] == 'row':
-                    # Reload and reapply row mapping
-                    encoding = self.detect_encoding(mapping_info['file'])
-                    if mapping_info['file'].endswith('.csv'):
-                        mapping_df = pd.read_csv(mapping_info['file'], encoding=encoding)
-                    else:
-                        mapping_df = pd.read_csv(mapping_info['file'], delimiter='\t', encoding=encoding)
-                    
-                    self.apply_row_mapping(mapping_df, mapping_info['config'])
-            
-            self.status_var.set(
-                f"Reprocessed mappings. Current: {len(self.current_working_df)} rows, "
-                f"{len(self.current_working_df.columns)} columns")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to reprocess mappings: {str(e)}")
-    
-    # NEW METHOD: View current columns
-    def view_current_columns(self):
-        """Display current columns in working dataframe"""
-        if self.current_working_df is None:
-            messagebox.showinfo("Info", "No data processed yet")
-            return
-        
-        popup = tk.Toplevel(self.root)
-        popup.title("Current Working Columns")
-        popup.geometry("500x450")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Current Columns in Working Data", 
-                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
-        
-        ttk.Label(popup, text=f"Total Rows: {len(self.current_working_df)} | Total Columns: {len(self.current_working_df.columns)}", 
-                 font=('TkDefaultFont', 9)).pack(pady=5)
-        
-        list_frame = ttk.Frame(popup)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        listbox = tk.Listbox(list_frame)
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
-        listbox.configure(yscrollcommand=scrollbar.set)
-        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        for col in self.current_working_df.columns:
-            listbox.insert(tk.END, col)
-        
-        ttk.Button(popup, text="Close", command=popup.destroy).pack(pady=10)
-    
     # Method to split multi-valued strings
     def split_multi_values(self, value):
         """Split comma or semicolon separated values"""
         if pd.isna(value) or value == "" or value is None:
             return [""]
         
-        # Convert to string to handle any data type
         value_str = str(value).strip()
         
-        # Handle empty string after conversion
         if not value_str:
             return [""]
         
@@ -823,12 +776,10 @@ class CSVProcessorGUI:
     # Method to detect if a value contains dictionary-like data
     def is_dictionary_like(self, value):
         """Check if a value looks like a dictionary"""
-        # Handle pandas NA, None, and empty values
         try:
             if pd.isna(value):
                 return False
         except (ValueError, TypeError):
-            # Handle cases where pd.isna raises an error (e.g., with arrays)
             if value is None:
                 return False
         
@@ -848,12 +799,10 @@ class CSVProcessorGUI:
     # Method to parse dictionary-like strings
     def parse_dictionary_value(self, value):
         """Parse dictionary-like value into key-value pairs, handling duplicate keys by collecting all values"""
-        # Handle pandas NA, None, and empty values
         try:
             if pd.isna(value):
                 return {}
         except (ValueError, TypeError):
-            # Handle cases where pd.isna raises an error
             if value is None:
                 return {}
         
@@ -867,7 +816,6 @@ class CSVProcessorGUI:
         try:
             if value_str.startswith('{') and value_str.endswith('}'):
                 parsed = json.loads(value_str)
-                # Convert to list values to handle duplicates uniformly
                 for k, v in parsed.items():
                     result[k] = [v] if not isinstance(v, list) else v
                 return result
@@ -878,7 +826,6 @@ class CSVProcessorGUI:
         try:
             parsed = ast.literal_eval(value_str)
             if isinstance(parsed, dict):
-                # Convert to list values to handle duplicates uniformly
                 for k, v in parsed.items():
                     result[k] = [v] if not isinstance(v, list) else v
                 return result
@@ -894,7 +841,6 @@ class CSVProcessorGUI:
                     key, val = line.split(':', 1)
                     key = key.strip()
                     val = val.strip()
-                    # If key already exists, append to list; otherwise create new list
                     if key in result:
                         result[key].append(val)
                     else:
@@ -903,13 +849,11 @@ class CSVProcessorGUI:
                     key, val = line.split('=', 1)
                     key = key.strip()
                     val = val.strip()
-                    # If key already exists, append to list; otherwise create new list
                     if key in result:
                         result[key].append(val)
                     else:
                         result[key] = [val]
                 else:
-                    # Store line as key with empty value
                     if line in result:
                         result[line].append("")
                     else:
@@ -936,7 +880,6 @@ class CSVProcessorGUI:
                     if self.is_dictionary_like(value):
                         dict_count += 1
                         parsed = self.parse_dictionary_value(value)
-                        # Now parsed dict has lists as values, just get the keys
                         all_keys.update(parsed.keys())
                 
                 if dict_count > len(sample_values) * 0.5:
@@ -962,7 +905,6 @@ class CSVProcessorGUI:
         ttk.Label(header_frame, text="Tip: Check the boxes for keys you want to include.", 
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
         
-        # Create scrollable frame for checkboxes
         key_frame = ttk.Frame(popup)
         key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
@@ -981,7 +923,6 @@ class CSVProcessorGUI:
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Create checkboxes for each key
         key_vars = {}
         for key in available_keys:
             var = tk.BooleanVar(value=False)
@@ -997,7 +938,6 @@ class CSVProcessorGUI:
             count = sum(1 for var in key_vars.values() if var.get())
             status_label.config(text=f"{count} of {len(available_keys)} keys selected")
         
-        # Update status when checkboxes change
         for var in key_vars.values():
             var.trace('w', lambda *args: update_status())
         
@@ -1045,36 +985,40 @@ class CSVProcessorGUI:
     
     # Method to orchestrate stage 2 processing
     def process_stage2(self):
-        """Stage 2: Finalize and prepare for export"""
-        if not self.stage1_complete or self.current_working_df is None:
+        """Stage 2: Use current working data (with all mappings applied) as final output"""
+        if not self.stage1_complete or not self.current_working_data:
             messagebox.showwarning("Warning", "Please complete Stage 1 processing first")
             return
         
         try:
-            # Use current working dataframe as final processed data
-            self.processed_data = self.current_working_df.to_dict('records')
+            self.processed_data = copy.deepcopy(self.current_working_data)
             
             self.export_button.config(state='normal')
-            self.status_var.set(f"Finalized. {len(self.processed_data)} rows ready for export.")
             
-            messagebox.showinfo("Success", 
-                f"Data finalized successfully!\n\n"
-                f"Total Rows: {len(self.processed_data)}\n"
-                f"Total Columns: {len(self.current_working_df.columns)}\n\n"
-                f"You can now export the results.")
+            num_rows = len(self.processed_data)
+            columns = set()
+            for row in self.processed_data:
+                columns.update(row.keys())
+            num_cols = len(columns)
+            
+            self.status_var.set(f"Stage 2 complete. {num_rows} rows with {num_cols} columns ready for export.")
+            
+            messagebox.showinfo("Stage 2 Complete", 
+                f"Processing complete!\n\n"
+                f"Total Rows: {num_rows}\n"
+                f"Total Columns: {num_cols}\n"
+                f"Mappings Applied: {len(self.mapping_sequence)}\n\n"
+                f"Ready to export.")
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to finalize: {str(e)}")
-            self.status_var.set("Finalization failed")
+            messagebox.showerror("Error", f"Failed to process Stage 2: {str(e)}")
+            self.status_var.set("Stage 2 processing failed")
     
     # Method to process a single row
     def process_single_row(self, row, result_rows):
         """Process a single row, handling multi-values, dictionary fields with duplicate keys, and Cartesian product"""
-        import itertools
-        
         field_expansions = {}
         
-        # Process regular fields
         for field in self.selected_fields:
             if field not in self.dictionary_fields:
                 try:
@@ -1091,7 +1035,6 @@ class CSVProcessorGUI:
                     unique_values = [""]
                 field_expansions[field] = unique_values
         
-        # Process dictionary fields with duplicate key support
         for field in self.dictionary_fields:
             if field in self.selected_keys:
                 try:
@@ -1120,7 +1063,6 @@ class CSVProcessorGUI:
                     else:
                         field_expansions[f"{field}_{key}"] = [""]
         
-        # Generate Cartesian product
         if field_expansions:
             field_names = list(field_expansions.keys())
             field_values = list(field_expansions.values())
@@ -1133,7 +1075,25 @@ class CSVProcessorGUI:
                 if new_row not in result_rows:
                     result_rows.append(new_row)
     
-    # NEW METHOD: Manage default columns - add new and remove existing (with checkboxes)
+    # Method to apply mappings (kept for backwards compatibility)
+    def apply_mappings(self, result_rows):
+        """Apply mapping files to add additional columns with original column names"""
+        for field, mapping_df in self.mapping_data.items():
+            if field in self.selected_fields:
+                if len(mapping_df.columns) >= 2:
+                    key_col = mapping_df.columns[0]
+                    value_col = mapping_df.columns[1]
+                    
+                    mapping_dict = dict(zip(mapping_df[key_col], mapping_df[value_col]))
+                    
+                    for row in result_rows:
+                        if field in row:
+                            mapped_value = mapping_dict.get(row[field], "")
+                            row[value_col] = mapped_value
+        
+        return result_rows
+    
+    # METHOD: Manage default columns - add new and remove existing (with checkboxes)
     def manage_default_columns(self, df):
         """Step A: Add default columns and remove existing columns using checkboxes"""
         popup = tk.Toplevel(self.root)
@@ -1142,7 +1102,6 @@ class CSVProcessorGUI:
         popup.transient(self.root)
         popup.grab_set()
         
-        # Instructions
         ttk.Label(popup, text="Step A: Add Default Columns & Remove Existing Columns", 
                  font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
         
@@ -1156,7 +1115,6 @@ class CSVProcessorGUI:
         ttk.Label(add_frame, text="Add new columns with default values based on existing columns:", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Frame for column additions
         add_list_frame = ttk.Frame(add_frame)
         add_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
@@ -1166,10 +1124,9 @@ class CSVProcessorGUI:
         add_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         add_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        default_columns = []  # Store (new_col_name, source_col, mapping_dict)
+        default_columns = []
         
         def add_default_column():
-            # Dialog to get new column details
             detail_popup = tk.Toplevel(popup)
             detail_popup.title("Add Default Column")
             detail_popup.geometry("500x400")
@@ -1206,7 +1163,6 @@ class CSVProcessorGUI:
                     messagebox.showwarning("Warning", "Please select a source column")
                     return
                 
-                # Parse mapping
                 mapping_dict = {}
                 mapping_lines = mapping_text.get("1.0", tk.END).strip().split('\n')
                 for line in mapping_lines:
@@ -1236,14 +1192,13 @@ class CSVProcessorGUI:
         ttk.Button(button_frame1, text="Add Column", command=add_default_column).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame1, text="Remove Selected", command=remove_default_column).pack(side=tk.LEFT, padx=5)
         
-        # Tab 2: Remove Columns (with checkboxes)
+        # Tab 2: Remove Columns
         remove_frame = ttk.Frame(notebook)
         notebook.add(remove_frame, text="Remove Columns")
         
         ttk.Label(remove_frame, text="Check columns to remove from final output:", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Create scrollable frame for checkboxes
         remove_canvas_frame = ttk.Frame(remove_frame)
         remove_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
@@ -1262,7 +1217,6 @@ class CSVProcessorGUI:
         remove_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         remove_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Create checkboxes for columns to remove
         remove_vars = {}
         
         def select_all_remove():
@@ -1294,7 +1248,6 @@ class CSVProcessorGUI:
         def cancel():
             popup.destroy()
         
-        # Bottom buttons
         bottom_frame = ttk.Frame(popup)
         bottom_frame.pack(pady=10)
         ttk.Button(bottom_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
@@ -1303,7 +1256,7 @@ class CSVProcessorGUI:
         popup.wait_window()
         return result
     
-    # NEW METHOD: Rename columns including blank headers
+    # METHOD: Rename columns including blank headers
     def rename_columns(self, df):
         """Step B: Rename columns (including blank/null headers)"""
         popup = tk.Toplevel(self.root)
@@ -1318,11 +1271,9 @@ class CSVProcessorGUI:
         ttk.Label(popup, text="Edit the 'New Name' column to rename. Leave blank for empty header.", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Main container frame
         main_container = ttk.Frame(popup)
         main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Create canvas with scrollbar for the grid
         canvas = tk.Canvas(main_container, highlightthickness=0)
         scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
@@ -1335,7 +1286,6 @@ class CSVProcessorGUI:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Header row
         header_frame = ttk.Frame(scrollable_frame, relief=tk.RIDGE, borderwidth=2)
         header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2, pady=2)
         
@@ -1353,15 +1303,12 @@ class CSVProcessorGUI:
                  width=35, anchor=tk.W,
                  background='#ffe0b3').grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
         
-        # Store entry widgets
         entry_widgets = {}
         
-        # Create rows for each column
         for idx, col in enumerate(df.columns, start=1):
             row_frame = ttk.Frame(scrollable_frame)
             row_frame.grid(row=idx, column=0, sticky=(tk.W, tk.E), padx=2, pady=1)
             
-            # Original name (read-only, with light gray background)
             original_frame = tk.Frame(row_frame, relief=tk.SOLID, borderwidth=1, bg='#f5f5f5')
             original_frame.grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
             
@@ -1370,12 +1317,10 @@ class CSVProcessorGUI:
                                      width=40, padx=5, pady=5)
             original_label.pack(fill=tk.BOTH)
             
-            # Arrow
             arrow_label = ttk.Label(row_frame, text="→", 
                                    font=('TkDefaultFont', 12))
             arrow_label.grid(row=0, column=1, padx=5)
             
-            # New name (editable, with light orange/yellow background box)
             entry_frame = tk.Frame(row_frame, relief=tk.SOLID, borderwidth=2, bg='#fff8dc')
             entry_frame.grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
             
@@ -1389,19 +1334,16 @@ class CSVProcessorGUI:
             row_frame.columnconfigure(0, weight=1)
             row_frame.columnconfigure(2, weight=1)
         
-        # Configure scrollable frame
         scrollable_frame.columnconfigure(0, weight=1)
         
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Enable mouse wheel scrolling
         def on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
         canvas.bind_all("<MouseWheel>", on_mousewheel)
         
-        # Info label
         info_frame = ttk.Frame(popup)
         info_frame.pack(fill=tk.X, padx=10, pady=5)
         
@@ -1413,7 +1355,6 @@ class CSVProcessorGUI:
         result = {}
         
         def confirm():
-            # Collect all entries
             rename_map = {}
             for original, entry in entry_widgets.items():
                 new_name = entry.get().strip()
@@ -1424,13 +1365,11 @@ class CSVProcessorGUI:
             popup.destroy()
         
         def reset():
-            """Reset all mappings to original names"""
             for original, entry in entry_widgets.items():
                 entry.delete(0, tk.END)
                 entry.insert(0, original)
         
         def clear_all():
-            """Clear all new names"""
             response = messagebox.askyesno("Clear All", 
                 "Are you sure you want to clear all new column names?")
             if response:
@@ -1441,7 +1380,6 @@ class CSVProcessorGUI:
             canvas.unbind_all("<MouseWheel>")
             popup.destroy()
         
-        # Buttons
         button_frame = ttk.Frame(popup)
         button_frame.pack(pady=10)
         ttk.Button(button_frame, text="Reset All", command=reset).pack(side=tk.LEFT, padx=5)
@@ -1452,7 +1390,7 @@ class CSVProcessorGUI:
         popup.wait_window()
         return result
     
-    # NEW METHOD: Sequence columns
+    # METHOD: Sequence columns
     def sequence_columns(self, df):
         """Step C: Set column sequence"""
         popup = tk.Toplevel(self.root)
@@ -1467,7 +1405,6 @@ class CSVProcessorGUI:
         ttk.Label(popup, text="Arrange columns in desired order (use buttons to move):", 
                  font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
         
-        # Create frame with listbox
         list_frame = ttk.Frame(popup)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
@@ -1516,7 +1453,6 @@ class CSVProcessorGUI:
                 column_listbox.insert(tk.END, item)
                 column_listbox.selection_set(column_listbox.size() - 1)
         
-        # Movement buttons
         button_frame = ttk.Frame(popup)
         button_frame.pack(pady=5)
         
@@ -1528,7 +1464,7 @@ class CSVProcessorGUI:
         result = {}
         
         def use_default():
-            result['sequence'] = None  # Use default order
+            result['sequence'] = None
             popup.destroy()
         
         def confirm():
@@ -1538,7 +1474,6 @@ class CSVProcessorGUI:
         def cancel():
             popup.destroy()
         
-        # Confirm buttons
         confirm_frame = ttk.Frame(popup)
         confirm_frame.pack(pady=10)
         ttk.Button(confirm_frame, text="Use Default Order", command=use_default).pack(side=tk.LEFT, padx=5)
@@ -1583,13 +1518,12 @@ class CSVProcessorGUI:
             messagebox.showwarning("Warning", "No processed data to export")
             return
         
-        # Convert to DataFrame for easier manipulation
         df_export = pd.DataFrame(self.processed_data)
         
-        # Step A: Manage default columns (add new, remove existing)
+        # Step A: Manage default columns
         step_a_result = self.manage_default_columns(df_export)
         
-        if not step_a_result:  # User cancelled
+        if not step_a_result:
             return
         
         # Apply default column additions
@@ -1597,10 +1531,8 @@ class CSVProcessorGUI:
             if source_col in df_export.columns:
                 def map_value(val):
                     val_str = str(val) if pd.notna(val) else ""
-                    # Check for exact match
                     if val_str in mapping_dict:
                         return mapping_dict[val_str]
-                    # Check for wildcard
                     elif '*' in mapping_dict:
                         return mapping_dict['*']
                     else:
@@ -1618,7 +1550,7 @@ class CSVProcessorGUI:
         # Step B: Rename columns
         step_b_result = self.rename_columns(df_export)
         
-        if not step_b_result:  # User cancelled
+        if not step_b_result:
             return
         
         if 'rename_map' in step_b_result:
@@ -1628,11 +1560,10 @@ class CSVProcessorGUI:
         # Step C: Sequence columns
         step_c_result = self.sequence_columns(df_export)
         
-        if not step_c_result:  # User cancelled
+        if not step_c_result:
             return
         
         if 'sequence' in step_c_result and step_c_result['sequence']:
-            # Reorder columns according to user preference
             df_export = df_export[step_c_result['sequence']]
         
         # Now proceed with file export
