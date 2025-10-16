@@ -38,6 +38,10 @@ class CSVProcessorGUI:
         self.dictionary_fields = {}
         # Initialize empty dictionary to store user-selected keys for each dictionary field
         self.selected_keys = {}
+        # Initialize dictionary to store character limit specs for each key
+        self.key_char_limits = {}
+        # Initialize dictionary to store consolidation configs (key combinations)
+        self.key_consolidations = {}
         # Initialize None to store the final processed data after transformation
         self.processed_data = None
         # Initialize empty dictionary to store loaded mapping data as DataFrames
@@ -48,8 +52,6 @@ class CSVProcessorGUI:
         self.stage1_complete = False
         # Initialize dictionary to store checkbox variables for field selection
         self.field_checkboxes = {}
-        # Initialize dictionary to store combined column configurations
-        self.combined_columns = {}
         
         # Call the UI setup method to create and arrange all GUI components
         self.setup_ui()
@@ -299,125 +301,6 @@ class CSVProcessorGUI:
         
         popup.wait_window()
     
-    # NEW METHOD: Show popup for combining dictionary keys into new column
-    def show_combine_keys_popup(self, field, available_keys):
-        """Show popup for selecting keys to combine with character limits"""
-        popup = tk.Toplevel(self.root)
-        popup.title(f"Combine Keys from Field: {field}")
-        popup.geometry("600x500")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text=f"Create Combined Column from '{field}'", 
-                 font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
-        
-        ttk.Label(popup, text="Select keys to combine and specify character limits:", 
-                 font=('TkDefaultFont', 9)).pack(pady=5)
-        
-        # Frame for key selection with character limits
-        main_container = ttk.Frame(popup)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Canvas with scrollbar
-        canvas = tk.Canvas(main_container, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Header row
-        header_frame = ttk.Frame(scrollable_frame)
-        header_frame.grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=5)
-        
-        ttk.Label(header_frame, text="Select", width=8, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, padx=5)
-        ttk.Label(header_frame, text="Key Name", width=25, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=1, padx=5)
-        ttk.Label(header_frame, text="Chars (* = all)", width=15, font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=2, padx=5)
-        
-        # Store selections
-        key_selections = {}
-        
-        # Create rows for each key
-        for idx, key in enumerate(available_keys, start=1):
-            var = tk.BooleanVar(value=False)
-            char_entry = ttk.Entry(scrollable_frame, width=12)
-            char_entry.insert(0, "*")  # Default to all characters
-            
-            cb = ttk.Checkbutton(scrollable_frame, variable=var)
-            cb.grid(row=idx, column=0, padx=5, pady=2)
-            
-            ttk.Label(scrollable_frame, text=key, width=25, anchor=tk.W).grid(row=idx, column=1, padx=5, pady=2, sticky=tk.W)
-            char_entry.grid(row=idx, column=2, padx=5, pady=2)
-            
-            key_selections[key] = {'var': var, 'chars': char_entry}
-        
-        # New column name input
-        name_frame = ttk.Frame(popup)
-        name_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(name_frame, text="New Column Name:", font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=5)
-        new_col_entry = ttk.Entry(name_frame, width=30)
-        new_col_entry.insert(0, f"{field}_combined")
-        new_col_entry.pack(side=tk.LEFT, padx=5)
-        
-        result = {}
-        
-        def confirm():
-            selected = []
-            for key, widgets in key_selections.items():
-                if widgets['var'].get():
-                    chars_str = widgets['chars'].get().strip()
-                    if not chars_str:
-                        chars_str = "*"
-                    
-                    # Validate character limit
-                    if chars_str != "*":
-                        try:
-                            chars_int = int(chars_str)
-                            if chars_int <= 0:
-                                messagebox.showwarning("Warning", f"Character limit for '{key}' must be positive")
-                                return
-                        except ValueError:
-                            messagebox.showwarning("Warning", f"Invalid character limit for '{key}': {chars_str}")
-                            return
-                    
-                    selected.append({'key': key, 'chars': chars_str})
-            
-            if not selected:
-                messagebox.showwarning("Warning", "Please select at least one key")
-                return
-            
-            new_col_name = new_col_entry.get().strip()
-            if not new_col_name:
-                messagebox.showwarning("Warning", "Please enter a column name")
-                return
-            
-            result['selected_keys'] = selected
-            result['new_column_name'] = new_col_name
-            popup.destroy()
-        
-        def cancel():
-            popup.destroy()
-        
-        # Buttons
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
-        
-        ttk.Button(button_frame, text="Confirm", command=confirm).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Skip This Field", command=cancel).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-        
-        return result
-    
     # Method to perform stage 1 processing - dictionary expansion
     def process_stage1(self):
         if self.df is None:
@@ -437,39 +320,27 @@ class CSVProcessorGUI:
             
             # Initialize dictionary to store user's key selections
             self.selected_keys = {}
-            self.combined_columns = {}
+            self.key_char_limits = {}
+            self.key_consolidations = {}
             
             # If dictionary fields are found in selected fields, show popup for key selection
             if self.dictionary_fields:
                 for field, available_keys in self.dictionary_fields.items():
                     if available_keys:
-                        # First ask if user wants to combine keys
-                        response = messagebox.askyesnocancel(
-                            "Dictionary Field Options",
-                            f"Field '{field}' contains dictionary data.\n\n"
-                            f"Click 'Yes' to combine multiple keys into one column\n"
-                            f"Click 'No' to select keys individually\n"
-                            f"Click 'Cancel' to skip this field"
-                        )
+                        result = self.show_key_selection_popup(field, available_keys)
                         
-                        if response is None:  # Cancel
-                            continue
-                        elif response:  # Yes - combine keys
-                            combine_result = self.show_combine_keys_popup(field, available_keys)
-                            if combine_result and 'selected_keys' in combine_result:
-                                self.combined_columns[field] = combine_result
-                        else:  # No - individual keys
-                            selected = self.show_key_selection_popup(field, available_keys)
-                            if selected:
-                                self.selected_keys[field] = selected
-                            else:
-                                # If user cancels, ask if they want to skip this field
-                                skip_response = messagebox.askyesno("Skip Field?", 
-                                    f"No keys selected for field '{field}'.\n\n"
-                                    f"Do you want to keep this field without dictionary expansion?")
-                                if not skip_response:
-                                    # Remove from selected fields if user doesn't want to keep it
-                                    self.selected_fields.remove(field)
+                        if result:
+                            self.selected_keys[field] = result['selected_keys']
+                            self.key_char_limits[field] = result['char_limits']
+                            self.key_consolidations[field] = result['consolidations']
+                        else:
+                            # If user cancels, ask if they want to skip this field
+                            response = messagebox.askyesno("Skip Field?", 
+                                f"No keys selected for field '{field}'.\n\n"
+                                f"Do you want to keep this field without dictionary expansion?")
+                            if not response:
+                                # Remove from selected fields if user doesn't want to keep it
+                                self.selected_fields.remove(field)
             
             # Process stage 1 data
             self.stage1_data = self.process_stage1_dataframe()
@@ -499,66 +370,6 @@ class CSVProcessorGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
             self.status_var.set("Stage 1 processing failed")
-    
-    # NEW METHOD: Process combined column values with character limits
-    def process_combined_values(self, row, field, config):
-        """Process combined column values with character limits and Cartesian product"""
-        import itertools
-        
-        try:
-            dict_value = row[field]
-        except (KeyError, TypeError):
-            dict_value = ""
-        
-        parsed_dict = self.parse_dictionary_value(dict_value)
-        
-        # Collect all values for each key with character limits
-        key_value_lists = []
-        
-        for key_config in config['selected_keys']:
-            key = key_config['key']
-            chars = key_config['chars']
-            
-            if key in parsed_dict:
-                values = []
-                for val in parsed_dict[key]:
-                    if val is None:
-                        val = ""
-                    val_str = str(val)
-                    
-                    # Apply character limit
-                    if chars != "*":
-                        char_limit = int(chars)
-                        val_str = val_str[:char_limit]
-                    
-                    values.append(val_str)
-                
-                # Remove duplicates while preserving order
-                unique_values = []
-                for v in values:
-                    if v not in unique_values:
-                        unique_values.append(v)
-                
-                if unique_values:
-                    key_value_lists.append(unique_values)
-                else:
-                    key_value_lists.append([''])
-            else:
-                key_value_lists.append([''])
-        
-        # Generate Cartesian product and concatenate
-        combined_values = []
-        if key_value_lists:
-            for combination in itertools.product(*key_value_lists):
-                # Concatenate all values in the combination
-                combined = ', '.join(str(v) for v in combination if v)
-                if combined:
-                    combined_values.append(combined)
-        
-        if not combined_values:
-            combined_values = ['']
-        
-        return combined_values
     
     # Method to process dataframe for stage 1
     def process_stage1_dataframe(self):
@@ -654,6 +465,18 @@ class CSVProcessorGUI:
             return [v.strip() for v in value_str.split(',') if v.strip()]
         else:
             return [value_str]
+    
+    # NEW METHOD: Apply character limit to a value
+    def apply_char_limit(self, value, char_limit):
+        """Apply character limit to a value. '*' means all characters."""
+        if char_limit == '*' or char_limit is None:
+            return str(value)
+        
+        try:
+            limit = int(char_limit)
+            return str(value)[:limit]
+        except (ValueError, TypeError):
+            return str(value)
     
     # Method to detect if a value contains dictionary-like data
     def is_dictionary_like(self, value):
@@ -779,30 +602,38 @@ class CSVProcessorGUI:
         
         return dict_fields
     
-    # Method to show key selection popup with checkboxes
+    # NEW METHOD: Show key selection popup with consolidation and char limit options
     def show_key_selection_popup(self, field, available_keys):
-        """Show popup for key selection in dictionary fields with checkboxes"""
+        """Show popup for key selection with consolidation and character limit options"""
         popup = tk.Toplevel(self.root)
         popup.title(f"Select Keys for Field: {field}")
-        popup.geometry("450x350")
+        popup.geometry("700x500")
         popup.transient(self.root)
         popup.grab_set()
         
         header_frame = ttk.Frame(popup)
         header_frame.pack(pady=10, padx=10, fill=tk.X)
         
-        ttk.Label(header_frame, text=f"Select keys to include from field '{field}':", 
+        ttk.Label(header_frame, text=f"Configure keys from field '{field}':", 
                  font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
         
-        ttk.Label(header_frame, text="Tip: Check the boxes for keys you want to include.", 
+        ttk.Label(header_frame, text="Tip: Select keys to include, optionally consolidate multiple keys into one column, and set character limits.", 
                  font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W, pady=(2, 0))
         
-        # Create scrollable frame for checkboxes
-        key_frame = ttk.Frame(popup)
-        key_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Create notebook for tabs
+        notebook = ttk.Notebook(popup)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        canvas = tk.Canvas(key_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(key_frame, orient="vertical", command=canvas.yview)
+        # TAB 1: Key Selection
+        key_frame = ttk.Frame(notebook)
+        notebook.add(key_frame, text="Select Keys")
+        
+        # Create scrollable frame for checkboxes
+        key_canvas_frame = ttk.Frame(key_frame)
+        key_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        canvas = tk.Canvas(key_canvas_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(key_canvas_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
         
         scrollable_frame.bind(
@@ -824,7 +655,7 @@ class CSVProcessorGUI:
             cb = ttk.Checkbutton(scrollable_frame, text=key, variable=var)
             cb.pack(anchor=tk.W, padx=5, pady=2)
         
-        status_label = ttk.Label(popup, text=f"0 of {len(available_keys)} keys selected", 
+        status_label = ttk.Label(key_frame, text=f"0 of {len(available_keys)} keys selected", 
                                 foreground='blue')
         status_label.pack(pady=(0, 5))
         
@@ -836,8 +667,6 @@ class CSVProcessorGUI:
         for var in key_vars.values():
             var.trace('w', lambda *args: update_status())
         
-        selected_keys = []
-        
         def on_select_all():
             for var in key_vars.values():
                 var.set(True)
@@ -846,17 +675,7 @@ class CSVProcessorGUI:
             for var in key_vars.values():
                 var.set(False)
         
-        def on_confirm():
-            nonlocal selected_keys
-            selected_keys = [key for key, var in key_vars.items() if var.get()]
-            popup.destroy()
-        
-        def on_cancel():
-            nonlocal selected_keys
-            selected_keys = []
-            popup.destroy()
-        
-        helper_button_frame = ttk.Frame(popup)
+        helper_button_frame = ttk.Frame(key_frame)
         helper_button_frame.pack(pady=(5, 5))
         
         ttk.Button(helper_button_frame, text="Select All", 
@@ -865,18 +684,160 @@ class CSVProcessorGUI:
         ttk.Button(helper_button_frame, text="Clear All", 
                   command=on_clear_all).pack(side=tk.LEFT, padx=5)
         
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
+        # TAB 2: Consolidate Keys
+        consolidate_frame = ttk.Frame(notebook)
+        notebook.add(consolidate_frame, text="Consolidate Keys")
         
-        ttk.Button(button_frame, text="Confirm Selection", 
-                  command=on_confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Label(consolidate_frame, text="Combine two or more selected keys into a single new column:", 
+                 font=('TkDefaultFont', 9, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
         
-        ttk.Button(button_frame, text="Cancel", 
-                  command=on_cancel).pack(side=tk.LEFT, padx=5)
+        consolidation_list = []
+        
+        consolidate_listbox_frame = ttk.Frame(consolidate_frame)
+        consolidate_listbox_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        consolidate_listbox = tk.Listbox(consolidate_listbox_frame, height=10)
+        consolidate_scrollbar = ttk.Scrollbar(consolidate_listbox_frame, orient="vertical", command=consolidate_listbox.yview)
+        consolidate_listbox.configure(yscrollcommand=consolidate_scrollbar.set)
+        consolidate_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        consolidate_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        def add_consolidation():
+            # Dialog for consolidation config
+            cons_popup = tk.Toplevel(popup)
+            cons_popup.title("Add Key Consolidation")
+            cons_popup.geometry("500x300")
+            cons_popup.transient(popup)
+            cons_popup.grab_set()
+            
+            ttk.Label(cons_popup, text="New Column Name:", font=('TkDefaultFont', 9, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
+            new_col_name = ttk.Entry(cons_popup, width=40)
+            new_col_name.grid(row=0, column=1, padx=10, pady=10)
+            
+            ttk.Label(cons_popup, text="Select Keys to Consolidate:", font=('TkDefaultFont', 9, 'bold')).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
+            
+            # Create frame with checkboxes for key selection
+            cons_key_frame = ttk.Frame(cons_popup)
+            cons_key_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=10, pady=5)
+            
+            cons_key_canvas = tk.Canvas(cons_key_frame, highlightthickness=0, height=120)
+            cons_key_scrollbar = ttk.Scrollbar(cons_key_frame, orient="vertical", command=cons_key_canvas.yview)
+            cons_key_scrollable = ttk.Frame(cons_key_canvas)
+            
+            cons_key_scrollable.bind(
+                "<Configure>",
+                lambda e: cons_key_canvas.configure(scrollregion=cons_key_canvas.bbox("all"))
+            )
+            
+            cons_key_canvas.create_window((0, 0), window=cons_key_scrollable, anchor="nw")
+            cons_key_canvas.configure(yscrollcommand=cons_key_scrollbar.set)
+            
+            cons_key_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            cons_key_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            cons_key_vars = {}
+            for key in available_keys:
+                var = tk.BooleanVar(value=False)
+                cons_key_vars[key] = var
+                cb = ttk.Checkbutton(cons_key_scrollable, text=key, variable=var)
+                cb.pack(anchor=tk.W, padx=5, pady=2)
+            
+            def save_consolidation():
+                col_name = new_col_name.get().strip()
+                selected = [key for key, var in cons_key_vars.items() if var.get()]
+                
+                if not col_name:
+                    messagebox.showwarning("Warning", "Please enter a column name")
+                    return
+                
+                if len(selected) < 2:
+                    messagebox.showwarning("Warning", "Please select at least 2 keys to consolidate")
+                    return
+                
+                consolidation_list.append({'name': col_name, 'keys': selected})
+                consolidate_listbox.insert(tk.END, f"{col_name}: {', '.join(selected)}")
+                cons_popup.destroy()
+            
+            ttk.Button(cons_popup, text="Add Consolidation", command=save_consolidation).grid(row=3, column=0, columnspan=2, pady=15)
+        
+        def remove_consolidation():
+            selection = consolidate_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                consolidate_listbox.delete(idx)
+                consolidation_list.pop(idx)
+        
+        cons_button_frame = ttk.Frame(consolidate_frame)
+        cons_button_frame.pack(pady=5)
+        ttk.Button(cons_button_frame, text="Add Consolidation", command=add_consolidation).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cons_button_frame, text="Remove Selected", command=remove_consolidation).pack(side=tk.LEFT, padx=5)
+        
+        # TAB 3: Character Limits
+        char_limit_frame = ttk.Frame(notebook)
+        notebook.add(char_limit_frame, text="Character Limits")
+        
+        ttk.Label(char_limit_frame, text="Set character limit for each key (leave blank or use '*' for all characters):", 
+                 font=('TkDefaultFont', 9, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+        
+        char_limits = {}
+        
+        char_limit_canvas_frame = ttk.Frame(char_limit_frame)
+        char_limit_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        char_limit_canvas = tk.Canvas(char_limit_canvas_frame, highlightthickness=0)
+        char_limit_scrollbar = ttk.Scrollbar(char_limit_canvas_frame, orient="vertical", command=char_limit_canvas.yview)
+        char_limit_scrollable = ttk.Frame(char_limit_canvas)
+        
+        char_limit_scrollable.bind(
+            "<Configure>",
+            lambda e: char_limit_canvas.configure(scrollregion=char_limit_canvas.bbox("all"))
+        )
+        
+        char_limit_canvas.create_window((0, 0), window=char_limit_scrollable, anchor="nw")
+        char_limit_canvas.configure(yscrollcommand=char_limit_scrollbar.set)
+        
+        char_limit_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        char_limit_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        for key in available_keys:
+            key_frame_row = ttk.Frame(char_limit_scrollable)
+            key_frame_row.pack(fill=tk.X, padx=5, pady=5)
+            
+            ttk.Label(key_frame_row, text=f"{key}:", width=20, anchor=tk.W).pack(side=tk.LEFT, padx=5)
+            
+            char_entry = ttk.Entry(key_frame_row, width=15)
+            char_entry.insert(0, "*")
+            char_entry.pack(side=tk.LEFT, padx=5)
+            
+            ttk.Label(key_frame_row, text="(number or '*' for all)", font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=5)
+            
+            char_limits[key] = char_entry
+        
+        result = {'selected_keys': [], 'char_limits': {}, 'consolidations': []}
+        
+        def confirm():
+            result['selected_keys'] = [key for key, var in key_vars.items() if var.get()]
+            result['consolidations'] = consolidation_list.copy()
+            
+            for key, entry in char_limits.items():
+                limit_val = entry.get().strip()
+                result['char_limits'][key] = limit_val if limit_val else '*'
+            
+            popup.destroy()
+        
+        def cancel():
+            result = None
+            popup.destroy()
+        
+        # Bottom buttons
+        bottom_frame = ttk.Frame(popup)
+        bottom_frame.pack(pady=10)
+        ttk.Button(bottom_frame, text="Confirm Selection", command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(bottom_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
         
         popup.wait_window()
         
-        return selected_keys
+        return result if result['selected_keys'] else None
     
     # Method to orchestrate stage 2 processing
     def process_stage2(self):
@@ -901,12 +862,12 @@ class CSVProcessorGUI:
     
     # Method to process a single row
     def process_single_row(self, row, result_rows):
-        """Process a single row, handling multi-values, dictionary fields with duplicate keys, combined columns, and Cartesian product"""
+        """Process a single row with consolidation and character limits support"""
         import itertools
         
         field_expansions = {}
         
-        # Process regular fields
+        # Process regular fields (non-dictionary)
         for field in self.selected_fields:
             if field not in self.dictionary_fields:
                 try:
@@ -923,15 +884,7 @@ class CSVProcessorGUI:
                     unique_values = [""]
                 field_expansions[field] = unique_values
         
-        # Process combined columns first
-        for field in self.combined_columns:
-            if field in self.dictionary_fields:
-                config = self.combined_columns[field]
-                combined_values = self.process_combined_values(row, field, config)
-                new_col_name = config['new_column_name']
-                field_expansions[new_col_name] = combined_values
-        
-        # Process dictionary fields with individual key selection
+        # Process dictionary fields
         for field in self.dictionary_fields:
             if field in self.selected_keys:
                 try:
@@ -940,13 +893,20 @@ class CSVProcessorGUI:
                     dict_value = ""
                 
                 parsed_dict = self.parse_dictionary_value(dict_value)
+                char_limits = self.key_char_limits.get(field, {})
+                consolidations = self.key_consolidations.get(field, [])
                 
+                # First, process individual keys
                 for key in self.selected_keys[field]:
                     if key in parsed_dict:
                         all_key_values = []
                         for val in parsed_dict[key]:
                             if val is None:
                                 val = ""
+                            # Apply character limit
+                            char_limit = char_limits.get(key, '*')
+                            val = self.apply_char_limit(val, char_limit)
+                            
                             split_values = self.split_multi_values(val)
                             all_key_values.extend(split_values)
                         
@@ -959,6 +919,33 @@ class CSVProcessorGUI:
                         field_expansions[f"{field}_{key}"] = unique_values
                     else:
                         field_expansions[f"{field}_{key}"] = [""]
+                
+                # Process consolidations
+                for consolidation in consolidations:
+                    new_col_name = consolidation['name']
+                    cons_keys = consolidation['keys']
+                    
+                    # Build consolidated values
+                    consolidated_values = []
+                    for cons_key in cons_keys:
+                        if cons_key in parsed_dict:
+                            for val in parsed_dict[cons_key]:
+                                if val is None:
+                                    val = ""
+                                # Apply character limit
+                                char_limit = char_limits.get(cons_key, '*')
+                                val = self.apply_char_limit(val, char_limit)
+                                consolidated_values.append(val)
+                    
+                    # Create unique values list
+                    unique_cons_values = []
+                    for val in consolidated_values:
+                        if val and val not in unique_cons_values:
+                            unique_cons_values.append(val)
+                    if not unique_cons_values:
+                        unique_cons_values = [""]
+                    
+                    field_expansions[new_col_name] = unique_cons_values
         
         # Generate Cartesian product
         if field_expansions:
@@ -991,7 +978,7 @@ class CSVProcessorGUI:
         
         return result_rows
     
-    # NEW METHOD: Manage default columns - add new and remove existing (with checkboxes)
+    # Method to manage default columns - add new and remove existing (with checkboxes)
     def manage_default_columns(self, df):
         """Step A: Add default columns and remove existing columns using checkboxes"""
         popup = tk.Toplevel(self.root)
@@ -1160,3 +1147,137 @@ class CSVProcessorGUI:
         
         popup.wait_window()
         return result
+    
+    # Method to rename columns including blank headers
+    def rename_columns(self, df):
+        """Step B: Rename columns (including blank/null headers)"""
+        popup = tk.Toplevel(self.root)
+        popup.title("Rename Columns")
+        popup.geometry("900x600")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Step B: Rename Columns", 
+                 font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
+        
+        ttk.Label(popup, text="Edit the 'New Name' column to rename. Leave blank for empty header.", 
+                 font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+        
+        # Main container frame
+        main_container = ttk.Frame(popup)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create canvas with scrollbar for the grid
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Header row
+        header_frame = ttk.Frame(scrollable_frame, relief=tk.RIDGE, borderwidth=2)
+        header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2, pady=2)
+        
+        ttk.Label(header_frame, text="Original Column Name", 
+                 font=('TkDefaultFont', 9, 'bold'), 
+                 width=35, anchor=tk.W, 
+                 background='#e0e0e0').grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(header_frame, text="→", 
+                 font=('TkDefaultFont', 12, 'bold'),
+                 width=3, anchor=tk.CENTER).grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Label(header_frame, text="New Column Name (Editable)", 
+                 font=('TkDefaultFont', 9, 'bold'), 
+                 width=35, anchor=tk.W,
+                 background='#ffe0b3').grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        
+        # Store entry widgets
+        entry_widgets = {}
+        
+        # Create rows for each column
+        for idx, col in enumerate(df.columns, start=1):
+            row_frame = ttk.Frame(scrollable_frame)
+            row_frame.grid(row=idx, column=0, sticky=(tk.W, tk.E), padx=2, pady=1)
+            
+            # Original name (read-only, with light gray background)
+            original_frame = tk.Frame(row_frame, relief=tk.SOLID, borderwidth=1, bg='#f5f5f5')
+            original_frame.grid(row=0, column=0, padx=2, pady=2, sticky=(tk.W, tk.E))
+            
+            original_label = tk.Label(original_frame, text=col, 
+                                     anchor=tk.W, bg='#f5f5f5',
+                                     width=40, padx=5, pady=5)
+            original_label.pack(fill=tk.BOTH)
+            
+            # Arrow
+            arrow_label = ttk.Label(row_frame, text="→", 
+                                   font=('TkDefaultFont', 12))
+            arrow_label.grid(row=0, column=1, padx=5)
+            
+            # New name (editable, with light orange/yellow background box)
+            entry_frame = tk.Frame(row_frame, relief=tk.SOLID, borderwidth=2, bg='#fff8dc')
+            entry_frame.grid(row=0, column=2, padx=2, pady=2, sticky=(tk.W, tk.E))
+            
+            entry = tk.Entry(entry_frame, width=40, 
+                           font=('TkDefaultFont', 9),
+                           bg='#fffaed', relief=tk.FLAT)
+            entry.insert(0, col)
+            entry.pack(fill=tk.BOTH, padx=3, pady=3)
+            entry_widgets[col] = entry
+            
+            row_frame.columnconfigure(0, weight=1)
+            row_frame.columnconfigure(2, weight=1)
+        
+        # Configure scrollable frame
+        scrollable_frame.columnconfigure(0, weight=1)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Enable mouse wheel scrolling
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        
+        # Info label
+        info_frame = ttk.Frame(popup)
+        info_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        info_label = ttk.Label(info_frame, 
+                              text=f"Total columns: {len(df.columns)} | Tip: Leave field blank for empty header", 
+                              font=('TkDefaultFont', 9), foreground='blue')
+        info_label.pack(side=tk.LEFT)
+        
+        result = {}
+        
+        def confirm():
+            # Collect all entries
+            rename_map = {}
+            for original, entry in entry_widgets.items():
+                new_name = entry.get().strip()
+                rename_map[original] = new_name
+            
+            result['rename_map'] = rename_map
+            canvas.unbind_all("<MouseWheel>")
+            popup.destroy()
+        
+        def reset():
+            """Reset all mappings to original names"""
+            for original, entry in entry_widgets.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, original)
+        
+        def clear_all():
+            """Clear all new names"""
+            response = messagebox.askyesno("Clear All", 
+                "Are you sure you want to clear all new column names?")
+            if response:
+                for entry in entry_widgets.values():
+                    entry.delete(0, tk.END
