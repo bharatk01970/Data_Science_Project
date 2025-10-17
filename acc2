@@ -4,10 +4,12 @@ def expand_combined_keys(self, field_expansions, combine_info):
     keys = combine_info['keys']
     char_limits = combine_info['char_limits']
 
-    # Truncate each key's values first
     truncated_lists = []
     for key in keys:
         vals = field_expansions.get(key, [""])
+        # If the extracted list is empty, keep one empty string to preserve product
+        if not vals:
+            vals = [""]
         limit = char_limits.get(key, '*')
         if limit != '*':
             try:
@@ -17,117 +19,15 @@ def expand_combined_keys(self, field_expansions, combine_info):
                 pass
         truncated_lists.append(vals)
 
-    # Cartesian product tuples (e.g. A × B)
+    # Ensure no empty iterable passed to product
+    if not truncated_lists or any(len(v) == 0 for v in truncated_lists):
+        return new_col, [""]
+
     product_tuples = list(itertools.product(*truncated_lists))
 
-    # Flatten product tuples into sequence, but by keys order
     combined_values = []
-    # For keys=[A,B]
-    # for each a in A:
-    #    for each b in B:
-    #        yield b
-    #    yield a
-    #
-    # However, your requirement is:
-    # b1
-    # b2
-    # b3
-    # a1
-    # b1
-    # b2
-    # b3
-    # a2
-
-    # We'll achieve this by building blocks of values per tuple:
-    # For product tuples:
-    # For each tuple, output values in order, one per row,
-    # but for your required pattern we switch order to match keys => must reorder keys
-
-    # NOTE: Your example shows the first key is 'A' but combined column expands as b1,b2,b3,a1,b1,b2,b3,a2 i.e., B repeated for each A value.
-    # So to implement that, we iterate keys in reversed order per tuple.
-
     for tup in product_tuples:
-        # For each tuple, output per key values (reversed for your pattern) in separate rows
+        # Reverse order for correct b×a pattern
         for val in reversed(tup):
             combined_values.append(val)
-
     return new_col, combined_values
-
-def process_single_row(self, row, result_rows):
-    import itertools
-
-    field_expansions = {}
-
-    # Expand non-dictionary fields
-    for field in self.selected_fields:
-        if field not in self.dictionary_fields:
-            try:
-                field_value = row[field]
-            except (KeyError, TypeError):
-                field_value = ""
-            values = self.split_multi_values(field_value)
-            unique_values = []
-            for val in values:
-                if val and val not in unique_values:
-                    unique_values.append(val)
-            if not unique_values:
-                unique_values = [""]
-            field_expansions[field] = unique_values
-
-    # Expand dictionary keys
-    for field in self.dictionary_fields:
-        if field in self.selected_keys:
-            try:
-                dict_value = row[field]
-            except (KeyError, TypeError):
-                dict_value = ""
-            parsed_dict = self.parse_dictionary_value(dict_value)
-            for key in self.selected_keys[field]:
-                if key in parsed_dict:
-                    all_key_values = []
-                    for val in parsed_dict[key]:
-                        if val is None:
-                            val = ""
-                        split_values = self.split_multi_values(val)
-                        all_key_values.extend(split_values)
-                    unique_values = []
-                    for val in all_key_values:
-                        if val and val not in unique_values:
-                            unique_values.append(val)
-                    if not unique_values:
-                        unique_values = [""]
-                    field_expansions[f"{field}_{key}"] = unique_values
-                else:
-                    field_expansions[f"{field}_{key}"] = [""]
-
-    # Combine keys via updated method
-    if hasattr(self, 'combined_key_info') and self.combined_key_info:
-        for field, combo_info in self.combined_key_info.items():
-            new_col, combined_values = self.expand_combined_keys(field_expansions, combo_info)
-            # Remove individual keys
-            for key in combo_info['keys']:
-                field_expansions.pop(key, None)
-            # Insert new combined column values
-            field_expansions[new_col] = combined_values
-
-    # Calculate new combined_len
-    combined_len = 0
-    if hasattr(self, 'combined_key_info') and self.combined_key_info:
-        combined_col = list(self.combined_key_info.values())[0]['new_col']
-        combined_len = len(field_expansions[combined_col])
-    else:
-        combined_len = max(len(v) for v in field_expansions.values()) if field_expansions else 1
-
-    aligned_expansions = {}
-    for k, v in field_expansions.items():
-        if len(v) == combined_len:
-            aligned_expansions[k] = v
-        else:
-            repeats = (combined_len // len(v)) + 1
-            extended = (v * repeats)[:combined_len]
-            aligned_expansions[k] = extended
-
-    # Generate output rows
-    for i in range(combined_len):
-        new_row = {k: aligned_expansions[k][i] for k in aligned_expansions}
-        result_rows.append(new_row)
