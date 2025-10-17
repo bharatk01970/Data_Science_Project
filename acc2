@@ -1,195 +1,69 @@
-import fnmatch  # Add this import at the top of your file
+# Inside CSVProcessorGUI class
 
-def apply_mapping(value, mapping_dict):
-    """Apply mapping with wildcard pattern support"""
-    value_str = str(value) if value is not None else ""
-    
-    # First try exact matches
-    if value_str in mapping_dict:
-        return mapping_dict[value_str]
-    
-    # Then try pattern matches
-    for pattern, mapped_val in mapping_dict.items():
-        if pattern != "*" and fnmatch.fnmatch(value_str, pattern):
-            return mapped_val
-    
-    # Finally use wildcard (*) as catch-all if present
-    if "*" in mapping_dict:
-        return mapping_dict["*"]
-    
-    return ""
+def choose_mapping_mode(self):
+    """Show dialog: for each mapping field, let the user choose output type (direct or mapped)."""
+    # Save: field → mode chosen ('input' or 'mapping')
+    field_modes = {}
 
-def manage_default_columns(self, df):
-    """Step A: Add default columns and remove existing columns using checkboxes"""
+    if not self.mapping_data:
+        return {}
+
     popup = tk.Toplevel(self.root)
-    popup.title("Manage Default Columns")
-    popup.geometry("600x500")
-    popup.transient(self.root)
+    popup.title("Select Mapping Usage Mode")
+    popup.geometry("400x50" + str(70 * len(self.mapping_data)))
     popup.grab_set()
-    
-    ttk.Label(popup, text="Step A: Add Default Columns & Remove Existing Columns", 
-             font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
-    
-    notebook = ttk.Notebook(popup)
-    notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-    
-    # Tab 1: Add Default Columns
-    add_frame = ttk.Frame(notebook)
-    notebook.add(add_frame, text="Add Default Columns")
-    
-    ttk.Label(add_frame, text="Add new columns with default values based on existing columns:", 
-             font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-    
-    # Frame for column additions
-    add_list_frame = ttk.Frame(add_frame)
-    add_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-    
-    add_listbox = tk.Listbox(add_list_frame, height=10)
-    add_scrollbar = ttk.Scrollbar(add_list_frame, orient="vertical", command=add_listbox.yview)
-    add_listbox.configure(yscrollcommand=add_scrollbar.set)
-    add_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    add_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
-    default_columns = []  # Store (new_col_name, source_col, mapping_dict)
-    
-    def add_default_column():
-        # Dialog to get new column details
-        detail_popup = tk.Toplevel(popup)
-        detail_popup.title("Add Default Column")
-        detail_popup.geometry("500x450")
-        detail_popup.transient(popup)
-        detail_popup.grab_set()
-        
-        ttk.Label(detail_popup, text="New Column Name:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
-        new_col_entry = ttk.Entry(detail_popup, width=30)
-        new_col_entry.grid(row=0, column=1, padx=10, pady=5)
-        
-        ttk.Label(detail_popup, text="Source Column:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=5)
-        source_var = tk.StringVar()
-        source_combo = ttk.Combobox(detail_popup, textvariable=source_var, width=28, state='readonly')
-        source_combo['values'] = list(df.columns)
-        source_combo.grid(row=1, column=1, padx=10, pady=5)
-        
-        ttk.Label(detail_popup, text="Value Mapping (format: source_value=default_value, one per line):", 
-                 font=('TkDefaultFont', 9)).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
-        
-        mapping_text = tk.Text(detail_popup, height=10, width=50)
-        mapping_text.grid(row=3, column=0, columnspan=2, padx=10, pady=5)
-        
-        # Updated example text with wildcard patterns
-        example_text = """Examples:
-Value1=DefaultA
-Value2=DefaultB
-*text*=Contains_Text
-text*=Starts_With_Text
-*text=Ends_With_Text
-*=DefaultForAll"""
-        
-        ttk.Label(detail_popup, text=example_text, 
-                 font=('TkDefaultFont', 8), foreground='gray').grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10)
-        
-        def save_mapping():
-            new_col = new_col_entry.get().strip()
-            source_col = source_var.get().strip()
-            
-            if not new_col:
-                messagebox.showwarning("Warning", "Please enter a new column name")
-                return
-            if not source_col:
-                messagebox.showwarning("Warning", "Please select a source column")
-                return
-            
-            # Parse mapping with enhanced pattern support
-            mapping_dict = {}
-            mapping_lines = mapping_text.get("1.0", tk.END).strip().split('
-')
-            
-            for line in mapping_lines:
-                line = line.strip()
-                if not line or '=' not in line:
-                    continue
-                
-                try:
-                    source_val, default_val = line.split('=', 1)
-                    source_val = source_val.strip()
-                    default_val = default_val.strip()
-                    mapping_dict[source_val] = default_val
-                except ValueError:
-                    continue
-            
-            if not mapping_dict:
-                messagebox.showwarning("Warning", "Please provide at least one mapping")
-                return
-            
-            # Add to default columns list
-            default_columns.append((new_col, source_col, mapping_dict))
-            add_listbox.insert(tk.END, f"{new_col} <- {source_col} ({len(mapping_dict)} mappings)")
-            
-            detail_popup.destroy()
-        
-        ttk.Button(detail_popup, text="Save Mapping", command=save_mapping).grid(row=5, column=0, columnspan=2, pady=10)
-    
-    # Add button to create new default column
-    ttk.Button(add_frame, text="Add Default Column", command=add_default_column).pack(pady=10)
-    
-    # Tab 2: Remove Existing Columns (existing code can remain the same)
-    remove_frame = ttk.Frame(notebook)
-    notebook.add(remove_frame, text="Remove Columns")
-    
-    ttk.Label(remove_frame, text="Select columns to remove:", 
-             font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-    
-    # Create checkboxes for each column to potentially remove
-    remove_vars = {}
-    remove_canvas = tk.Canvas(remove_frame, height=300)
-    remove_scrollbar = ttk.Scrollbar(remove_frame, orient="vertical", command=remove_canvas.yview)
-    remove_checkbox_frame = ttk.Frame(remove_canvas)
-    
-    remove_checkbox_frame.bind(
-        "<Configure>",
-        lambda e: remove_canvas.configure(scrollregion=remove_canvas.bbox("all"))
-    )
-    
-    remove_canvas.create_window((0, 0), window=remove_checkbox_frame, anchor="nw")
-    remove_canvas.configure(yscrollcommand=remove_scrollbar.set)
-    
-    remove_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-    remove_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=10)
-    
-    for col in df.columns:
-        var = tk.BooleanVar(value=False)
-        remove_vars[col] = var
-        ttk.Checkbutton(remove_checkbox_frame, text=col, variable=var).pack(anchor=tk.W, padx=5, pady=2)
-    
-    def apply_changes():
-        # Apply default column additions with enhanced mapping
-        modified_df = df.copy()
-        
-        for new_col, source_col, mapping_dict in default_columns:
-            if source_col in modified_df.columns:
-                modified_df[new_col] = modified_df[source_col].apply(
-                    lambda x: apply_mapping(x, mapping_dict)
-                )
-        
-        # Remove selected columns
-        cols_to_remove = [col for col, var in remove_vars.items() if var.get()]
-        if cols_to_remove:
-            modified_df = modified_df.drop(columns=cols_to_remove)
-        
-        # Update the main dataframe
-        self.df = modified_df
-        
-        # Refresh field checkboxes
-        self.populate_field_checkboxes()
-        
+
+    ttk.Label(popup, text="Choose for each mapped field:").pack(pady=10)
+
+    var_dict = {}
+    for field in self.mapping_data:
+        # Default: 'input'
+        var = tk.StringVar(value="input")
+        var_dict[field] = var
+        frame = ttk.Frame(popup)
+        frame.pack(anchor=tk.W, fill=tk.X, padx=10, pady=3)
+
+        ttk.Label(frame, text=f"Field '{field}':").pack(side=tk.LEFT, padx=(0,8))
+        ttk.Radiobutton(frame, text="Input Value", variable=var, value="input").pack(side=tk.LEFT)
+        ttk.Radiobutton(frame, text="Mapped Value", variable=var, value="mapping").pack(side=tk.LEFT)
+
+    def on_confirm():
+        for field, var in var_dict.items():
+            field_modes[field] = var.get()
         popup.destroy()
-        
-        # Show summary
-        added_cols = len(default_columns)
-        removed_cols = len(cols_to_remove)
-        messagebox.showinfo("Changes Applied", 
-                          f"Added {added_cols} default columns
-Removed {removed_cols} columns")
-    
-    # Apply button
-    ttk.Button(popup, text="Apply Changes", command=apply_changes).pack(pady=10)
+
+    ttk.Button(popup, text="Confirm", command=on_confirm).pack(pady=10)
+    popup.wait_window()
+    self.field_mapping_modes = field_modes
+
+# Call this dialog inside process_stage2 before generating output
+# Example placement in process_stage2 AFTER ensuring mappings & stage1_data:
+def process_stage2(self):
+    ...
+    if self.mapping_data:
+        self.choose_mapping_mode()
+        # self.field_mapping_modes: dict, e.g.: {'Y': 'mapping', 'Z': 'input'}
+    else:
+        self.field_mapping_modes = {}
+    self.processed_data = self.apply_mappings(self.stage1_data.copy())
+    ...
+
+# Major change in apply_mappings to honor user mode choice:
+def apply_mappings(self, result_rows):
+    """
+    NEW: For each field with mapping, use input or mapped values per user choice
+    """
+    for field, mapping_df in self.mapping_data.items():
+        mode = self.field_mapping_modes.get(field, "input")
+        if len(mapping_df.columns) >= 2:
+            key_col = mapping_df.columns[0]
+            value_col = mapping_df.columns[1]
+            mapping_dict = dict(zip(mapping_df[key_col], mapping_df[value_col]))
+
+            for row in result_rows:
+                if field in row:
+                    if mode == "mapping":
+                        mapped_value = mapping_dict.get(row[field], "")
+                        row[field] = mapped_value  # replace original with mapped
+                    # If mode == "input", leave row[field] unchanged
+    return result_rows
