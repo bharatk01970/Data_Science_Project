@@ -4,12 +4,10 @@ def expand_combined_keys(self, field_expansions, combine_info):
     keys = combine_info['keys']
     char_limits = combine_info['char_limits']
 
+    # Apply truncation for each key independently (before product)
     truncated_lists = []
     for key in keys:
         vals = field_expansions.get(key, [""])
-        # If the extracted list is empty, keep one empty string to preserve product
-        if not vals:
-            vals = [""]
         limit = char_limits.get(key, '*')
         if limit != '*':
             try:
@@ -18,16 +16,14 @@ def expand_combined_keys(self, field_expansions, combine_info):
             except:
                 pass
         truncated_lists.append(vals)
-
-    # Ensure no empty iterable passed to product
-    if not truncated_lists or any(len(v) == 0 for v in truncated_lists):
-        return new_col, [""]
-
+    
+    # Generate cartesian product to get combined pairs/triples etc
     product_tuples = list(itertools.product(*truncated_lists))
 
+    # The new combined column will have each element of the tuples in sequence, depending on keys order
     combined_values = []
     for tup in product_tuples:
-        # Reverse order for correct b×a pattern
-        for val in reversed(tup):
-            combined_values.append(val)
+        # Append values in order, each as separate row
+        combined_values.extend(tup)
+
     return new_col, combined_values
