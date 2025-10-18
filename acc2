@@ -1,4 +1,4 @@
-Complete Code for New and Updated Functions1. NEW FUNCTION: apply_reference_based_repetitionInsert BEFORE apply_column_combination (around line 550)def apply_reference_based_repetition(self, result_rows, reference_columns, combined_column_name):
+def apply_reference_based_repetition(self, result_rows, reference_columns, combined_column_name):
     """Apply reference-based repetition - create combined output with repeated values"""
     if not reference_columns:
         return result_rows
@@ -40,7 +40,16 @@ Complete Code for New and Updated Functions1. NEW FUNCTION: apply_reference_base
         new_row = {combined_column_name: ', '.join(combined_values) if combined_values else ''}
         combined_rows.append(new_row)
     
-    return combined_rows2. UPDATED FUNCTION: show_column_combination_popupReplace entire function (around line 470)def show_column_combination_popup(self, columns):
+    return combined_rows
+
+
+
+
+
+
+
+№##№#####
+def show_column_combination_popup(self, columns):
     """Show popup to select columns for combination with reference-based repetition"""
     popup = tk.Toplevel(self.root)
     popup.title("Column Combination & Reference-Based Repetition")
@@ -185,7 +194,15 @@ Complete Code for New and Updated Functions1. NEW FUNCTION: apply_reference_base
     ttk.Button(button_frame, text="Skip (No Changes)", command=skip).pack(side=tk.LEFT, padx=5)
     
     popup.wait_window()
-    return result3. UPDATED CODE SECTION in process_stage1 methodFind and replace this section (around line 690)FIND THIS:# Show column combination popup
+    return result
+
+
+
+
+
+##### in process Stage 1
+
+# Show column combination popup
             combination_result = self.show_column_combination_popup(temp_stage1_columns)
             
             # Apply column combination if selected
@@ -196,7 +213,13 @@ Complete Code for New and Updated Functions1. NEW FUNCTION: apply_reference_base
                     combination_result['new_name']
                 )
             else:
-                self.stage1_data = temp_stage1_dataREPLACE WITH THIS:# Show column combination popup
+                self.stage1_data = temp_stage1_data
+
+
+REPLACE WITH THIS:
+
+
+# Show column combination popup
             combination_result = self.show_column_combination_popup(temp_stage1_columns)
             
             # Apply column combination if selected
@@ -221,4 +244,4 @@ Complete Code for New and Updated Functions1. NEW FUNCTION: apply_reference_base
                                     f"Combined column: {combination_result['combined_name']}\n"
                                     f"Total rows generated: {len(self.stage1_data)}")
             else:
-                self.stage1_data = temp_stage1_dataSummary:1 NEW function added: apply_reference_based_repetition1 COMPLETE function replaced: show_column_combination_popup1 SMALL section updated: In process_stage1 methodCopy and paste these exact code blocks into your file at the specified locations! ✅
+                self.stage1_data = temp_stage1_data
