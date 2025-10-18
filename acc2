@@ -40,17 +40,32 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
             else:
                 column_values[col] = []
         
+        # DEBUG: Print what we collected
+        print(f"\n=== DEBUG: Processing Row ===")
+        print(f"Columns to combine: {columns_to_combine}")
+        print(f"Column values collected:")
+        for col, vals in column_values.items():
+            print(f"  {col}: {vals}")
+        print(f"Reference column: '{reference_column}'")
+        print(f"Repeat columns: {repeat_columns}")
+        
         # Get reference column values if specified
         ref_values = []
         if reference_column and reference_column in column_values:
             ref_values = column_values[reference_column]
+            print(f"Reference values found: {ref_values}")
+        else:
+            print(f"No reference values (reference_column='{reference_column}', in column_values={reference_column in column_values})")
         
         # If no reference or no repeat columns, just combine all values
         if not reference_column or not repeat_columns or not ref_values:
+            print("MODE: Simple combination (no repetition)")
             # Simple combination - all values in order, each in separate row
             all_values = []
             for col in columns_to_combine:
                 all_values.extend(column_values.get(col, []))
+            
+            print(f"All values to add: {all_values}")
             
             # Create one row per value
             for value in all_values:
@@ -61,27 +76,30 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
                         new_row[key] = val
                 # Add combined column with single value
                 new_row[new_column_name] = value
-                
-                if new_row not in combined_rows:
-                    combined_rows.append(new_row)
+                combined_rows.append(new_row)
+                print(f"Added row: {new_column_name} = {value}")
         
         else:
             # Reference-based repetition
-            # Logic: For each reference value, add all repeat column values, then the ref value itself
-            # Pattern: [repeat_vals, ref1, repeat_vals, ref2, ..., other_vals]
+            print("MODE: Reference-based repetition")
             
             # Separate columns into categories
             other_columns = [col for col in columns_to_combine 
                            if col != reference_column and col not in repeat_columns]
             
-            # Get the repetition count (number of reference values)
-            repetition_count = len(ref_values)
+            print(f"Repeat columns: {repeat_columns}")
+            print(f"Other columns (non-repeat, non-ref): {other_columns}")
             
             # For each reference value, add repeated columns + reference value
-            for ref_val in ref_values:
+            for idx, ref_val in enumerate(ref_values):
+                print(f"\n  --- Processing reference value {idx+1}/{len(ref_values)}: {ref_val} ---")
+                
                 # Add all values from repeat columns
-                for col in repeat_columns:
-                    for val in column_values.get(col, []):
+                for repeat_col in repeat_columns:
+                    repeat_vals = column_values.get(repeat_col, [])
+                    print(f"    Adding {len(repeat_vals)} values from repeat column '{repeat_col}': {repeat_vals}")
+                    
+                    for val in repeat_vals:
                         new_row = {}
                         # Copy non-combined columns
                         for key, val_orig in row.items():
@@ -89,9 +107,8 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
                                 new_row[key] = val_orig
                         # Add combined column value
                         new_row[new_column_name] = val
-                        
-                        if new_row not in combined_rows:
-                            combined_rows.append(new_row)
+                        combined_rows.append(new_row)
+                        print(f"      Added: {new_column_name} = {val}")
                 
                 # Add the reference value itself
                 new_row = {}
@@ -99,58 +116,25 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
                     if key not in columns_to_combine:
                         new_row[key] = val_orig
                 new_row[new_column_name] = ref_val
-                
-                if new_row not in combined_rows:
-                    combined_rows.append(new_row)
+                combined_rows.append(new_row)
+                print(f"    Added reference: {new_column_name} = {ref_val}")
             
             # Add values from other (non-repeat, non-reference) columns - only once at the end
-            for col in other_columns:
-                for val in column_values.get(col, []):
+            print(f"\n  --- Adding other columns (once only) ---")
+            for other_col in other_columns:
+                other_vals = column_values.get(other_col, [])
+                print(f"    Adding {len(other_vals)} values from other column '{other_col}': {other_vals}")
+                
+                for val in other_vals:
                     new_row = {}
                     for key, val_orig in row.items():
                         if key not in columns_to_combine:
                             new_row[key] = val_orig
                     new_row[new_column_name] = val
-                    
-                    if new_row not in combined_rows:
-                        combined_rows.append(new_row)
+                    combined_rows.append(new_row)
+                    print(f"      Added: {new_column_name} = {val}")
+        
+        print(f"\nTotal rows generated from this input row: {len(combined_rows)}")
+        print("=== END DEBUG ===\n")
     
     return combined_rows
-
-
-
-
-
-
-
-###############
-
-def debug_column_combination(self, column_values, reference_column, repeat_columns):
-    """Debug helper to verify repetition logic"""
-    print("\n=== DEBUG: Column Combination ===")
-    print(f"All columns and their values:")
-    for col, vals in column_values.items():
-        print(f"  {col}: {vals}")
-    
-    if reference_column:
-        print(f"\nReference column: {reference_column}")
-        print(f"Reference values: {column_values.get(reference_column, [])}")
-        print(f"Repetition count: {len(column_values.get(reference_column, []))}")
-    
-    if repeat_columns:
-        print(f"\nColumns to repeat: {repeat_columns}")
-        for col in repeat_columns:
-            print(f"  {col} values: {column_values.get(col, [])}")
-    
-    print("=== END DEBUG ===\n")
-
-
-
-
-
-To use it, add this line at the beginning of apply_column_combination (after collecting column_values):
-
-
-
-# Debug line (remove after testing)
-# self.debug_column_combination(column_values, reference_column, repeat_columns)
