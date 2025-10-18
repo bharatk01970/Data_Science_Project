@@ -1,32 +1,32 @@
 def show_column_combination_popup(self, columns):
-    """Show popup to select columns for combination with optional reference-based repetition"""
+    """Show popup to select columns for combination with flexible reference-based repetition"""
     popup = tk.Toplevel(self.root)
     popup.title("Column Combination & Reference-Based Repetition")
-    popup.geometry("550x700")
+    popup.geometry("600x750")
     popup.transient(self.root)
     popup.grab_set()
     
     ttk.Label(popup, text="Column Combination & Reference-Based Repetition", 
               font=('TkDefaultFont', 11, 'bold')).pack(pady=10)
     
-    # Create notebook for two steps
+    # Create notebook for three steps
     notebook = ttk.Notebook(popup)
     notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     
-    # STEP 1: Column Combination (Required for Step 2)
+    # STEP 1: Column Combination
     combine_frame = ttk.Frame(notebook)
-    notebook.add(combine_frame, text="Step 1: Combine Columns")
+    notebook.add(combine_frame, text="Step 1: Select Columns")
     
-    ttk.Label(combine_frame, text="Select columns to combine into a single column:", 
-              font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-    ttk.Label(combine_frame, text="(This is the base for reference-based repetition)", 
+    ttk.Label(combine_frame, text="Select columns to combine:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
+    ttk.Label(combine_frame, text="Each value will appear in a separate row (not comma-separated)", 
               font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
     
     # Create scrollable frame for checkboxes
     canvas_frame1 = ttk.Frame(combine_frame)
     canvas_frame1.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     
-    canvas1 = tk.Canvas(canvas_frame1, highlightthickness=0)
+    canvas1 = tk.Canvas(canvas_frame1, highlightthickness=0, height=300)
     scrollbar1 = ttk.Scrollbar(canvas_frame1, orient="vertical", command=canvas1.yview)
     scrollable_frame1 = ttk.Frame(canvas1)
     
@@ -49,23 +49,20 @@ def show_column_combination_popup(self, columns):
         cb = ttk.Checkbutton(scrollable_frame1, text=col, variable=var)
         cb.pack(anchor=tk.W, padx=5, pady=2)
     
-    # STEP 2: Reference-Based Repetition (Optional)
+    # STEP 2: Reference Column Selection
     reference_frame = ttk.Frame(notebook)
-    notebook.add(reference_frame, text="Step 2: Reference Repetition (Optional)")
+    notebook.add(reference_frame, text="Step 2: Reference Column (Optional)")
     
-    ttk.Label(reference_frame, text="Select reference column(s) for repetition:", 
-              font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
-    ttk.Label(reference_frame, text="Values from other columns in the combined column will repeat\nbased on the count of values in the reference column(s).", 
+    ttk.Label(reference_frame, text="Select ONE reference column:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
+    ttk.Label(reference_frame, text="Other columns can repeat based on this reference column's value count", 
               font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
     
-    ttk.Label(reference_frame, text="Example: If A has 5 values and B (reference) has 2 values,\nA's values will appear twice in the combined column.", 
-              font=('TkDefaultFont', 8), foreground='blue').pack(pady=5, padx=10, anchor=tk.W)
-    
-    # Create scrollable frame for reference column checkboxes
+    # Create scrollable frame for reference column radio buttons
     canvas_frame2 = ttk.Frame(reference_frame)
     canvas_frame2.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
     
-    canvas2 = tk.Canvas(canvas_frame2, highlightthickness=0)
+    canvas2 = tk.Canvas(canvas_frame2, highlightthickness=0, height=300)
     scrollbar2 = ttk.Scrollbar(canvas_frame2, orient="vertical", command=canvas2.yview)
     scrollable_frame2 = ttk.Frame(canvas2)
     
@@ -80,21 +77,65 @@ def show_column_combination_popup(self, columns):
     canvas2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar2.pack(side=tk.RIGHT, fill=tk.Y)
     
-    # Create checkboxes for reference columns
-    reference_vars = {}
+    # Radio buttons for reference column (only one can be selected)
+    reference_var = tk.StringVar(value="")  # Empty means no reference
+    
+    # Add "None" option
+    ttk.Radiobutton(scrollable_frame2, text="None (No repetition)", 
+                    variable=reference_var, value="").pack(anchor=tk.W, padx=5, pady=2)
+    
+    for col in sorted(columns):
+        rb = ttk.Radiobutton(scrollable_frame2, text=col, variable=reference_var, value=col)
+        rb.pack(anchor=tk.W, padx=5, pady=2)
+    
+    # STEP 3: Repetition Selection
+    repeat_frame = ttk.Frame(notebook)
+    notebook.add(repeat_frame, text="Step 3: Repetition Options (Optional)")
+    
+    ttk.Label(repeat_frame, text="Select which columns to repeat:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
+    ttk.Label(repeat_frame, text="Only applies if a reference column is selected in Step 2", 
+              font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
+    
+    ttk.Label(repeat_frame, text="Example: If A has 3 values and B (reference) has 2 values,\nselecting 'Repeat A' will make A appear twice (once per B value)", 
+              font=('TkDefaultFont', 8), foreground='blue').pack(pady=5, padx=10, anchor=tk.W)
+    
+    # Create scrollable frame for repeat column checkboxes
+    canvas_frame3 = ttk.Frame(repeat_frame)
+    canvas_frame3.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+    
+    canvas3 = tk.Canvas(canvas_frame3, highlightthickness=0, height=250)
+    scrollbar3 = ttk.Scrollbar(canvas_frame3, orient="vertical", command=canvas3.yview)
+    scrollable_frame3 = ttk.Frame(canvas3)
+    
+    scrollable_frame3.bind(
+        "<Configure>",
+        lambda e: canvas3.configure(scrollregion=canvas3.bbox("all"))
+    )
+    
+    canvas3.create_window((0, 0), window=scrollable_frame3, anchor="nw")
+    canvas3.configure(yscrollcommand=scrollbar3.set)
+    
+    canvas3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar3.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    # Create checkboxes for columns to repeat
+    repeat_vars = {}
     for col in sorted(columns):
         var = tk.BooleanVar(value=False)
-        reference_vars[col] = var
-        cb = ttk.Checkbutton(scrollable_frame2, text=col, variable=var)
+        repeat_vars[col] = var
+        cb = ttk.Checkbutton(scrollable_frame3, text=col, variable=var)
         cb.pack(anchor=tk.W, padx=5, pady=2)
     
-    result = {'combine': False, 'columns': [], 'new_name': '', 'reference_columns': []}
+    result = {'combine': False, 'columns': [], 'new_name': '', 
+              'reference_column': '', 'repeat_columns': []}
     
     def confirm():
         selected_cols = [col for col, var in column_vars.items() if var.get()]
-        selected_refs = [col for col, var in reference_vars.items() if var.get()]
+        reference_col = reference_var.get()
+        repeat_cols = [col for col, var in repeat_vars.items() if var.get()]
         
-        # Column combination is required
+        # Validate Step 1
         if not selected_cols:
             messagebox.showwarning("Warning", "Please select at least one column in Step 1")
             return
@@ -103,13 +144,30 @@ def show_column_combination_popup(self, columns):
             messagebox.showwarning("Warning", "Please select at least 2 columns to combine")
             return
         
-        # Check if reference columns are subset of combined columns
-        if selected_refs:
-            invalid_refs = [ref for ref in selected_refs if ref not in selected_cols]
-            if invalid_refs:
+        # Validate Step 2 & 3 consistency
+        if reference_col and reference_col not in selected_cols:
+            messagebox.showwarning("Warning", 
+                f"Reference column '{reference_col}' must be one of the selected columns from Step 1")
+            return
+        
+        if repeat_cols:
+            if not reference_col:
                 messagebox.showwarning("Warning", 
-                    f"Reference columns must be from the columns selected for combination.\n"
-                    f"Invalid selections: {', '.join(invalid_refs)}")
+                    "You selected columns to repeat but no reference column.\n"
+                    "Please select a reference column in Step 2 or deselect all repeat columns.")
+                return
+            
+            invalid_repeats = [col for col in repeat_cols if col not in selected_cols]
+            if invalid_repeats:
+                messagebox.showwarning("Warning", 
+                    f"Columns to repeat must be from the selected columns in Step 1.\n"
+                    f"Invalid selections: {', '.join(invalid_repeats)}")
+                return
+            
+            if reference_col in repeat_cols:
+                messagebox.showwarning("Warning", 
+                    "The reference column cannot be in the 'repeat columns' list.\n"
+                    f"Please deselect '{reference_col}' from Step 3.")
                 return
         
         # Ask for new column name
@@ -123,7 +181,8 @@ def show_column_combination_popup(self, columns):
             result['combine'] = True
             result['columns'] = selected_cols
             result['new_name'] = new_name.strip()
-            result['reference_columns'] = selected_refs  # Can be empty list
+            result['reference_column'] = reference_col if reference_col else ''
+            result['repeat_columns'] = repeat_cols if repeat_cols else []
             popup.destroy()
         else:
             messagebox.showwarning("Warning", "Please enter a valid column name")
@@ -134,10 +193,14 @@ def show_column_combination_popup(self, columns):
     button_frame = ttk.Frame(popup)
     button_frame.pack(pady=10)
     
-    ttk.Label(button_frame, text="Note: Step 1 is required. Step 2 is optional.", 
-              font=('TkDefaultFont', 8), foreground='gray').pack(side=tk.LEFT, padx=10)
+    info_frame = ttk.Frame(button_frame)
+    info_frame.pack(side=tk.LEFT, padx=10)
+    ttk.Label(info_frame, text="Step 1: Required", 
+              font=('TkDefaultFont', 8), foreground='red').pack()
+    ttk.Label(info_frame, text="Steps 2 & 3: Optional", 
+              font=('TkDefaultFont', 8), foreground='gray').pack()
     
-    ttk.Button(button_frame, text="Apply", command=confirm).pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text="Apply Configuration", command=confirm).pack(side=tk.LEFT, padx=5)
     ttk.Button(button_frame, text="Skip (No Changes)", command=skip).pack(side=tk.LEFT, padx=5)
     
     popup.wait_window()
@@ -147,107 +210,127 @@ def show_column_combination_popup(self, columns):
 
 
 
+#########
 
 
 
-######
 
-
-def apply_column_combination(self, result_rows, columns_to_combine, new_column_name, reference_columns=None):
-    """Combine multiple columns into one with optional reference-based repetition"""
+def apply_column_combination(self, result_rows, columns_to_combine, new_column_name, 
+                             reference_column='', repeat_columns=None):
+    """Combine multiple columns into separate rows with optional reference-based repetition
+    
+    Args:
+        result_rows: List of row dictionaries
+        columns_to_combine: List of column names to combine
+        new_column_name: Name for the new combined column
+        reference_column: Column to use as reference for repetition (optional)
+        repeat_columns: List of columns whose values should repeat (optional)
+    
+    Returns:
+        List of row dictionaries with combined column, each value in separate row
+    """
     if not columns_to_combine or not new_column_name:
         return result_rows
+    
+    if repeat_columns is None:
+        repeat_columns = []
     
     combined_rows = []
     
     for row in result_rows:
-        # Separate reference and non-reference columns
-        ref_cols = reference_columns if reference_columns else []
-        non_ref_cols = [col for col in columns_to_combine if col not in ref_cols]
+        # Collect all values from all columns to combine
+        column_values = {}  # {column_name: [list of values]}
         
-        # Get reference column values if any
-        ref_values_list = []
-        if ref_cols:
-            for ref_col in ref_cols:
-                if ref_col in row and row[ref_col]:
-                    value = row[ref_col]
-                    if value:
-                        values = [value] if not isinstance(value, list) else value
-                        ref_values_list.extend([v for v in values if v])
+        for col in columns_to_combine:
+            if col in row and row[col]:
+                value = row[col]
+                # Split multi-values
+                if isinstance(value, str) and (',' in value or ';' in value):
+                    split_vals = self.split_multi_values(value)
+                    column_values[col] = [v for v in split_vals if v]
+                else:
+                    column_values[col] = [str(value)] if value else []
+            else:
+                column_values[col] = []
         
-        # If no reference columns or no reference values, use standard combination
-        if not ref_values_list:
-            ref_values_list = [None]  # Single iteration
+        # Get reference column values if specified
+        ref_values = []
+        if reference_column and reference_column in column_values:
+            ref_values = column_values[reference_column]
         
-        # For each reference value, create combined output
-        for ref_val in ref_values_list:
-            combined_values = []
+        # If no reference or no repeat columns, just combine all values
+        if not reference_column or not repeat_columns or not ref_values:
+            # Simple combination - all values in order
+            all_values = []
+            for col in columns_to_combine:
+                all_values.extend(column_values.get(col, []))
             
-            # Add all non-reference column values
-            for col in non_ref_cols:
-                if col in row and row[col]:
-                    value = row[col]
-                    if value:
-                        # Split multi-values if needed
-                        if isinstance(value, str) and (',' in value or ';' in value):
-                            split_vals = self.split_multi_values(value)
-                            combined_values.extend([v for v in split_vals if v])
-                        else:
-                            combined_values.append(value)
+            # Create one row per value
+            for value in all_values:
+                new_row = {}
+                # Copy non-combined columns
+                for key, val in row.items():
+                    if key not in columns_to_combine:
+                        new_row[key] = val
+                # Add combined column with single value
+                new_row[new_column_name] = value
+                
+                if new_row not in combined_rows:
+                    combined_rows.append(new_row)
+        
+        else:
+            # Reference-based repetition
+            # Pattern: [repeat_col_values, ref_value_1, repeat_col_values, ref_value_2, ...]
             
-            # Add the reference value (if exists)
-            if ref_val:
-                combined_values.append(ref_val)
+            # Separate columns into: repeat, reference, and other
+            other_columns = [col for col in columns_to_combine 
+                           if col != reference_column and col not in repeat_columns]
             
-            # Create new row
-            new_row = {}
-            # Copy all columns except the ones being combined
-            for key, val in row.items():
-                if key not in columns_to_combine:
-                    new_row[key] = val
+            # For each reference value
+            for ref_val in ref_values:
+                # Add values from repeat columns
+                for col in repeat_columns:
+                    for val in column_values.get(col, []):
+                        new_row = {}
+                        for key, val_orig in row.items():
+                            if key not in columns_to_combine:
+                                new_row[key] = val_orig
+                        new_row[new_column_name] = val
+                        
+                        if new_row not in combined_rows:
+                            combined_rows.append(new_row)
+                
+                # Add the reference value itself
+                new_row = {}
+                for key, val_orig in row.items():
+                    if key not in columns_to_combine:
+                        new_row[key] = val_orig
+                new_row[new_column_name] = ref_val
+                
+                if new_row not in combined_rows:
+                    combined_rows.append(new_row)
             
-            # Add the new combined column with comma-separated values
-            new_row[new_column_name] = ', '.join([str(v) for v in combined_values]) if combined_values else ''
-            
-            # Avoid duplicate rows
-            if new_row not in combined_rows:
-                combined_rows.append(new_row)
+            # Add values from other (non-repeat, non-reference) columns - only once
+            for col in other_columns:
+                for val in column_values.get(col, []):
+                    new_row = {}
+                    for key, val_orig in row.items():
+                        if key not in columns_to_combine:
+                            new_row[key] = val_orig
+                    new_row[new_column_name] = val
+                    
+                    if new_row not in combined_rows:
+                        combined_rows.append(new_row)
     
     return combined_rows
 
 
 
 
-######
-
-combination_result = self.show_column_combination_popup(temp_stage1_columns)
-            
-            # Apply column combination if selected
-            if combination_result.get('combine'):
-                self.stage1_data = self.apply_column_combination(
-                    temp_stage1_data,
-                    combination_result['columns'],
-                    combination_result['new_name']
-                )
-                self.status_var.set(f"Applied column combination: {combination_result['new_name']}")
-            # Apply reference-based repetition if selected
-            elif combination_result.get('reference_columns'):
-                self.stage1_data = self.apply_reference_based_repetition(
-                    temp_stage1_data,
-                    combination_result['reference_columns'],
-                    combination_result['combined_name']
-                )
-                ref_cols_str = ', '.join(combination_result['reference_columns'])
-                self.status_var.set(f"Applied reference-based repetition using column(s): {ref_cols_str}")
-                messagebox.showinfo("Reference-Based Repetition Applied", 
-                                    f"Values repeated based on reference column(s): {ref_cols_str}\n"
-                                    f"Combined column: {combination_result['combined_name']}\n"
-                                    f"Total rows generated: {len(self.stage1_data)}")
-            else:
-                self.stage1_data = temp_stage1_data
 
 
-@@@@
+
+##########
 
 combination_result = self.show_column_combination_popup(temp_stage1_columns)
             
@@ -257,18 +340,31 @@ combination_result = self.show_column_combination_popup(temp_stage1_columns)
                     temp_stage1_data,
                     combination_result['columns'],
                     combination_result['new_name'],
-                    combination_result.get('reference_columns')  # Pass reference columns (can be empty list)
+                    combination_result.get('reference_column', ''),
+                    combination_result.get('repeat_columns', [])
                 )
                 
                 status_msg = f"Applied column combination: {combination_result['new_name']}"
-                if combination_result.get('reference_columns'):
-                    ref_cols_str = ', '.join(combination_result['reference_columns'])
-                    status_msg += f" with reference-based repetition using: {ref_cols_str}"
-                    messagebox.showinfo("Column Combination Complete", 
-                                        f"Combined column: {combination_result['new_name']}\n"
-                                        f"Reference columns for repetition: {ref_cols_str}\n"
-                                        f"Total rows generated: {len(self.stage1_data)}")
                 
+                # Build detailed info message
+                info_parts = [f"Combined column: {combination_result['new_name']}"]
+                info_parts.append(f"Columns combined: {', '.join(combination_result['columns'])}")
+                
+                if combination_result.get('reference_column'):
+                    ref_col = combination_result['reference_column']
+                    status_msg += f" | Reference: {ref_col}"
+                    info_parts.append(f"Reference column: {ref_col}")
+                    
+                    if combination_result.get('repeat_columns'):
+                        repeat_cols_str = ', '.join(combination_result['repeat_columns'])
+                        status_msg += f" | Repeating: {repeat_cols_str}"
+                        info_parts.append(f"Columns repeated: {repeat_cols_str}")
+                    else:
+                        info_parts.append("No columns set to repeat")
+                
+                info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
+                
+                messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
                 self.status_var.set(status_msg)
             else:
                 self.stage1_data = temp_stage1_data
