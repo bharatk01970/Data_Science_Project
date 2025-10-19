@@ -66,7 +66,8 @@ def show_reference_mapping_popup(self, stage1_data, combined_column_name):
     result = {'apply': False, 'mapping_df': None, 'new_column': ''}
     
     def confirm():
-        if not mapping_data['df'] is not None:
+        # FIXED: Correct way to check if DataFrame is None
+        if mapping_data['df'] is None:
             response = messagebox.askyesno("No Mapping File", 
                                           "No mapping file selected. Skip this step?")
             if response:
@@ -96,188 +97,18 @@ def show_reference_mapping_popup(self, stage1_data, combined_column_name):
     return result
 
 
-def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, 
-                            reference_values, repeat_values):
-    """Apply reference-based mapping: map reference values but apply to repeated rows only
-    
-    Args:
-        stage1_data: List of row dictionaries after column combination
-        combined_column_name: Name of the combined column
-        mapping_df: DataFrame with mapping (col1=reference values, col2=mapped values)
-        new_column_name: Name for the new mapped column
-        reference_values: List of reference values (e.g., ['B1', 'B2'])
-        repeat_values: List of repeated values (e.g., ['A1', 'A2', 'A3'])
-    
-    Returns:
-        List of row dictionaries with new mapped column added
-    """
-    if not mapping_df or len(mapping_df.columns) < 2:
-        return stage1_data
-    
-    # Create mapping dictionary: reference_value -> mapped_value
-    key_col = mapping_df.columns[0]
-    value_col = mapping_df.columns[1]
-    mapping_dict = dict(zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str)))
-    
-    print(f"\n=== Reference Mapping ===")
-    print(f"Mapping dictionary: {mapping_dict}")
-    print(f"Reference values: {reference_values}")
-    print(f"Repeat values: {repeat_values}")
-    
-    # Track current reference context
-    current_reference = None
-    current_mapped_value = ""
-    
-    result_rows = []
-    
-    for row in stage1_data:
-        new_row = row.copy()
-        combined_value = row.get(combined_column_name, '')
-        
-        # Check if this row contains a reference value
-        if combined_value in reference_values:
-            current_reference = combined_value
-            current_mapped_value = mapping_dict.get(str(current_reference), '')
-            # For reference rows themselves, leave mapping blank
-            new_row[new_column_name] = ''
-            print(f"Reference row: {combined_value} -> mapped to '' (reference rows stay blank)")
-        
-        # Check if this row contains a repeat value
-        elif combined_value in repeat_values:
-            # Apply the current reference's mapped value
-            new_row[new_column_name] = current_mapped_value
-            print(f"Repeat row: {combined_value} -> mapped to '{current_mapped_value}'")
-        
-        # For all other values (like C)
-        else:
-            new_row[new_column_name] = ''
-            print(f"Other row: {combined_value} -> mapped to '' (other values stay blank)")
-        
-        result_rows.append(new_row)
-    
-    print(f"=== End Reference Mapping ===\n")
-    return result_rows
-
-
-
 
 
 
 ##########
 
+Also ensure the apply_reference_mapping method handles None properly. Update line 1 of that method:
 
 
-if combination_result.get('combine'):
-                self.stage1_data = self.apply_column_combination(
-                    temp_stage1_data,
-                    combination_result['columns'],
-                    combination_result['new_name'],
-                    combination_result.get('reference_column', ''),
-                    combination_result.get('repeat_columns', [])
-                )
-                
-                status_msg = f"Applied column combination: {combination_result['new_name']}"
-                
-                # Build detailed info message
-                info_parts = [f"Combined column: {combination_result['new_name']}"]
-                info_parts.append(f"Columns combined: {', '.join(combination_result['columns'])}")
-                
-                if combination_result.get('reference_column'):
-                    ref_col = combination_result['reference_column']
-                    status_msg += f" | Reference: {ref_col}"
-                    info_parts.append(f"Reference column: {ref_col}")
-                    
-                    if combination_result.get('repeat_columns'):
-                        repeat_cols_str = ', '.join(combination_result['repeat_columns'])
-                        status_msg += f" | Repeating: {repeat_cols_str}"
-                        info_parts.append(f"Columns repeated: {repeat_cols_str}")
-                    else:
-                        info_parts.append("No columns set to repeat")
-                
-                info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
-                
-                messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
-                self.status_var.set(status_msg)
-            else:
-                self.stage1_data = temp_stage1_data
-
-
-
-
-
-@@@@@@@
-
-if combination_result.get('combine'):
-                self.stage1_data = self.apply_column_combination(
-                    temp_stage1_data,
-                    combination_result['columns'],
-                    combination_result['new_name'],
-                    combination_result.get('reference_column', ''),
-                    combination_result.get('repeat_columns', [])
-                )
-                
-                status_msg = f"Applied column combination: {combination_result['new_name']}"
-                
-                # Build detailed info message
-                info_parts = [f"Combined column: {combination_result['new_name']}"]
-                info_parts.append(f"Columns combined: {', '.join(combination_result['columns'])}")
-                
-                # Store combination info for reference mapping
-                ref_col = combination_result.get('reference_column', '')
-                repeat_cols = combination_result.get('repeat_columns', [])
-                
-                if ref_col:
-                    status_msg += f" | Reference: {ref_col}"
-                    info_parts.append(f"Reference column: {ref_col}")
-                    
-                    if repeat_cols:
-                        repeat_cols_str = ', '.join(repeat_cols)
-                        status_msg += f" | Repeating: {repeat_cols_str}"
-                        info_parts.append(f"Columns repeated: {repeat_cols_str}")
-                    else:
-                        info_parts.append("No columns set to repeat")
-                
-                info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
-                
-                messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
-                self.status_var.set(status_msg)
-                
-                # NEW: Apply reference-based mapping if reference column and repeat columns exist
-                if ref_col and repeat_cols:
-                    # Extract reference and repeat values from the original data
-                    ref_values_set = set()
-                    repeat_values_set = set()
-                    
-                    for row in temp_stage1_data:
-                        for col in combination_result['columns']:
-                            if col in row and row[col]:
-                                values = self.split_multi_values(str(row[col]))
-                                if col == ref_col:
-                                    ref_values_set.update([v for v in values if v])
-                                elif col in repeat_cols:
-                                    repeat_values_set.update([v for v in values if v])
-                    
-                    reference_values_list = list(ref_values_set)
-                    repeat_values_list = list(repeat_values_set)
-                    
-                    # Show reference mapping popup
-                    mapping_result = self.show_reference_mapping_popup(
-                        self.stage1_data,
-                        combination_result['new_name']
-                    )
-                    
-                    if mapping_result and mapping_result.get('apply'):
-                        self.stage1_data = self.apply_reference_mapping(
-                            self.stage1_data,
-                            combination_result['new_name'],
-                            mapping_result['mapping_df'],
-                            mapping_result['new_column'],
-                            reference_values_list,
-                            repeat_values_list
-                        )
-                        status_msg += f" | Ref Mapping: {mapping_result['new_column']}"
-                        messagebox.showinfo("Reference Mapping Applied",
-                                          f"New mapped column '{mapping_result['new_column']}' added\n"
-                                          f"Mapping applied to repeated values only")
-            else:
-                self.stage1_data = temp_stage1_data
+def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, 
+                            reference_values, repeat_values):
+    """Apply reference-based mapping: map reference values but apply to repeated rows only"""
+    
+    # SAFETY CHECK: Handle None or empty DataFrame
+    if mapping_df is None or len(mapping_df.columns) < 2:
+        return stage1_data
