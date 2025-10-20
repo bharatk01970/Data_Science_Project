@@ -9,7 +9,7 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
         repeat_columns: List of columns whose values should repeat (optional)
     
     Returns:
-        List of row dictionaries with combined column, each value in separate row
+        List of row dictionaries with combined column and numbering, each value in separate row
     """
     if not columns_to_combine or not new_column_name:
         return result_rows
@@ -59,27 +59,29 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
                 combined_rows.append(new_row)
         
         else:
-            # Reference-based repetition with CORRECT ordering
+            # Reference-based repetition with CORRECT ordering and numbering
             other_columns = [col for col in columns_to_combine 
                            if col != reference_column and col not in repeat_columns]
             
+            # Collect all repeat values (will be the same for each reference iteration)
+            all_repeat_values = []
+            for repeat_col in repeat_columns:
+                all_repeat_values.extend(column_values.get(repeat_col, []))
+            
             # For each reference value, add repeated columns + reference value
             for ref_idx, ref_val in enumerate(ref_values):
-                # 1. Add all values from repeat columns FIRST
-                for repeat_col in repeat_columns:
-                    repeat_vals = column_values.get(repeat_col, [])
-                    
-                    for val_idx, val in enumerate(repeat_vals):
-                        new_row = {}
-                        # Copy non-combined columns
-                        for key, val_orig in row.items():
-                            if key not in columns_to_combine:
-                                new_row[key] = val_orig
-                        # Add combined column value
-                        new_row[new_column_name] = val
-                        # Add numbering column
-                        new_row['Numbering'] = f"{ref_val}_{val_idx + 1}"
-                        combined_rows.append(new_row)
+                # 1. Add all repeat values with sequential numbering
+                for seq_num, repeat_val in enumerate(all_repeat_values, start=1):
+                    new_row = {}
+                    # Copy non-combined columns
+                    for key, val_orig in row.items():
+                        if key not in columns_to_combine:
+                            new_row[key] = val_orig
+                    # Add combined column value
+                    new_row[new_column_name] = repeat_val
+                    # Add numbering column with sequential number
+                    new_row['Numbering'] = f"{ref_val}_{seq_num}"
+                    combined_rows.append(new_row)
                 
                 # 2. Add the reference value itself AFTER repeated values
                 new_row = {}
@@ -107,12 +109,23 @@ def apply_column_combination(self, result_rows, columns_to_combine, new_column_n
 
 
 def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, reference_values, repeat_values):
-    """Apply reference-based mapping: map reference values but apply to repeated rows only
+    """Apply reference-based mapping using the Numbering column
     
     The mapping follows the numbering pattern:
     - If b1 maps to z1, then all rows with numbering b1_1, b1_2, b1_3 get z1
     - If b2 maps to z2, then all rows with numbering b2_1, b2_2, b2_3 get z2
     - Reference rows themselves (b1_o, b2_o) and other rows (C_o) remain blank
+    
+    Args:
+        stage1_data: List of row dictionaries after column combination
+        combined_column_name: Name of the combined column (not used in new logic)
+        mapping_df: DataFrame with mapping (col1=reference values, col2=mapped values)
+        new_column_name: Name for the new mapped column
+        reference_values: List of reference values (for validation)
+        repeat_values: List of repeated values (not used in new logic)
+    
+    Returns:
+        List of row dictionaries with new mapped column added
     """
     if mapping_df is None or len(mapping_df.columns) < 2:
         return stage1_data
@@ -122,28 +135,37 @@ def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df,
     value_col = mapping_df.columns[1]
     mapping_dict = dict(zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str)))
     
+    print(f"\n=== Reference Mapping (New Logic) ===")
+    print(f"Mapping dictionary: {mapping_dict}")
+    
     result_rows = []
     
     for row in stage1_data:
         new_row = row.copy()
         numbering = row.get('Numbering', '')
         
+        # Initialize mapped column as empty
+        new_row[new_column_name] = ''
+        
         # Extract the reference prefix from numbering (e.g., "b1" from "b1_1")
         if numbering and '_' in numbering:
-            ref_prefix = numbering.split('_')[0]
-            suffix = numbering.split('_')[1]
+            parts = numbering.split('_')
+            ref_prefix = parts[0]
+            suffix = parts[1]
             
             # If this is a repeated row (suffix is numeric), apply mapping
             if suffix.isdigit():
                 # Find the mapped value for this reference
                 mapped_value = mapping_dict.get(ref_prefix, '')
                 new_row[new_column_name] = mapped_value
+                print(f"Numbering: {numbering} -> Mapped to: '{mapped_value}'")
             else:
                 # For reference rows (_o suffix) and other rows, leave blank
-                new_row[new_column_name] = ''
+                print(f"Numbering: {numbering} -> Left blank (reference/other row)")
         else:
-            new_row[new_column_name] = ''
+            print(f"Numbering: '{numbering}' -> Left blank (no valid numbering)")
         
         result_rows.append(new_row)
     
+    print(f"=== End Reference Mapping ===\n")
     return result_rows
