@@ -1,47 +1,74 @@
 def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, reference_values, repeat_values):
-    """Fix: Correctly map repeated rows that appear before their reference rows."""
+    """Apply reference-based mapping robustly when repeated values appear *before* their reference rows.
+
+    Logic:
+      - Build mapping dict from mapping_df.
+      - Keep a buffer of indices for repeat rows encountered.
+      - When a reference row is encountered, assign the mapped value to all buffered repeat rows and clear the buffer.
+      - Reference rows themselves get an empty mapped value.
+      - Other rows remain blank in the mapped column.
+    """
     if mapping_df is None or len(mapping_df.columns) < 2:
         return stage1_data
 
+    # Build mapping dict (stringified keys)
     key_col = mapping_df.columns[0]
     value_col = mapping_df.columns[1]
-    mapping_dict = dict(zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str)))
+    mapping_dict = {str(k): str(v) for k, v in zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str))}
 
-    print(f"\n=== Reference Mapping (Revised) ===")
-    print(f"Mapping dictionary: {mapping_dict}")
+    print("\n=== Reference Mapping (Buffer-based) ===")
+    print(f"Mapping dictionary keys: {list(mapping_dict.keys())[:10]} ... (total {len(mapping_dict)})")
 
-    # Pass 1: identify reference mappings
-    ref_mapping_positions = {}
-    for idx, row in enumerate(stage1_data):
-        val = row.get(combined_column_name, '')
-        if val in reference_values:
-            mapped_val = mapping_dict.get(val, '')
-            ref_mapping_positions[idx] = (val, mapped_val)
+    # Work on a deep copy of data to avoid mutating caller data
+    import copy
+    rows = [copy.deepcopy(r) for r in stage1_data]
 
-    # Pass 2: assign mappings to repeat rows
+    # Normalize reference_values and repeat_values to strings for matching
+    ref_set = set(str(x) for x in (reference_values or []))
+    rep_set = set(str(x) for x in (repeat_values or []))
+
+    # Buffer to hold indices of repeat rows waiting for their reference (indexes into result_rows)
+    buffer_indices = []
+
+    # Result accumulation
     result_rows = []
-    current_mapped_value = ''
-    for idx, row in enumerate(stage1_data):
-        new_row = row.copy()
-        combined_val = new_row.get(combined_column_name, '')
 
-        # If current row is a reference row → set new context
-        if combined_val in reference_values:
-            current_mapped_value = mapping_dict.get(combined_val, '')
-            new_row[new_column_name] = ''  # keep reference row blank
-            print(f"Reference row: {combined_val} -> mapped to ''")
+    for idx, row in enumerate(rows):
+        combined_val = str(row.get(combined_column_name, ''))
 
-        # If current row is a repeat row
-        elif combined_val in repeat_values:
-            # Use latest mapping value if available
-            new_row[new_column_name] = current_mapped_value
-            print(f"Repeat row: {combined_val} -> mapped to '{current_mapped_value}'")
+        # If this is a repeat row, buffer it for the upcoming reference
+        if combined_val in rep_set:
+            # Initialize mapped column as blank for now (will be filled when reference found)
+            row[new_column_name] = ''
+            # Append to result_rows and buffer the index within result_rows
+            result_rows.append(row)
+            buffer_indices.append(len(result_rows) - 1)
+            print(f"Buffered repeat row: {combined_val} at original idx {idx} -> result_rows idx {len(result_rows)-1}")
+
+        # If this is a reference row, flush buffer with mapped value
+        elif combined_val in ref_set:
+            mapped_value = mapping_dict.get(combined_val, '')
+            # Assign mapped value to all buffered repeat rows (if any)
+            if buffer_indices:
+                for bi in buffer_indices:
+                    result_rows[bi][new_column_name] = mapped_value
+                print(f"Flushed {len(buffer_indices)} buffered repeats with mapping '{mapped_value}' for reference '{combined_val}'")
+            # Clear buffer
+            buffer_indices = []
+            # Reference row itself stays blank
+            row[new_column_name] = ''
+            result_rows.append(row)
+            print(f"Reference row: {combined_val} at original idx {idx} -> mapping left blank")
 
         else:
-            new_row[new_column_name] = ''
-            print(f"Other row: {combined_val} -> mapped to ''")
+            # Other rows (e.g., C) remain blank and do not affect buffering
+            row[new_column_name] = ''
+            result_rows.append(row)
+            print(f"Other row: {combined_val} at original idx {idx} -> left blank")
 
-        result_rows.append(new_row)
+    # If buffer remains at the end (no reference found), leave them blank and log
+    if buffer_indices:
+        print(f"Warning: {len(buffer_indices)} buffered repeat rows were not followed by any reference. They remain unmapped.")
 
-    print(f"=== End Reference Mapping ===\n")
+    print("=== End Reference Mapping (Buffer-based) ===\n")
     return result_rows
