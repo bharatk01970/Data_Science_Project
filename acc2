@@ -1,12 +1,8 @@
 def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, reference_values, repeat_values):
-    """Apply reference-based mapping robustly when repeated values appear *before* their reference rows.
-
-    Logic:
-      - Build mapping dict from mapping_df.
-      - Keep a buffer of indices for repeat rows encountered.
-      - When a reference row is encountered, assign the mapped value to all buffered repeat rows and clear the buffer.
-      - Reference rows themselves get an empty mapped value.
-      - Other rows remain blank in the mapped column.
+    """Enhanced mapping logic:
+       - Handles repeated A values mapped via reference B (existing behavior).
+       - Additionally applies direct mapping for non-repeated values (like Column C)
+         if they are present in the mapping file.
     """
     if mapping_df is None or len(mapping_df.columns) < 2:
         return stage1_data
@@ -14,61 +10,55 @@ def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df,
     # Build mapping dict (stringified keys)
     key_col = mapping_df.columns[0]
     value_col = mapping_df.columns[1]
-    mapping_dict = {str(k): str(v) for k, v in zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str))}
+    mapping_dict = {str(k).strip(): str(v).strip() for k, v in zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str))}
 
-    print("\n=== Reference Mapping (Buffer-based) ===")
-    print(f"Mapping dictionary keys: {list(mapping_dict.keys())[:10]} ... (total {len(mapping_dict)})")
+    print("\n=== Reference Mapping (Extended) ===")
+    print(f"Mapping dictionary keys sample: {list(mapping_dict.keys())[:10]} ... total {len(mapping_dict)}")
 
-    # Work on a deep copy of data to avoid mutating caller data
     import copy
     rows = [copy.deepcopy(r) for r in stage1_data]
 
-    # Normalize reference_values and repeat_values to strings for matching
-    ref_set = set(str(x) for x in (reference_values or []))
-    rep_set = set(str(x) for x in (repeat_values or []))
+    ref_set = set(str(x).strip() for x in (reference_values or []))
+    rep_set = set(str(x).strip() for x in (repeat_values or []))
 
-    # Buffer to hold indices of repeat rows waiting for their reference (indexes into result_rows)
     buffer_indices = []
-
-    # Result accumulation
     result_rows = []
 
     for idx, row in enumerate(rows):
-        combined_val = str(row.get(combined_column_name, ''))
+        combined_val = str(row.get(combined_column_name, '')).strip()
 
-        # If this is a repeat row, buffer it for the upcoming reference
+        # Repeat rows → buffer them
         if combined_val in rep_set:
-            # Initialize mapped column as blank for now (will be filled when reference found)
             row[new_column_name] = ''
-            # Append to result_rows and buffer the index within result_rows
             result_rows.append(row)
             buffer_indices.append(len(result_rows) - 1)
-            print(f"Buffered repeat row: {combined_val} at original idx {idx} -> result_rows idx {len(result_rows)-1}")
+            print(f"Buffered repeat row: {combined_val}")
 
-        # If this is a reference row, flush buffer with mapped value
+        # Reference rows → flush buffer
         elif combined_val in ref_set:
             mapped_value = mapping_dict.get(combined_val, '')
-            # Assign mapped value to all buffered repeat rows (if any)
             if buffer_indices:
                 for bi in buffer_indices:
                     result_rows[bi][new_column_name] = mapped_value
-                print(f"Flushed {len(buffer_indices)} buffered repeats with mapping '{mapped_value}' for reference '{combined_val}'")
-            # Clear buffer
+                print(f"Flushed {len(buffer_indices)} repeats with mapping '{mapped_value}' for reference '{combined_val}'")
             buffer_indices = []
-            # Reference row itself stays blank
             row[new_column_name] = ''
             result_rows.append(row)
-            print(f"Reference row: {combined_val} at original idx {idx} -> mapping left blank")
 
         else:
-            # Other rows (e.g., C) remain blank and do not affect buffering
-            row[new_column_name] = ''
+            # Non-repeated rows (like C)
+            # Check if mapping exists for them directly
+            direct_map = mapping_dict.get(combined_val, '')
+            if direct_map:
+                row[new_column_name] = direct_map
+                print(f"Direct-mapped non-repeated row: {combined_val} -> {direct_map}")
+            else:
+                row[new_column_name] = ''
+                print(f"Other row: {combined_val} -> left blank (no direct mapping)")
             result_rows.append(row)
-            print(f"Other row: {combined_val} at original idx {idx} -> left blank")
 
-    # If buffer remains at the end (no reference found), leave them blank and log
     if buffer_indices:
-        print(f"Warning: {len(buffer_indices)} buffered repeat rows were not followed by any reference. They remain unmapped.")
+        print(f"Warning: {len(buffer_indices)} buffered repeat rows were not followed by any reference.")
 
-    print("=== End Reference Mapping (Buffer-based) ===\n")
+    print("=== End Reference Mapping (Extended) ===\n")
     return result_rows
