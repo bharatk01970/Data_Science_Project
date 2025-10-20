@@ -1,64 +1,84 @@
-def apply_reference_mapping(self, stage1_data, combined_column_name, mapping_df, new_column_name, reference_values, repeat_values):
-    """Enhanced mapping logic:
-       - Handles repeated A values mapped via reference B (existing behavior).
-       - Additionally applies direct mapping for non-repeated values (like Column C)
-         if they are present in the mapping file.
+def apply_default_column_mapping(self, data_rows, source_column, mapping_df, target_column):
+    """
+    Enhanced Default Column Mapping:
+    - Supports wildcard-based mapping rules.
+    - Pattern rules:
+        'APP='     → exact match
+        '*App='    → starts with 'App'
+        '*App*='   → contains 'App'
+        'ZApp*='   → ends with 'ZApp'
+        '='        → source value blank
+        '*='       → all remaining unmatched values
     """
     if mapping_df is None or len(mapping_df.columns) < 2:
-        return stage1_data
+        return data_rows
 
-    # Build mapping dict (stringified keys)
     key_col = mapping_df.columns[0]
     value_col = mapping_df.columns[1]
-    mapping_dict = {str(k).strip(): str(v).strip() for k, v in zip(mapping_df[key_col].astype(str), mapping_df[value_col].astype(str))}
+    mapping_rules = [(str(k).strip(), str(v).strip()) for k, v in zip(mapping_df[key_col], mapping_df[value_col])]
 
-    print("\n=== Reference Mapping (Extended) ===")
-    print(f"Mapping dictionary keys sample: {list(mapping_dict.keys())[:10]} ... total {len(mapping_dict)}")
+    def match_pattern(src_val, pattern):
+        src_val = str(src_val or '').strip()
+        pattern = pattern.strip()
 
-    import copy
-    rows = [copy.deepcopy(r) for r in stage1_data]
+        # Handle blank
+        if pattern == '=':
+            return src_val == ''
 
-    ref_set = set(str(x).strip() for x in (reference_values or []))
-    rep_set = set(str(x).strip() for x in (repeat_values or []))
+        # Handle catch-all
+        if pattern == '*=':
+            return True  # only used when others fail
 
-    buffer_indices = []
-    result_rows = []
-
-    for idx, row in enumerate(rows):
-        combined_val = str(row.get(combined_column_name, '')).strip()
-
-        # Repeat rows → buffer them
-        if combined_val in rep_set:
-            row[new_column_name] = ''
-            result_rows.append(row)
-            buffer_indices.append(len(result_rows) - 1)
-            print(f"Buffered repeat row: {combined_val}")
-
-        # Reference rows → flush buffer
-        elif combined_val in ref_set:
-            mapped_value = mapping_dict.get(combined_val, '')
-            if buffer_indices:
-                for bi in buffer_indices:
-                    result_rows[bi][new_column_name] = mapped_value
-                print(f"Flushed {len(buffer_indices)} repeats with mapping '{mapped_value}' for reference '{combined_val}'")
-            buffer_indices = []
-            row[new_column_name] = ''
-            result_rows.append(row)
-
+        # Split pattern before '='
+        if '=' in pattern:
+            left = pattern.split('=')[0]
         else:
-            # Non-repeated rows (like C)
-            # Check if mapping exists for them directly
-            direct_map = mapping_dict.get(combined_val, '')
-            if direct_map:
-                row[new_column_name] = direct_map
-                print(f"Direct-mapped non-repeated row: {combined_val} -> {direct_map}")
-            else:
-                row[new_column_name] = ''
-                print(f"Other row: {combined_val} -> left blank (no direct mapping)")
-            result_rows.append(row)
+            left = pattern
 
-    if buffer_indices:
-        print(f"Warning: {len(buffer_indices)} buffered repeat rows were not followed by any reference.")
+        # Exact match
+        if not left.startswith('*') and not left.endswith('*'):
+            return src_val == left
 
-    print("=== End Reference Mapping (Extended) ===\n")
-    return result_rows
+        # Starts with
+        if left.startswith('*') and not left.endswith('*'):
+            keyword = left[1:]
+            return src_val.startswith(keyword)
+
+        # Ends with
+        if left.endswith('*') and not left.startswith('*'):
+            keyword = left[:-1]
+            return src_val.endswith(keyword)
+
+        # Contains
+        if left.startswith('*') and left.endswith('*'):
+            keyword = left.strip('*')
+            return keyword in src_val
+
+        return False
+
+    # Apply mapping
+    for row in data_rows:
+        src_val = str(row.get(source_column, '')).strip()
+        mapped_val = ''
+        applied = False
+
+        for pattern, target in mapping_rules:
+            if pattern == '*=':
+                fallback_value = target  # store fallback for later
+                continue
+            if match_pattern(src_val, pattern):
+                mapped_val = target
+                applied = True
+                break
+
+        # If not matched, apply fallback if defined
+        if not applied:
+            for pattern, target in mapping_rules:
+                if pattern == '*=':
+                    mapped_val = target
+                    break
+
+        row[target_column] = mapped_val
+
+    print(f"Applied default column mapping with wildcard rules on '{source_column}' → '{target_column}'")
+    return data_rows
