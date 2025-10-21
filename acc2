@@ -1,121 +1,474 @@
-def apply_combined_column_actions(self, df, combined_col, target_cols, selected_sources, impact_value='', mode='blank_others'):
-    """
-    Apply user-defined actions on selected target columns based on combined column content.
-    """
-    import pandas as pd
-
-    if combined_col not in df.columns:
-        print(f"⚠ Combined column '{combined_col}' not found in DataFrame.")
-        return df
-
-    for target in target_cols:
-        if target not in df.columns:
-            print(f"⚠ Target column '{target}' not found, skipping.")
-            continue
-
-        new_values = []
-        for _, row in df.iterrows():
-            combined_val = str(row.get(combined_col, '')).strip()
-            matched = any(combined_val.startswith(src) for src in selected_sources)
-
-            if matched:
-                new_values.append(impact_value)
-            else:
-                if mode == 'blank_others':
-                    new_values.append('')
-                else:
-                    new_values.append(row[target])
-
-        df[target] = new_values
-
-    print(f"✅ Combined-column action applied on {target_cols} based on {selected_sources}.")
-    return df
-
-
-
-def combined_column_action_popup(self, df, combined_col):
-    """
-    Popup for user to configure post-mapping actions based on the combined column.
-    """
-    import tkinter as tk
-    from tkinter import ttk, messagebox
-
+def show_conditional_impact_popup(self, stage1_data, combined_column_name):
+    """Show popup to configure conditional impacts on target columns based on combined column values"""
+    if not stage1_data:
+        return None
+    
+    # Extract unique values from combined column
+    combined_values = set()
+    for row in stage1_data:
+        if combined_column_name in row and row[combined_column_name]:
+            combined_values.add(str(row[combined_column_name]).strip())
+    
+    # Get all available columns (excluding combined column)
+    available_columns = set()
+    for row in stage1_data:
+        available_columns.update(row.keys())
+    available_columns.discard(combined_column_name)
+    
+    if not combined_values or not available_columns:
+        return None
+    
     popup = tk.Toplevel(self.root)
-    popup.title("Post-Mapping Action (Blankout of Cells)")
-    popup.geometry("520x480")
+    popup.title("Conditional Column Impact (Optional)")
+    popup.geometry("700x650")
+    popup.transient(self.root)
     popup.grab_set()
+    
+    ttk.Label(popup, text="Conditional Column Impact (Optional)", 
+              font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+    ttk.Label(popup, text="Define actions on target columns based on combined column values", 
+              font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+    
+    # Create notebook for organized input
+    notebook = ttk.Notebook(popup)
+    notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    
+    # --- TAB 1: Select Target Columns ---
+    tab1 = ttk.Frame(notebook)
+    notebook.add(tab1, text="Step 1: Target Columns")
+    
+    ttk.Label(tab1, text="Select target column(s) to impact:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
+    
+    # Scrollable frame for target column checkboxes
+    target_canvas_frame = ttk.Frame(tab1)
+    target_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+    
+    target_canvas = tk.Canvas(target_canvas_frame, highlightthickness=0, height=300)
+    target_scrollbar = ttk.Scrollbar(target_canvas_frame, orient="vertical", command=target_canvas.yview)
+    target_scrollable = ttk.Frame(target_canvas)
+    
+    target_scrollable.bind("<Configure>", 
+                          lambda e: target_canvas.configure(scrollregion=target_canvas.bbox("all")))
+    
+    target_canvas.create_window((0, 0), window=target_scrollable, anchor="nw")
+    target_canvas.configure(yscrollcommand=target_scrollbar.set)
+    
+    target_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    target_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    target_vars = {}
+    for col in sorted(available_columns):
+        var = tk.BooleanVar(value=False)
+        target_vars[col] = var
+        cb = ttk.Checkbutton(target_scrollable, text=col, variable=var)
+        cb.pack(anchor=tk.W, padx=5, pady=2)
+    
+    # --- TAB 2: Select Trigger Values ---
+    tab2 = ttk.Frame(notebook)
+    notebook.add(tab2, text="Step 2: Trigger Values")
+    
+    ttk.Label(tab2, text=f"Select value(s) from '{combined_column_name}' that trigger the action:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
+    ttk.Label(tab2, text="Only rows with these values will be affected", 
+              font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
+    
+    # Scrollable frame for trigger value checkboxes
+    trigger_canvas_frame = ttk.Frame(tab2)
+    trigger_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+    
+    trigger_canvas = tk.Canvas(trigger_canvas_frame, highlightthickness=0, height=300)
+    trigger_scrollbar = ttk.Scrollbar(trigger_canvas_frame, orient="vertical", command=trigger_canvas.yview)
+    trigger_scrollable = ttk.Frame(trigger_canvas)
+    
+    trigger_scrollable.bind("<Configure>", 
+                           lambda e: trigger_canvas.configure(scrollregion=trigger_canvas.bbox("all")))
+    
+    trigger_canvas.create_window((0, 0), window=trigger_scrollable, anchor="nw")
+    trigger_canvas.configure(yscrollcommand=trigger_scrollbar.set)
+    
+    trigger_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    trigger_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
+    trigger_vars = {}
+    for val in sorted(combined_values):
+        var = tk.BooleanVar(value=False)
+        trigger_vars[val] = var
+        cb = ttk.Checkbutton(trigger_scrollable, text=val, variable=var)
+        cb.pack(anchor=tk.W, padx=5, pady=2)
+    
+    # --- TAB 3: Define Impact ---
+    tab3 = ttk.Frame(notebook)
+    notebook.add(tab3, text="Step 3: Define Impact")
+    
+    ttk.Label(tab3, text="Choose the action to perform:", 
+              font=('TkDefaultFont', 9, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+    
+    impact_var = tk.StringVar(value="blank_non_matching")
+    
+    # Radio buttons for impact options
+    rb_frame = ttk.Frame(tab3)
+    rb_frame.pack(fill=tk.X, padx=20, pady=5)
+    
+    ttk.Radiobutton(rb_frame, text="Option 1: Blank out NON-MATCHING rows (keep matching rows unchanged)", 
+                    variable=impact_var, value="blank_non_matching").pack(anchor=tk.W, pady=3)
+    ttk.Label(rb_frame, text="   → Target columns become empty for rows NOT in trigger values", 
+              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
+    
+    ttk.Radiobutton(rb_frame, text="Option 2: Replace MATCHING rows with custom value", 
+                    variable=impact_var, value="replace_matching").pack(anchor=tk.W, pady=3)
+    ttk.Label(rb_frame, text="   → Target columns get new value for rows IN trigger values", 
+              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
+    
+    ttk.Radiobutton(rb_frame, text="Option 3: Blank out MATCHING rows (keep non-matching unchanged)", 
+                    variable=impact_var, value="blank_matching").pack(anchor=tk.W, pady=3)
+    ttk.Label(rb_frame, text="   → Target columns become empty for rows IN trigger values", 
+              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
+    
+    # Custom value entry (for Option 2)
+    value_frame = ttk.Frame(tab3)
+    value_frame.pack(fill=tk.X, padx=20, pady=15)
+    
+    ttk.Label(value_frame, text="Custom replacement value (for Option 2):").pack(side=tk.LEFT, padx=5)
+    custom_value_entry = ttk.Entry(value_frame, width=30)
+    custom_value_entry.pack(side=tk.LEFT, padx=5)
+    custom_value_entry.insert(0, "")
+    
+    # Example section
+    example_frame = ttk.LabelFrame(tab3, text="Example", padding=10)
+    example_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    
+    example_text = tk.Text(example_frame, height=8, width=70, wrap=tk.WORD, 
+                          font=('Courier', 8), state='normal')
+    example_text.pack(fill=tk.BOTH, expand=True)
+    
+    example_content = """
+Example Setup:
+• Combined Column: [A1, A2, B1, C1]
+• Target Column: X
+• Trigger Values: [A1, A2]
 
-    tk.Label(popup, text="Select Target Columns:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    target_listbox = tk.Listbox(popup, selectmode="multiple", exportselection=False, height=6)
-    target_listbox.pack(fill="x", padx=10)
-    for col in df.columns:
-        if col != combined_col:
-            target_listbox.insert("end", col)
+Option 1 Result (Blank Non-Matching):
+  Row with A1 → X keeps original value
+  Row with A2 → X keeps original value
+  Row with B1 → X becomes blank
+  Row with C1 → X becomes blank
 
-    tk.Label(popup, text="\nSelect Combined Column Sources (A/B/C etc.):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    source_entry = tk.Entry(popup)
-    source_entry.pack(fill="x", padx=10)
-    tk.Label(popup, text="(Enter comma-separated identifiers like A,C)").pack(anchor="w", padx=12)
+Option 2 Result (Replace Matching with "drama"):
+  Row with A1 → X = "drama"
+  Row with A2 → X = "drama"
+  Row with B1 → X keeps original value
+  Row with C1 → X keeps original value
 
-    tk.Label(popup, text="\nImpact Value (optional):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    impact_entry = tk.Entry(popup)
-    impact_entry.pack(fill="x", padx=10)
-
-    tk.Label(popup, text="\nAction Mode:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    mode_var = tk.StringVar(value="blank_others")
-    tk.Radiobutton(popup, text="Blank other rows", variable=mode_var, value="blank_others").pack(anchor="w", padx=20)
-    tk.Radiobutton(popup, text="Keep other rows unchanged", variable=mode_var, value="keep_others").pack(anchor="w", padx=20)
-
-    def apply_action():
-        selected_indices = target_listbox.curselection()
-        if not selected_indices:
-            messagebox.showwarning("Selection Missing", "Please select at least one target column.")
+Option 3 Result (Blank Matching):
+  Row with A1 → X becomes blank
+  Row with A2 → X becomes blank
+  Row with B1 → X keeps original value
+  Row with C1 → X keeps original value
+    """
+    example_text.insert('1.0', example_content)
+    example_text.config(state='disabled')
+    
+    result = {'apply': False, 'target_columns': [], 'trigger_values': [], 
+              'impact_type': '', 'custom_value': ''}
+    
+    def validate_and_confirm():
+        target_cols = [col for col, var in target_vars.items() if var.get()]
+        trigger_vals = [val for val, var in trigger_vars.items() if var.get()]
+        impact_type = impact_var.get()
+        custom_val = custom_value_entry.get().strip()
+        
+        # Validation
+        if not target_cols:
+            messagebox.showwarning("Warning", "Please select at least one target column in Step 1")
             return
-
-        selected_targets = [target_listbox.get(i) for i in selected_indices]
-        selected_sources = [x.strip() for x in source_entry.get().split(",") if x.strip()]
-        impact_val = impact_entry.get().strip()
-        mode = mode_var.get()
-
-        if not selected_sources:
-            messagebox.showwarning("Input Missing", "Please specify at least one combined column source (A, B, C, etc.).")
+        
+        if not trigger_vals:
+            messagebox.showwarning("Warning", "Please select at least one trigger value in Step 2")
             return
-
-        df_updated = self.apply_combined_column_actions(
-            df=df,
-            combined_col=combined_col,
-            target_cols=selected_targets,
-            selected_sources=selected_sources,
-            impact_value=impact_val,
-            mode=mode
-        )
-
-        messagebox.showinfo("Success", f"Action applied on {len(selected_targets)} target column(s).")
+        
+        if impact_type == "replace_matching" and not custom_val:
+            messagebox.showwarning("Warning", 
+                "Option 2 requires a custom replacement value.\nPlease enter a value in Step 3.")
+            return
+        
+        result['apply'] = True
+        result['target_columns'] = target_cols
+        result['trigger_values'] = trigger_vals
+        result['impact_type'] = impact_type
+        result['custom_value'] = custom_val
         popup.destroy()
-        return df_updated
-
-    tk.Button(popup, text="Apply Action", command=apply_action, bg="#4CAF50", fg="white", padx=8, pady=4).pack(pady=15)
-    tk.Button(popup, text="Cancel", command=popup.destroy).pack()
-
-
-
-
-
-
-
-
-
+    
+    def skip():
+        popup.destroy()
+    
+    # Bottom buttons
+    button_frame = ttk.Frame(popup)
+    button_frame.pack(pady=10)
+    
+    ttk.Button(button_frame, text="Apply Configuration", 
+               command=validate_and_confirm, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text="Skip (No Conditional Impact)", 
+               command=skip).pack(side=tk.LEFT, padx=5)
+    
+    popup.wait_window()
+    return result
 
 
 
 #####
 
-# Post-Mapping Action button
-tk.Button(stage1_popup,
-          text="Post-Mapping Action (Blankout of Cells)",
-          bg="#1976D2", fg="white", padx=10, pady=5,
-          command=lambda: self.combined_column_action_popup(mapped_data, combined_col=combined_col)
-         ).pack(pady=10)
+def apply_conditional_impact(self, stage1_data, combined_column_name, target_columns, 
+                             trigger_values, impact_type, custom_value=''):
+    """Apply conditional impact on target columns based on combined column values
+    
+    Args:
+        stage1_data: List of row dictionaries
+        combined_column_name: Name of the combined column
+        target_columns: List of column names to impact
+        trigger_values: List of values from combined column that trigger the action
+        impact_type: 'blank_non_matching', 'replace_matching', or 'blank_matching'
+        custom_value: Custom value for 'replace_matching' option
+    
+    Returns:
+        Modified list of row dictionaries
+    """
+    if not target_columns or not trigger_values:
+        return stage1_data
+    
+    print("\n=== Conditional Column Impact ===")
+    print(f"Combined Column: {combined_column_name}")
+    print(f"Target Columns: {target_columns}")
+    print(f"Trigger Values: {trigger_values}")
+    print(f"Impact Type: {impact_type}")
+    if custom_value:
+        print(f"Custom Value: {custom_value}")
+    
+    trigger_set = set(str(v).strip() for v in trigger_values)
+    
+    modified_count = 0
+    for row in stage1_data:
+        combined_val = str(row.get(combined_column_name, '')).strip()
+        is_trigger_match = combined_val in trigger_set
+        
+        for target_col in target_columns:
+            if target_col in row:
+                if impact_type == "blank_non_matching":
+                    # Blank out non-matching rows (keep matching rows unchanged)
+                    if not is_trigger_match:
+                        row[target_col] = ''
+                        modified_count += 1
+                
+                elif impact_type == "replace_matching":
+                    # Replace matching rows with custom value
+                    if is_trigger_match:
+                        row[target_col] = custom_value
+                        modified_count += 1
+                
+                elif impact_type == "blank_matching":
+                    # Blank out matching rows (keep non-matching unchanged)
+                    if is_trigger_match:
+                        row[target_col] = ''
+                        modified_count += 1
+    
+    print(f"Modified {modified_count} cell(s) across target columns")
+    print("=== End Conditional Column Impact ===\n")
+    
+    return stage1_data
 
 
 
+
+
+####
+
+def process_stage1(self):
+    if self.df is None:
+        messagebox.showwarning("Warning", "Please load an input file first")
+        return
+    
+    # Get selected fields from checkboxes
+    self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
+    
+    if not self.selected_fields:
+        messagebox.showwarning("Warning", "Please select at least one field to process")
+        return
+
+    try:
+        #Dictionary field detection -- ONLY for selected fields
+        self.dictionary_fields=self.detect_dictionary_fields(self.selected_fields)
+
+        #initialize dictionary to store user's key selections
+        self.selected_keys={}
+
+        #if dictionary fields are found in selected fields, show popup for key selection
+        if self.dictionary_fields:
+            for field, available_keys in self.dictionary_fields.items():
+                if available_keys:
+                    selected=self.show_key_selection_popup(field,available_keys)
+                    if selected:
+                        self.selected_keys[field]=selected
+                    else:
+                        #if user cancels, ask if the user want to skip the field
+                        response=messagebox.askyesno('Skip Field?',f"No keys selected for field '{field}'. \n\nDo you want to keep this field without dictionary expansion?")
+                        if not response:
+                            #remove from selected fields if user doesn't want to keep it
+                            self.selected_fields.remove(field)
+        
+        # NEW: Show early mapping popup after key selection
+        self.early_mapping_data = {}
+        if self.selected_keys:
+            self.early_mapping_data = self.show_early_mapping_popup(self.selected_keys)
+        
+        # Process dataframe for Stage 1
+        temp_stage1_data = self.process_stage1_dataframe()
+
+        # Apply early mappings
+        temp_stage1_data = self.apply_early_mappings(temp_stage1_data)
+
+        # Get columns from temporary Stage 1 data for combination popup
+        temp_stage1_columns = set()
+        for row in temp_stage1_data:
+            temp_stage1_columns.update(row.keys())
+
+        
+        # Show column combination popup
+        combination_result = self.show_column_combination_popup(temp_stage1_columns)
+        
+        # Variables to track combined column info
+        combined_col_name = None
+        ref_values_list = []
+        repeat_values_list = []
+        
+        # Apply column combination with optional reference-based repetition
+        if combination_result.get('combine'):
+            self.stage1_data = self.apply_column_combination(
+                temp_stage1_data,
+                combination_result['columns'],
+                combination_result['new_name'],
+                combination_result.get('reference_column', ''),
+                combination_result.get('repeat_columns', [])
+            )
+            
+            combined_col_name = combination_result['new_name']
+            
+            status_msg = f"Applied column combination: {combined_col_name}"
+            
+            # Build detailed info message
+            info_parts = [f"Combined column: {combined_col_name}"]
+            info_parts.append(f"Columns combined: {', '.join(combination_result['columns'])}")
+            
+            # Store combination info for reference mapping
+            ref_col = combination_result.get('reference_column', '')
+            repeat_cols = combination_result.get('repeat_columns', [])
+            
+            if ref_col:
+                status_msg += f" | Reference: {ref_col}"
+                info_parts.append(f"Reference column: {ref_col}")
+                
+                if repeat_cols:
+                    repeat_cols_str = ', '.join(repeat_cols)
+                    status_msg += f" | Repeating: {repeat_cols_str}"
+                    info_parts.append(f"Columns repeated: {repeat_cols_str}")
+                else:
+                    info_parts.append("No columns set to repeat")
+            
+            info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
+            
+            messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
+            self.status_var.set(status_msg)
+            
+            # NEW: Apply reference-based mapping if reference column and repeat columns exist
+            if ref_col and repeat_cols:
+                # Extract reference and repeat values from the original data
+                ref_values_set = set()
+                repeat_values_set = set()
+                
+                for row in temp_stage1_data:
+                    for col in combination_result['columns']:
+                        if col in row and row[col]:
+                            values = self.split_multi_values(str(row[col]))
+                            if col == ref_col:
+                                ref_values_set.update([v for v in values if v])
+                            elif col in repeat_cols:
+                                repeat_values_set.update([v for v in values if v])
+                
+                ref_values_list = list(ref_values_set)
+                repeat_values_list = list(repeat_values_set)
+                
+                # Show reference mapping popup
+                mapping_result = self.show_reference_mapping_popup(
+                    self.stage1_data,
+                    combined_col_name
+                )
+                
+                if mapping_result and mapping_result.get('apply'):
+                    self.stage1_data = self.apply_reference_mapping(
+                        self.stage1_data,
+                        combined_col_name,
+                        mapping_result['mapping_df'],
+                        mapping_result['new_column'],
+                        ref_values_list,
+                        repeat_values_list
+                    )
+                    status_msg += f" | Ref Mapping: {mapping_result['new_column']}"
+                    messagebox.showinfo("Reference Mapping Applied",
+                                      f"New mapped column '{mapping_result['new_column']}' added\n"
+                                      f"Mapping applied to repeated values only")
+        else:
+            self.stage1_data = temp_stage1_data
+        
+        # *** NEW FUNCTIONALITY: Conditional Column Impact ***
+        # This runs AFTER combined column and reference mapping are complete
+        if combined_col_name:
+            conditional_result = self.show_conditional_impact_popup(
+                self.stage1_data,
+                combined_col_name
+            )
+            
+            if conditional_result and conditional_result.get('apply'):
+                self.stage1_data = self.apply_conditional_impact(
+                    self.stage1_data,
+                    combined_col_name,
+                    conditional_result['target_columns'],
+                    conditional_result['trigger_values'],
+                    conditional_result['impact_type'],
+                    conditional_result.get('custom_value', '')
+                )
+                
+                impact_desc = {
+                    'blank_non_matching': 'Blanked non-matching rows',
+                    'replace_matching': f"Replaced matching rows with '{conditional_result.get('custom_value', '')}'",
+                    'blank_matching': 'Blanked matching rows'
+                }
+                
+                messagebox.showinfo("Conditional Impact Applied",
+                    f"Action: {impact_desc.get(conditional_result['impact_type'], 'Applied')}\n"
+                    f"Target columns: {', '.join(conditional_result['target_columns'])}\n"
+                    f"Trigger values: {', '.join(conditional_result['trigger_values'])}")
+
+        #get selected columns from Stage1
+        if self.stage1_data:
+            stage1_columns=set()
+            for row in self.stage1_data:
+                stage1_columns.update(row.keys())
+
+            #update the selected_fields to match stage 1 o/p
+            self.selected_fields=list(stage1_columns)
+
+            # Show popup with selected columns
+            self.show_selected_columns_popup(stage1_columns)
+
+        #stage 1 completion status
+        self.stage1_complete=True
+        self.stage1_status_label.config(text=f'✓ Complete ({len(self.stage1_data)} rows)')
+        
+        #enable mapping file addition & Stage 2 Processing
+        self.add_mapping_button.config(state='normal')
+        self.stage2_button.config(state='normal')
+
+        self.status_var.set(f"Stage 1 Completed. {len(self.stage1_data)} rows generated from selected fields. Proceed to add mapping files, if any, or proceed to Stage 2.")
+        
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
+        self.status_var.set("Stage 1 processing failed")
