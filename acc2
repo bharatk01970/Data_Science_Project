@@ -299,3 +299,87 @@ Option 3 Result (Blank Matching):
     
     popup.wait_window()
     return result
+
+
+
+
+
+######
+Add this new method after apply_column_combination (around line 920):
+
+
+
+def build_combination_source_map(self, temp_stage1_data, columns_to_combine):
+    """Build a mapping of source columns to their values in the combined column
+    
+    Args:
+        temp_stage1_data: Original data before combination
+        columns_to_combine: List of columns that were combined
+    
+    Returns:
+        Dictionary mapping column names to lists of their values
+    """
+    column_to_values = {}
+    
+    for col in columns_to_combine:
+        values_set = set()
+        for row in temp_stage1_data:
+            if col in row and row[col]:
+                value = row[col]
+                # Split multi-values
+                if isinstance(value, str) and (',' in value or ';' in value):
+                    split_vals = self.split_multi_values(value)
+                    values_set.update([v for v in split_vals if v])
+                else:
+                    val_str = str(value) if value else ""
+                    if val_str:
+                        values_set.add(val_str)
+        
+        if values_set:
+            column_to_values[col] = sorted(list(values_set))
+    
+    return column_to_values
+
+
+
+
+
+
+
+#######
+
+
+Apply column combination with optional reference-based repetition
+        if combination_result.get('combine'):
+            self.stage1_data = self.apply_column_combination(
+                temp_stage1_data,
+                combination_result['columns'],
+                combination_result['new_name'],
+                combination_result.get('reference_column', ''),
+                combination_result.get('repeat_columns', [])
+            )
+            
+            combined_col_name = combination_result['new_name']
+
+
+
+
+@@@@@
+
+# Apply column combination with optional reference-based repetition
+        if combination_result.get('combine'):
+            # Build source mapping for conditional impact feature
+            self.combination_source_columns = self.build_combination_source_map(
+                temp_stage1_data,
+                combination_result['columns']
+            )
+            
+            self.stage1_data = self.apply_column_combination(
+                temp_stage1_data,
+                combination_result['columns'],
+                combination_result['new_name'],
+                combination_result.get('reference_column', ''),
+                combination_result.get('repeat_columns', [])
+            )
+            
+            combined_col_name = combination_result['new_name']
