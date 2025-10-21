@@ -1,84 +1,97 @@
-def apply_default_column_mapping(self, data_rows, source_column, mapping_df, target_column):
+Add this new function into your main class (the same class where your other Tkinter popups exist, e.g. after your manage_default_columns or mapping_popup functions).
+
+
+def combined_column_action_popup(self, df, combined_col):
     """
-    Enhanced Default Column Mapping:
-    - Supports wildcard-based mapping rules.
-    - Pattern rules:
-        'APP='     → exact match
-        '*App='    → starts with 'App'
-        '*App*='   → contains 'App'
-        'ZApp*='   → ends with 'ZApp'
-        '='        → source value blank
-        '*='       → all remaining unmatched values
+    GUI popup for user to configure actions based on combined column content.
+    Allows:
+        - Selecting one or more target columns
+        - Selecting combined column sources (A/B/C identifiers)
+        - Entering impact value
+        - Choosing mode (blank others / keep others)
+    Applies results directly to DataFrame.
     """
-    if mapping_df is None or len(mapping_df.columns) < 2:
-        return data_rows
 
-    key_col = mapping_df.columns[0]
-    value_col = mapping_df.columns[1]
-    mapping_rules = [(str(k).strip(), str(v).strip()) for k, v in zip(mapping_df[key_col], mapping_df[value_col])]
+    import tkinter as tk
+    from tkinter import ttk, messagebox
 
-    def match_pattern(src_val, pattern):
-        src_val = str(src_val or '').strip()
-        pattern = pattern.strip()
+    popup = tk.Toplevel(self.root)
+    popup.title("Apply Actions Based on Combined Column")
+    popup.geometry("520x480")
+    popup.grab_set()
 
-        # Handle blank
-        if pattern == '=':
-            return src_val == ''
+    tk.Label(popup, text="Select Target Columns:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    target_listbox = tk.Listbox(popup, selectmode="multiple", exportselection=False, height=6)
+    target_listbox.pack(fill="x", padx=10)
+    for col in df.columns:
+        if col != combined_col:
+            target_listbox.insert("end", col)
 
-        # Handle catch-all
-        if pattern == '*=':
-            return True  # only used when others fail
+    tk.Label(popup, text="\nSelect Combined Column Sources (A/B/C etc.):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    source_entry = tk.Entry(popup)
+    source_entry.pack(fill="x", padx=10)
+    tk.Label(popup, text="(Enter comma-separated identifiers like A,C)").pack(anchor="w", padx=12)
 
-        # Split pattern before '='
-        if '=' in pattern:
-            left = pattern.split('=')[0]
-        else:
-            left = pattern
+    tk.Label(popup, text="\nImpact Value (optional):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    impact_entry = tk.Entry(popup)
+    impact_entry.pack(fill="x", padx=10)
 
-        # Exact match
-        if not left.startswith('*') and not left.endswith('*'):
-            return src_val == left
+    tk.Label(popup, text="\nAction Mode:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    mode_var = tk.StringVar(value="blank_others")
+    tk.Radiobutton(popup, text="Blank other rows", variable=mode_var, value="blank_others").pack(anchor="w", padx=20)
+    tk.Radiobutton(popup, text="Keep other rows unchanged", variable=mode_var, value="keep_others").pack(anchor="w", padx=20)
 
-        # Starts with
-        if left.startswith('*') and not left.endswith('*'):
-            keyword = left[1:]
-            return src_val.startswith(keyword)
+    def apply_action():
+        selected_indices = target_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Selection Missing", "Please select at least one target column.")
+            return
 
-        # Ends with
-        if left.endswith('*') and not left.startswith('*'):
-            keyword = left[:-1]
-            return src_val.endswith(keyword)
+        selected_targets = [target_listbox.get(i) for i in selected_indices]
+        selected_sources = [x.strip() for x in source_entry.get().split(",") if x.strip()]
+        impact_val = impact_entry.get().strip()
+        mode = mode_var.get()
 
-        # Contains
-        if left.startswith('*') and left.endswith('*'):
-            keyword = left.strip('*')
-            return keyword in src_val
+        if not selected_sources:
+            messagebox.showwarning("Input Missing", "Please specify at least one combined column source (A, B, C, etc.).")
+            return
 
-        return False
+        df_updated = self.apply_combined_column_actions(
+            df=df,
+            combined_col=combined_col,
+            target_cols=selected_targets,
+            selected_sources=selected_sources,
+            impact_value=impact_val,
+            mode=mode
+        )
 
-    # Apply mapping
-    for row in data_rows:
-        src_val = str(row.get(source_column, '')).strip()
-        mapped_val = ''
-        applied = False
+        messagebox.showinfo("Success", f"Action applied on {len(selected_targets)} target column(s).")
+        popup.destroy()
+        return df_updated
 
-        for pattern, target in mapping_rules:
-            if pattern == '*=':
-                fallback_value = target  # store fallback for later
-                continue
-            if match_pattern(src_val, pattern):
-                mapped_val = target
-                applied = True
-                break
+    tk.Button(popup, text="Apply Action", command=apply_action, bg="#4CAF50", fg="white", padx=8, pady=4).pack(pady=15)
+    tk.Button(popup, text="Cancel", command=popup.destroy).pack()
 
-        # If not matched, apply fallback if defined
-        if not applied:
-            for pattern, target in mapping_rules:
-                if pattern == '*=':
-                    mapped_val = target
-                    break
 
-        row[target_column] = mapped_val
 
-    print(f"Applied default column mapping with wildcard rules on '{source_column}' → '{target_column}'")
-    return data_rows
+
+
+
+
+#########
+
+🧩 2. Where to Call This Popup
+After your combined column mapping step finishes, call this popup so the user can trigger the new functionality.
+Find where your code currently ends mapping, something like:
+
+
+# Combined column mapping completed
+self.display_dataframe(result_df)
+
+
+Right after that, add:
+Copy code
+Python
+self.combined_column_action_popup(result_df, combined_col="Combined Column")
+(Change "Combined Column" to your actual combined column name if different.)
+
