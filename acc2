@@ -1,16 +1,121 @@
-combined_data = self.apply_column_combination(
-    result_rows=stage1_data,
-    columns_to_combine=columns_to_combine,
-    new_column_name=combined_col,
-    reference_column=reference_col,
-    repeat_columns=repeat_cols
-)
+def apply_combined_column_actions(self, df, combined_col, target_cols, selected_sources, impact_value='', mode='blank_others'):
+    """
+    Apply user-defined actions on selected target columns based on combined column content.
+    """
+    import pandas as pd
 
-mapped_data = self.apply_reference_mapping(
-    stage1_data=combined_data,
-    combined_column_name=combined_col,
-    mapping_df=mapping_df,
-    new_column_name=mapped_col_name,
-    reference_values=ref_values,
-    repeat_values=repeat_values
-)
+    if combined_col not in df.columns:
+        print(f"⚠ Combined column '{combined_col}' not found in DataFrame.")
+        return df
+
+    for target in target_cols:
+        if target not in df.columns:
+            print(f"⚠ Target column '{target}' not found, skipping.")
+            continue
+
+        new_values = []
+        for _, row in df.iterrows():
+            combined_val = str(row.get(combined_col, '')).strip()
+            matched = any(combined_val.startswith(src) for src in selected_sources)
+
+            if matched:
+                new_values.append(impact_value)
+            else:
+                if mode == 'blank_others':
+                    new_values.append('')
+                else:
+                    new_values.append(row[target])
+
+        df[target] = new_values
+
+    print(f"✅ Combined-column action applied on {target_cols} based on {selected_sources}.")
+    return df
+
+
+
+def combined_column_action_popup(self, df, combined_col):
+    """
+    Popup for user to configure post-mapping actions based on the combined column.
+    """
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+
+    popup = tk.Toplevel(self.root)
+    popup.title("Post-Mapping Action (Blankout of Cells)")
+    popup.geometry("520x480")
+    popup.grab_set()
+
+    tk.Label(popup, text="Select Target Columns:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    target_listbox = tk.Listbox(popup, selectmode="multiple", exportselection=False, height=6)
+    target_listbox.pack(fill="x", padx=10)
+    for col in df.columns:
+        if col != combined_col:
+            target_listbox.insert("end", col)
+
+    tk.Label(popup, text="\nSelect Combined Column Sources (A/B/C etc.):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    source_entry = tk.Entry(popup)
+    source_entry.pack(fill="x", padx=10)
+    tk.Label(popup, text="(Enter comma-separated identifiers like A,C)").pack(anchor="w", padx=12)
+
+    tk.Label(popup, text="\nImpact Value (optional):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    impact_entry = tk.Entry(popup)
+    impact_entry.pack(fill="x", padx=10)
+
+    tk.Label(popup, text="\nAction Mode:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
+    mode_var = tk.StringVar(value="blank_others")
+    tk.Radiobutton(popup, text="Blank other rows", variable=mode_var, value="blank_others").pack(anchor="w", padx=20)
+    tk.Radiobutton(popup, text="Keep other rows unchanged", variable=mode_var, value="keep_others").pack(anchor="w", padx=20)
+
+    def apply_action():
+        selected_indices = target_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Selection Missing", "Please select at least one target column.")
+            return
+
+        selected_targets = [target_listbox.get(i) for i in selected_indices]
+        selected_sources = [x.strip() for x in source_entry.get().split(",") if x.strip()]
+        impact_val = impact_entry.get().strip()
+        mode = mode_var.get()
+
+        if not selected_sources:
+            messagebox.showwarning("Input Missing", "Please specify at least one combined column source (A, B, C, etc.).")
+            return
+
+        df_updated = self.apply_combined_column_actions(
+            df=df,
+            combined_col=combined_col,
+            target_cols=selected_targets,
+            selected_sources=selected_sources,
+            impact_value=impact_val,
+            mode=mode
+        )
+
+        messagebox.showinfo("Success", f"Action applied on {len(selected_targets)} target column(s).")
+        popup.destroy()
+        return df_updated
+
+    tk.Button(popup, text="Apply Action", command=apply_action, bg="#4CAF50", fg="white", padx=8, pady=4).pack(pady=15)
+    tk.Button(popup, text="Cancel", command=popup.destroy).pack()
+
+
+
+
+
+
+
+
+
+
+
+
+#####
+
+# Post-Mapping Action button
+tk.Button(stage1_popup,
+          text="Post-Mapping Action (Blankout of Cells)",
+          bg="#1976D2", fg="white", padx=10, pady=5,
+          command=lambda: self.combined_column_action_popup(mapped_data, combined_col=combined_col)
+         ).pack(pady=10)
+
+
+
