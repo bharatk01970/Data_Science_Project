@@ -1,97 +1,28 @@
-Add this new function into your main class (the same class where your other Tkinter popups exist, e.g. after your manage_default_columns or mapping_popup functions).
-
-
-def combined_column_action_popup(self, df, combined_col):
-    """
-    GUI popup for user to configure actions based on combined column content.
-    Allows:
-        - Selecting one or more target columns
-        - Selecting combined column sources (A/B/C identifiers)
-        - Entering impact value
-        - Choosing mode (blank others / keep others)
-    Applies results directly to DataFrame.
-    """
-
+def display_dataframe(self, df):
+    """Display a pandas DataFrame in a simple Tkinter popup for inspection."""
     import tkinter as tk
-    from tkinter import ttk, messagebox
+    from tkinter import ttk
 
     popup = tk.Toplevel(self.root)
-    popup.title("Apply Actions Based on Combined Column")
-    popup.geometry("520x480")
-    popup.grab_set()
+    popup.title("Data Preview")
+    popup.geometry("800x400")
 
-    tk.Label(popup, text="Select Target Columns:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    target_listbox = tk.Listbox(popup, selectmode="multiple", exportselection=False, height=6)
-    target_listbox.pack(fill="x", padx=10)
+    frame = ttk.Frame(popup)
+    frame.pack(fill="both", expand=True)
+
+    tree = ttk.Treeview(frame)
+    tree.pack(fill="both", expand=True)
+
+    # Set columns
+    tree["columns"] = list(df.columns)
+    tree["show"] = "headings"
+
     for col in df.columns:
-        if col != combined_col:
-            target_listbox.insert("end", col)
+        tree.heading(col, text=col)
+        tree.column(col, width=120, anchor="center")
 
-    tk.Label(popup, text="\nSelect Combined Column Sources (A/B/C etc.):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    source_entry = tk.Entry(popup)
-    source_entry.pack(fill="x", padx=10)
-    tk.Label(popup, text="(Enter comma-separated identifiers like A,C)").pack(anchor="w", padx=12)
+    # Insert rows
+    for _, row in df.iterrows():
+        tree.insert("", "end", values=list(row))
 
-    tk.Label(popup, text="\nImpact Value (optional):", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    impact_entry = tk.Entry(popup)
-    impact_entry.pack(fill="x", padx=10)
-
-    tk.Label(popup, text="\nAction Mode:", font=("Arial", 10, "bold")).pack(anchor="w", padx=10, pady=5)
-    mode_var = tk.StringVar(value="blank_others")
-    tk.Radiobutton(popup, text="Blank other rows", variable=mode_var, value="blank_others").pack(anchor="w", padx=20)
-    tk.Radiobutton(popup, text="Keep other rows unchanged", variable=mode_var, value="keep_others").pack(anchor="w", padx=20)
-
-    def apply_action():
-        selected_indices = target_listbox.curselection()
-        if not selected_indices:
-            messagebox.showwarning("Selection Missing", "Please select at least one target column.")
-            return
-
-        selected_targets = [target_listbox.get(i) for i in selected_indices]
-        selected_sources = [x.strip() for x in source_entry.get().split(",") if x.strip()]
-        impact_val = impact_entry.get().strip()
-        mode = mode_var.get()
-
-        if not selected_sources:
-            messagebox.showwarning("Input Missing", "Please specify at least one combined column source (A, B, C, etc.).")
-            return
-
-        df_updated = self.apply_combined_column_actions(
-            df=df,
-            combined_col=combined_col,
-            target_cols=selected_targets,
-            selected_sources=selected_sources,
-            impact_value=impact_val,
-            mode=mode
-        )
-
-        messagebox.showinfo("Success", f"Action applied on {len(selected_targets)} target column(s).")
-        popup.destroy()
-        return df_updated
-
-    tk.Button(popup, text="Apply Action", command=apply_action, bg="#4CAF50", fg="white", padx=8, pady=4).pack(pady=15)
-    tk.Button(popup, text="Cancel", command=popup.destroy).pack()
-
-
-
-
-
-
-
-#########
-
-🧩 2. Where to Call This Popup
-After your combined column mapping step finishes, call this popup so the user can trigger the new functionality.
-Find where your code currently ends mapping, something like:
-
-
-# Combined column mapping completed
-self.display_dataframe(result_df)
-
-
-Right after that, add:
-Copy code
-Python
-self.combined_column_action_popup(result_df, combined_col="Combined Column")
-(Change "Combined Column" to your actual combined column name if different.)
-
+    popup.grab_set()
