@@ -1,28 +1,16 @@
-def display_dataframe(self, df):
-    """Display a pandas DataFrame in a simple Tkinter popup for inspection."""
-    import tkinter as tk
-    from tkinter import ttk
+combined_data = self.apply_column_combination(
+    result_rows=stage1_data,
+    columns_to_combine=columns_to_combine,
+    new_column_name=combined_col,
+    reference_column=reference_col,
+    repeat_columns=repeat_cols
+)
 
-    popup = tk.Toplevel(self.root)
-    popup.title("Data Preview")
-    popup.geometry("800x400")
-
-    frame = ttk.Frame(popup)
-    frame.pack(fill="both", expand=True)
-
-    tree = ttk.Treeview(frame)
-    tree.pack(fill="both", expand=True)
-
-    # Set columns
-    tree["columns"] = list(df.columns)
-    tree["show"] = "headings"
-
-    for col in df.columns:
-        tree.heading(col, text=col)
-        tree.column(col, width=120, anchor="center")
-
-    # Insert rows
-    for _, row in df.iterrows():
-        tree.insert("", "end", values=list(row))
-
-    popup.grab_set()
+mapped_data = self.apply_reference_mapping(
+    stage1_data=combined_data,
+    combined_column_name=combined_col,
+    mapping_df=mapping_df,
+    new_column_name=mapped_col_name,
+    reference_values=ref_values,
+    repeat_values=repeat_values
+)
