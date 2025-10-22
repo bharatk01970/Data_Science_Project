@@ -1,385 +1,291 @@
-def show_conditional_impact_popup(self, stage1_data, combined_column_name):
-    """Show popup to configure conditional impacts on target columns based on combined column values"""
-    if not stage1_data:
-        return None
+def add_default_columns():#To get new column details
+    detail_popup=tk.Toplevel(popup)
+    detail_popup.title('Add Default Column')
+    detail_popup.geometry('600x650')
+    detail_popup.transient(popup)
+    detail_popup.grab_set()
+
+    #Column name input
+    ttk.Label(detail_popup, text="New Column Name:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
+    new_col_entry = ttk.Entry(detail_popup, width=35)
+    new_col_entry.grid(row=0, column=1, padx=10, pady=5)
+
+    ttk.Label(detail_popup, text='Source Column:').grid(row=1, column=0, sticky=tk.W, padx=10,pady=5)
+    source_var=tk.StringVar()
+    source_combo=ttk.Combobox(detail_popup, textvariable=source_var,width=33, state='readonly')
+    source_combo['values'] = list(df.columns)
+    source_combo.grid(row=1, column=1, padx=10, pady=5)
+
+    ttk.Label(detail_popup, text='Value Mapping (source_value → default_value)',font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
     
-    # Extract unique values from combined column
-    combined_values = set()
-    for row in stage1_data:
-        if combined_column_name in row and row[combined_column_name]:
-            combined_values.add(str(row[combined_column_name]).strip())
+    # Enhanced instructions frame
+    inst_frame = ttk.LabelFrame(detail_popup, text="Mapping Rules & Patterns", padding=5)
+    inst_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
     
-    # Get all available columns (excluding combined column)
-    available_columns = set()
-    for row in stage1_data:
-        available_columns.update(row.keys())
-    available_columns.discard(combined_column_name)
+    instructions = [
+        "• Exact match: value1=output1",
+        "• Wildcard (all non-blank): *=default_output",
+        "• Blank/empty values: <BLANK>=blank_output",
+        "• Starts with pattern: Pea*=output (matches Pea, Peach, Peanut)",
+        "• Ends with pattern: *berry=output (matches Strawberry, Blueberry)",
+        "• Contains pattern: *app*=output (matches Apple, Pineapple, application)",
+        "• Multiple mappings: one per line",
+        "• Priority: Exact > Pattern Match > Blank > Wildcard (*)"
+    ]
     
-    if not combined_values or not available_columns:
-        return None
+    for i, inst in enumerate(instructions):
+        ttk.Label(inst_frame, text=inst, font=('TkDefaultFont', 8), 
+                 foreground='blue').grid(row=i, column=0, sticky=tk.W, padx=5, pady=1)
     
-    popup = tk.Toplevel(self.root)
-    popup.title("Conditional Column Impact (Optional)")
-    popup.geometry("700x650")
-    popup.transient(self.root)
-    popup.grab_set()
+    # Mapping text area
+    ttk.Label(detail_popup, text="Enter mapping rules (one per line):", 
+              font=('TkDefaultFont', 8)).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(5,2))
     
-    ttk.Label(popup, text="Conditional Column Impact (Optional)", 
-              font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
-    ttk.Label(popup, text="Define actions on target columns based on combined column values", 
-              font=('TkDefaultFont', 9)).pack(pady=5, padx=10, anchor=tk.W)
+    mapping_text = tk.Text(detail_popup, height=10, width=65, font=('Courier', 9))
+    mapping_text.grid(row=5, column=0, columnspan=2, padx=10, pady=5)
     
-    # Create notebook for organized input
-    notebook = ttk.Notebook(popup)
-    notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    # Example frame
+    example_frame = ttk.LabelFrame(detail_popup, text="Examples", padding=5)
+    example_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
     
-    # --- TAB 1: Select Target Columns ---
-    tab1 = ttk.Frame(notebook)
-    notebook.add(tab1, text="Step 1: Target Columns")
-    
-    ttk.Label(tab1, text="Select target column(s) to impact:", 
-              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
-    
-    # Scrollable frame for target column checkboxes
-    target_canvas_frame = ttk.Frame(tab1)
-    target_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-    
-    target_canvas = tk.Canvas(target_canvas_frame, highlightthickness=0, height=300)
-    target_scrollbar = ttk.Scrollbar(target_canvas_frame, orient="vertical", command=target_canvas.yview)
-    target_scrollable = ttk.Frame(target_canvas)
-    
-    target_scrollable.bind("<Configure>", 
-                          lambda e: target_canvas.configure(scrollregion=target_canvas.bbox("all")))
-    
-    target_canvas.create_window((0, 0), window=target_scrollable, anchor="nw")
-    target_canvas.configure(yscrollcommand=target_scrollbar.set)
-    
-    target_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    target_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
-    target_vars = {}
-    for col in sorted(available_columns):
-        var = tk.BooleanVar(value=False)
-        target_vars[col] = var
-        cb = ttk.Checkbutton(target_scrollable, text=col, variable=var)
-        cb.pack(anchor=tk.W, padx=5, pady=2)
-    
-    # --- TAB 2: Select Trigger Values (with mode selection) ---
-    tab2 = ttk.Frame(notebook)
-    notebook.add(tab2, text="Step 2: Trigger Values")
-    
-    ttk.Label(tab2, text=f"Select value(s) from '{combined_column_name}' that trigger the action:", 
-              font=('TkDefaultFont', 9, 'bold')).pack(pady=5, padx=10, anchor=tk.W)
-    ttk.Label(tab2, text="Only rows with these values will be affected", 
-              font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
-    
-    # Mode selection frame
-    mode_frame = ttk.LabelFrame(tab2, text="Selection Mode", padding=10)
-    mode_frame.pack(fill=tk.X, padx=10, pady=5)
-    
-    selection_mode = tk.StringVar(value="individual")
-    
-    ttk.Radiobutton(mode_frame, text="Select Individual Values", 
-                    variable=selection_mode, value="individual",
-                    command=lambda: update_trigger_display()).pack(anchor=tk.W, pady=2)
-    ttk.Radiobutton(mode_frame, text="Select by Column Headers (bulk selection)", 
-                    variable=selection_mode, value="column_headers",
-                    command=lambda: update_trigger_display()).pack(anchor=tk.W, pady=2)
-    
-    # Scrollable frame for trigger selection (will be dynamically updated)
-    trigger_canvas_frame = ttk.Frame(tab2)
-    trigger_canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-    
-    trigger_canvas = tk.Canvas(trigger_canvas_frame, highlightthickness=0, height=250)
-    trigger_scrollbar = ttk.Scrollbar(trigger_canvas_frame, orient="vertical", command=trigger_canvas.yview)
-    trigger_scrollable = ttk.Frame(trigger_canvas)
-    
-    trigger_scrollable.bind("<Configure>", 
-                           lambda e: trigger_canvas.configure(scrollregion=trigger_canvas.bbox("all")))
-    
-    trigger_canvas.create_window((0, 0), window=trigger_scrollable, anchor="nw")
-    trigger_canvas.configure(yscrollcommand=trigger_scrollbar.set)
-    
-    trigger_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    trigger_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    
-    # Storage for trigger selection
-    trigger_vars = {}
-    column_header_vars = {}
-    column_to_values_map = {}  # Maps column name to list of its values
-    
-    def update_trigger_display():
-        """Update the trigger selection display based on selected mode"""
-        # Clear existing widgets
-        for widget in trigger_scrollable.winfo_children():
-            widget.destroy()
-        trigger_vars.clear()
-        column_header_vars.clear()
-        
-        mode = selection_mode.get()
-        
-        if mode == "individual":
-            # Show individual values (original functionality)
-            for val in sorted(combined_values):
-                var = tk.BooleanVar(value=False)
-                trigger_vars[val] = var
-                cb = ttk.Checkbutton(trigger_scrollable, text=val, variable=var)
-                cb.pack(anchor=tk.W, padx=5, pady=2)
-        
-        elif mode == "column_headers":
-            # Show column headers with sample values
-            # First, we need to map which values belong to which source columns
-            # This requires tracking from the combination process
-            
-            # Try to infer column grouping from the data
-            # Look for patterns or use stored metadata if available
-            if hasattr(self, 'combination_source_columns') and self.combination_source_columns:
-                # Use stored mapping if available
-                for col_name in sorted(self.combination_source_columns.keys()):
-                    values = self.combination_source_columns[col_name]
-                    column_to_values_map[col_name] = values
-                    
-                    var = tk.BooleanVar(value=False)
-                    column_header_vars[col_name] = var
-                    
-                    # Show sample value in parentheses
-                    sample_val = values[0] if values else ""
-                    display_text = f"{col_name} ({sample_val}... [{len(values)} values])"
-                    
-                    cb = ttk.Checkbutton(trigger_scrollable, text=display_text, variable=var)
-                    cb.pack(anchor=tk.W, padx=5, pady=2)
-            else:
-                # Fallback: Show warning that column mapping is not available
-                ttk.Label(trigger_scrollable, 
-                         text="⚠ Column header mapping not available",
-                         font=('TkDefaultFont', 9, 'bold'),
-                         foreground='red').pack(anchor=tk.W, padx=5, pady=5)
-                ttk.Label(trigger_scrollable, 
-                         text="Please use 'Individual Values' mode instead.\n\n"
-                              "Column header mode requires tracking from the\n"
-                              "combination process. This will be available in\n"
-                              "future processing runs.",
-                         font=('TkDefaultFont', 8),
-                         foreground='gray').pack(anchor=tk.W, padx=5, pady=2)
-    
-    # Initial display
-    update_trigger_display()
-    
-    # --- TAB 3: Define Impact ---
-    tab3 = ttk.Frame(notebook)
-    notebook.add(tab3, text="Step 3: Define Impact")
-    
-    ttk.Label(tab3, text="Choose the action to perform:", 
-              font=('TkDefaultFont', 9, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-    
-    impact_var = tk.StringVar(value="blank_non_matching")
-    
-    # Radio buttons for impact options
-    rb_frame = ttk.Frame(tab3)
-    rb_frame.pack(fill=tk.X, padx=20, pady=5)
-    
-    ttk.Radiobutton(rb_frame, text="Option 1: Blank out NON-MATCHING rows (keep matching rows unchanged)", 
-                    variable=impact_var, value="blank_non_matching").pack(anchor=tk.W, pady=3)
-    ttk.Label(rb_frame, text="   → Target columns become empty for rows NOT in trigger values", 
-              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
-    
-    ttk.Radiobutton(rb_frame, text="Option 2: Replace MATCHING rows with custom value", 
-                    variable=impact_var, value="replace_matching").pack(anchor=tk.W, pady=3)
-    ttk.Label(rb_frame, text="   → Target columns get new value for rows IN trigger values", 
-              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
-    
-    ttk.Radiobutton(rb_frame, text="Option 3: Blank out MATCHING rows (keep non-matching unchanged)", 
-                    variable=impact_var, value="blank_matching").pack(anchor=tk.W, pady=3)
-    ttk.Label(rb_frame, text="   → Target columns become empty for rows IN trigger values", 
-              font=('TkDefaultFont', 8), foreground='blue').pack(anchor=tk.W, padx=20)
-    
-    # Custom value entry (for Option 2)
-    value_frame = ttk.Frame(tab3)
-    value_frame.pack(fill=tk.X, padx=20, pady=15)
-    
-    ttk.Label(value_frame, text="Custom replacement value (for Option 2):").pack(side=tk.LEFT, padx=5)
-    custom_value_entry = ttk.Entry(value_frame, width=30)
-    custom_value_entry.pack(side=tk.LEFT, padx=5)
-    custom_value_entry.insert(0, "")
-    
-    # Example section
-    example_frame = ttk.LabelFrame(tab3, text="Example", padding=10)
-    example_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-    
-    example_text = tk.Text(example_frame, height=8, width=70, wrap=tk.WORD, 
-                          font=('Courier', 8), state='normal')
+    example_text = tk.Text(example_frame, height=8, width=65, font=('Courier', 8), 
+                          wrap=tk.WORD, state='normal', background='#f0f0f0')
     example_text.pack(fill=tk.BOTH, expand=True)
     
-    example_content = """
-Example Setup:
-• Combined Column: [A1, A2, B1, C1]
-• Target Column: X
-• Trigger Selection: Column A (contains A1, A2)
-
-Option 1 Result (Blank Non-Matching):
-  Row with A1 → X keeps original value
-  Row with A2 → X keeps original value
-  Row with B1 → X becomes blank
-  Row with C1 → X becomes blank
-
-Option 2 Result (Replace Matching with "drama"):
-  Row with A1 → X = "drama"
-  Row with A2 → X = "drama"
-  Row with B1 → X keeps original value
-  Row with C1 → X keeps original value
-
-Option 3 Result (Blank Matching):
-  Row with A1 → X becomes blank
-  Row with A2 → X becomes blank
-  Row with B1 → X keeps original value
-  Row with C1 → X keeps original value
-    """
+    example_content = """Example 1 (Exact + Wildcard):    Example 2 (Patterns):
+Apple=Fruit                       *Manager=Management
+Carrot=Vegetable                  Sales*=Sales_Dept
+*=Other                           *Engineer*=Engineering
+                                  <BLANK>=Unassigned
+Example 3 (Prefix patterns):      *=Other_Dept
+Pea*=Legume          
+Str*=Berry                        Example 4 (Suffix patterns):
+Car*=Vehicle                      *berry=Berry_Type
+<BLANK>=Unknown                   *tion=Action_Word
+*=General                         *=General_Category"""
+    
     example_text.insert('1.0', example_content)
     example_text.config(state='disabled')
     
-    result = {'apply': False, 'target_columns': [], 'trigger_values': [], 
-              'impact_type': '', 'custom_value': ''}
+    # Pattern matching info
+    info_frame = ttk.Frame(detail_popup)
+    info_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
     
-    def validate_and_confirm():
-        target_cols = [col for col, var in target_vars.items() if var.get()]
+    ttk.Label(info_frame, text="ℹ Pattern Matching is case-sensitive", 
+              font=('TkDefaultFont', 8), foreground='red').pack(anchor=tk.W)
+    ttk.Label(info_frame, text="ℹ Use * alone for catch-all wildcard (non-blank values only)", 
+              font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
+
+    def save_mapping():
+        new_col=new_col_entry.get().strip()
+        source_col=source_var.get().strip()
+        if not new_col:
+            messagebox.showwarning('Warning','Please enter a new column name')
+            return
+        if not source_col:
+            messagebox.showwarning('Warning','Please select a source column')
+            return
+
+        #parse mapping with enhanced pattern support
+        mapping_dict={}
+        has_wildcard = False
+        has_blank = False
+        pattern_count = 0
         
-        # Collect trigger values based on selection mode
-        mode = selection_mode.get()
-        trigger_vals = []
-        
-        if mode == "individual":
-            trigger_vals = [val for val, var in trigger_vars.items() if var.get()]
-        elif mode == "column_headers":
-            # Collect all values from selected column headers
-            selected_columns = [col for col, var in column_header_vars.items() if var.get()]
-            for col in selected_columns:
-                if col in column_to_values_map:
-                    trigger_vals.extend(column_to_values_map[col])
-        
-        impact_type = impact_var.get()
-        custom_val = custom_value_entry.get().strip()
-        
-        # Validation
-        if not target_cols:
-            messagebox.showwarning("Warning", "Please select at least one target column in Step 1")
+        mapping_lines=mapping_text.get('1.0',tk.END).strip().split('\n')
+        for line_num, line in enumerate(mapping_lines, 1):
+            line = line.strip()
+            if not line:
+                continue
+                
+            if '=' not in line:
+                messagebox.showwarning('Warning', 
+                    f'Invalid format on line {line_num}: "{line}"\n'
+                    'Expected format: key=value')
+                return
+                
+            key, val = line.split('=', 1)
+            key = key.strip()
+            val = val.strip()
+            
+            if not key or not val:
+                messagebox.showwarning('Warning', 
+                    f'Empty key or value on line {line_num}: "{line}"')
+                return
+            
+            # Check for special keys
+            if key == '*':
+                has_wildcard = True
+            elif key.upper() == '<BLANK>':
+                has_blank = True
+                key = '<BLANK>'  # Normalize to uppercase
+            elif '*' in key and key != '*':
+                # Pattern detected
+                pattern_count += 1
+                # Validate pattern (should not have * in middle unless it's *text* pattern)
+                star_count = key.count('*')
+                if star_count > 2:
+                    messagebox.showwarning('Warning', 
+                        f'Invalid pattern on line {line_num}: "{key}"\n'
+                        'Only prefix (*text), suffix (text*), or contains (*text*) patterns allowed')
+                    return
+                if star_count == 2 and not (key.startswith('*') and key.endswith('*')):
+                    messagebox.showwarning('Warning', 
+                        f'Invalid pattern on line {line_num}: "{key}"\n'
+                        'For two wildcards, use *text* (contains pattern)')
+                    return
+            
+            mapping_dict[key] = val
+
+        if not mapping_dict:
+            messagebox.showwarning('Warning','Please provide at least one value mapping')
             return
         
-        if not trigger_vals:
-            if mode == "column_headers" and not hasattr(self, 'combination_source_columns'):
-                messagebox.showwarning("Warning", 
-                    "Column header mode is not available.\n"
-                    "Please switch to 'Individual Values' mode in Step 2.")
-            else:
-                messagebox.showwarning("Warning", "Please select at least one trigger value/column in Step 2")
-            return
+        # Show summary of mapping configuration
+        summary_parts = [f"✓ {len(mapping_dict)} mapping rule(s) defined"]
+        if has_wildcard:
+            summary_parts.append("✓ Catch-all wildcard (*) included")
+        if has_blank:
+            summary_parts.append("✓ Blank value (<BLANK>) rule included")
+        if pattern_count > 0:
+            summary_parts.append(f"✓ {pattern_count} pattern matching rule(s) included")
         
-        if impact_type == "replace_matching" and not custom_val:
-            messagebox.showwarning("Warning", 
-                "Option 2 requires a custom replacement value.\nPlease enter a value in Step 3.")
-            return
-        
-        result['apply'] = True
-        result['target_columns'] = target_cols
-        result['trigger_values'] = trigger_vals
-        result['impact_type'] = impact_type
-        result['custom_value'] = custom_val
-        popup.destroy()
-    
-    def skip():
-        popup.destroy()
-    
-    # Bottom buttons
-    button_frame = ttk.Frame(popup)
-    button_frame.pack(pady=10)
-    
-    ttk.Button(button_frame, text="Apply Configuration", 
-               command=validate_and_confirm, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-    ttk.Button(button_frame, text="Skip (No Conditional Impact)", 
-               command=skip).pack(side=tk.LEFT, padx=5)
-    
-    popup.wait_window()
-    return result
-
-
-
-
-
-######
-Add this new method after apply_column_combination (around line 920):
-
-
-
-def build_combination_source_map(self, temp_stage1_data, columns_to_combine):
-    """Build a mapping of source columns to their values in the combined column
-    
-    Args:
-        temp_stage1_data: Original data before combination
-        columns_to_combine: List of columns that were combined
-    
-    Returns:
-        Dictionary mapping column names to lists of their values
-    """
-    column_to_values = {}
-    
-    for col in columns_to_combine:
-        values_set = set()
-        for row in temp_stage1_data:
-            if col in row and row[col]:
-                value = row[col]
-                # Split multi-values
-                if isinstance(value, str) and (',' in value or ';' in value):
-                    split_vals = self.split_multi_values(value)
-                    values_set.update([v for v in split_vals if v])
-                else:
-                    val_str = str(value) if value else ""
-                    if val_str:
-                        values_set.add(val_str)
-        
-        if values_set:
-            column_to_values[col] = sorted(list(values_set))
-    
-    return column_to_values
-
-
-
-
-
-
-
-#######
-
-
-Apply column combination with optional reference-based repetition
-        if combination_result.get('combine'):
-            self.stage1_data = self.apply_column_combination(
-                temp_stage1_data,
-                combination_result['columns'],
-                combination_result['new_name'],
-                combination_result.get('reference_column', ''),
-                combination_result.get('repeat_columns', [])
-            )
+        # Confirm with user
+        confirm_msg = f"Add default column '{new_col}' based on '{source_col}'?\n\n" + "\n".join(summary_parts)
+        if messagebox.askyesno("Confirm Mapping", confirm_msg):
+            default_columns.append((new_col, source_col, mapping_dict))
             
-            combined_col_name = combination_result['new_name']
-
-
-
-
-@@@@@
-
-# Apply column combination with optional reference-based repetition
-        if combination_result.get('combine'):
-            # Build source mapping for conditional impact feature
-            self.combination_source_columns = self.build_combination_source_map(
-                temp_stage1_data,
-                combination_result['columns']
-            )
+            # Display in listbox with indicators
+            display_text = f'{new_col} ← {source_col}'
+            indicators = []
+            if has_wildcard:
+                indicators.append('*')
+            if has_blank:
+                indicators.append('B')
+            if pattern_count > 0:
+                indicators.append(f'P{pattern_count}')
             
-            self.stage1_data = self.apply_column_combination(
-                temp_stage1_data,
-                combination_result['columns'],
-                combination_result['new_name'],
-                combination_result.get('reference_column', ''),
-                combination_result.get('repeat_columns', [])
-            )
+            if indicators:
+                display_text += f' [{", ".join(indicators)}]'
             
-            combined_col_name = combination_result['new_name']
+            add_listbox.insert(tk.END, display_text)
+            detail_popup.destroy()
+
+    button_frame = ttk.Frame(detail_popup)
+    button_frame.grid(row=8, column=0, columnspan=2, pady=10)
+    
+    ttk.Button(button_frame, text='Save Mapping', 
+               command=save_mapping, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text='Cancel', 
+               command=detail_popup.destroy).pack(side=tk.LEFT, padx=5)
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################
+
+
+Update the export_data Method - Enhanced Pattern MatchingReplace the default column application section in export_data() with this comprehensive pattern-matching version:
+
+
+
+
+
+# Apply default column additions with wildcard, blank, and pattern support
+        for new_col, source_col, mapping_dict in step_a_result['default_columns']:
+            if source_col in df_export.columns:
+                def map_value(val):
+                    # Handle null/NaN/None values
+                    if pd.isna(val) or val is None:
+                        val_str = ""
+                    else:
+                        val_str = str(val).strip()
+                    
+                    # Priority 1: Check for exact match (case-sensitive)
+                    if val_str in mapping_dict:
+                        return mapping_dict[val_str]
+                    
+                    # Priority 2: Check for pattern matches (prefix, suffix, contains)
+                    # Only check patterns if value is not blank
+                    if val_str != "":
+                        for pattern, output in mapping_dict.items():
+                            # Skip special keys
+                            if pattern in ['*', '<BLANK>']:
+                                continue
+                            
+                            # Check if pattern contains wildcards
+                            if '*' in pattern:
+                                # Pattern: *text* (contains)
+                                if pattern.startswith('*') and pattern.endswith('*') and len(pattern) > 2:
+                                    search_text = pattern[1:-1]  # Remove both *
+                                    if search_text in val_str:
+                                        return output
+                                
+                                # Pattern: *text (ends with)
+                                elif pattern.startswith('*') and not pattern.endswith('*'):
+                                    suffix = pattern[1:]  # Remove leading *
+                                    if val_str.endswith(suffix):
+                                        return output
+                                
+                                # Pattern: text* (starts with)
+                                elif pattern.endswith('*') and not pattern.startswith('*'):
+                                    prefix = pattern[:-1]  # Remove trailing *
+                                    if val_str.startswith(prefix):
+                                        return output
+                    
+                    # Priority 3: Check for blank/empty values
+                    if val_str == "" and '<BLANK>' in mapping_dict:
+                        return mapping_dict['<BLANK>']
+                    
+                    # Priority 4: Check for wildcard (only for non-blank values)
+                    if val_str != "" and '*' in mapping_dict:
+                        return mapping_dict['*']
+                    
+                    # Priority 5: No match found, return empty string
+                    return ""
+                
+                df_export[new_col] = df_export[source_col].apply(map_value)
+                
+                # Log the mapping result
+                print(f"\n=== Default Column Mapping Applied ===")
+                print(f"New Column: {new_col}")
+                print(f"Source Column: {source_col}")
+                print(f"Mapping Rules: {len(mapping_dict)}")
+                
+                # Analyze mapping rules
+                exact_matches = [k for k in mapping_dict.keys() if '*' not in k and k != '<BLANK>']
+                patterns = [k for k in mapping_dict.keys() if '*' in k and k != '*']
+                
+                if exact_matches:
+                    print(f"  - Exact matches: {len(exact_matches)}")
+                if patterns:
+                    print(f"  - Pattern rules: {len(patterns)}")
+                    for p in patterns:
+                        if p.startswith('*') and p.endswith('*') and len(p) > 2:
+                            print(f"    • Contains: '{p[1:-1]}'")
+                        elif p.startswith('*'):
+                            print(f"    • Ends with: '{p[1:]}'")
+                        elif p.endswith('*'):
+                            print(f"    • Starts with: '{p[:-1]}'")
+                if '<BLANK>' in mapping_dict:
+                    print(f"  - Blank values → '{mapping_dict['<BLANK>']}'")
+                if '*' in mapping_dict:
+                    print(f"  - Catch-all wildcard (*) → '{mapping_dict['*']}'")
+                
+                print(f"Unique values generated: {df_export[new_col].nunique()}")
+                print(f"Sample output values: {list(df_export[new_col].unique())[:5]}")
+                print("=" * 40)
+
+
+
+
+
