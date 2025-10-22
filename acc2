@@ -1,291 +1,150 @@
-def add_default_columns():#To get new column details
-    detail_popup=tk.Toplevel(popup)
-    detail_popup.title('Add Default Column')
-    detail_popup.geometry('600x650')
-    detail_popup.transient(popup)
-    detail_popup.grab_set()
+import requests
+from bs4 import BeautifulSoup
+import csv
+from urllib.parse import urljoin
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
 
-    #Column name input
-    ttk.Label(detail_popup, text="New Column Name:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=5)
-    new_col_entry = ttk.Entry(detail_popup, width=35)
-    new_col_entry.grid(row=0, column=1, padx=10, pady=5)
+def scrape_page(url, output_csv, delay=1.5, progress_var=None):
+    all_data = []
+    headers = []
+    session = requests.Session()
+    next_page = url
+    page_num = 1
 
-    ttk.Label(detail_popup, text='Source Column:').grid(row=1, column=0, sticky=tk.W, padx=10,pady=5)
-    source_var=tk.StringVar()
-    source_combo=ttk.Combobox(detail_popup, textvariable=source_var,width=33, state='readonly')
-    source_combo['values'] = list(df.columns)
-    source_combo.grid(row=1, column=1, padx=10, pady=5)
+    try:
+        while next_page:
+            if progress_var:
+                progress_var.set(f"Scraping page {page_num}...")
 
-    ttk.Label(detail_popup, text='Value Mapping (source_value → default_value)',font=('TkDefaultFont', 9, 'bold')).grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(10, 5))
-    
-    # Enhanced instructions frame
-    inst_frame = ttk.LabelFrame(detail_popup, text="Mapping Rules & Patterns", padding=5)
-    inst_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
-    
-    instructions = [
-        "• Exact match: value1=output1",
-        "• Wildcard (all non-blank): *=default_output",
-        "• Blank/empty values: <BLANK>=blank_output",
-        "• Starts with pattern: Pea*=output (matches Pea, Peach, Peanut)",
-        "• Ends with pattern: *berry=output (matches Strawberry, Blueberry)",
-        "• Contains pattern: *app*=output (matches Apple, Pineapple, application)",
-        "• Multiple mappings: one per line",
-        "• Priority: Exact > Pattern Match > Blank > Wildcard (*)"
-    ]
-    
-    for i, inst in enumerate(instructions):
-        ttk.Label(inst_frame, text=inst, font=('TkDefaultFont', 8), 
-                 foreground='blue').grid(row=i, column=0, sticky=tk.W, padx=5, pady=1)
-    
-    # Mapping text area
-    ttk.Label(detail_popup, text="Enter mapping rules (one per line):", 
-              font=('TkDefaultFont', 8)).grid(row=4, column=0, columnspan=2, sticky=tk.W, padx=10, pady=(5,2))
-    
-    mapping_text = tk.Text(detail_popup, height=10, width=65, font=('Courier', 9))
-    mapping_text.grid(row=5, column=0, columnspan=2, padx=10, pady=5)
-    
-    # Example frame
-    example_frame = ttk.LabelFrame(detail_popup, text="Examples", padding=5)
-    example_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
-    
-    example_text = tk.Text(example_frame, height=8, width=65, font=('Courier', 8), 
-                          wrap=tk.WORD, state='normal', background='#f0f0f0')
-    example_text.pack(fill=tk.BOTH, expand=True)
-    
-    example_content = """Example 1 (Exact + Wildcard):    Example 2 (Patterns):
-Apple=Fruit                       *Manager=Management
-Carrot=Vegetable                  Sales*=Sales_Dept
-*=Other                           *Engineer*=Engineering
-                                  <BLANK>=Unassigned
-Example 3 (Prefix patterns):      *=Other_Dept
-Pea*=Legume          
-Str*=Berry                        Example 4 (Suffix patterns):
-Car*=Vehicle                      *berry=Berry_Type
-<BLANK>=Unknown                   *tion=Action_Word
-*=General                         *=General_Category"""
-    
-    example_text.insert('1.0', example_content)
-    example_text.config(state='disabled')
-    
-    # Pattern matching info
-    info_frame = ttk.Frame(detail_popup)
-    info_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=10, pady=5)
-    
-    ttk.Label(info_frame, text="ℹ Pattern Matching is case-sensitive", 
-              font=('TkDefaultFont', 8), foreground='red').pack(anchor=tk.W)
-    ttk.Label(info_frame, text="ℹ Use * alone for catch-all wildcard (non-blank values only)", 
-              font=('TkDefaultFont', 8), foreground='gray').pack(anchor=tk.W)
+            response = session.get(next_page)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
 
-    def save_mapping():
-        new_col=new_col_entry.get().strip()
-        source_col=source_var.get().strip()
-        if not new_col:
-            messagebox.showwarning('Warning','Please enter a new column name')
-            return
-        if not source_col:
-            messagebox.showwarning('Warning','Please select a source column')
-            return
+            # --- Detect structure ---
+            table = soup.find("table")
+            list_items = soup.find_all("li")
+            cards = soup.select("div[class*='card'], div[class*='item'], div[class*='listing']")
 
-        #parse mapping with enhanced pattern support
-        mapping_dict={}
-        has_wildcard = False
-        has_blank = False
-        pattern_count = 0
-        
-        mapping_lines=mapping_text.get('1.0',tk.END).strip().split('\n')
-        for line_num, line in enumerate(mapping_lines, 1):
-            line = line.strip()
-            if not line:
-                continue
-                
-            if '=' not in line:
-                messagebox.showwarning('Warning', 
-                    f'Invalid format on line {line_num}: "{line}"\n'
-                    'Expected format: key=value')
-                return
-                
-            key, val = line.split('=', 1)
-            key = key.strip()
-            val = val.strip()
-            
-            if not key or not val:
-                messagebox.showwarning('Warning', 
-                    f'Empty key or value on line {line_num}: "{line}"')
-                return
-            
-            # Check for special keys
-            if key == '*':
-                has_wildcard = True
-            elif key.upper() == '<BLANK>':
-                has_blank = True
-                key = '<BLANK>'  # Normalize to uppercase
-            elif '*' in key and key != '*':
-                # Pattern detected
-                pattern_count += 1
-                # Validate pattern (should not have * in middle unless it's *text* pattern)
-                star_count = key.count('*')
-                if star_count > 2:
-                    messagebox.showwarning('Warning', 
-                        f'Invalid pattern on line {line_num}: "{key}"\n'
-                        'Only prefix (*text), suffix (text*), or contains (*text*) patterns allowed')
-                    return
-                if star_count == 2 and not (key.startswith('*') and key.endswith('*')):
-                    messagebox.showwarning('Warning', 
-                        f'Invalid pattern on line {line_num}: "{key}"\n'
-                        'For two wildcards, use *text* (contains pattern)')
-                    return
-            
-            mapping_dict[key] = val
+            page_data = []
 
-        if not mapping_dict:
-            messagebox.showwarning('Warning','Please provide at least one value mapping')
-            return
-        
-        # Show summary of mapping configuration
-        summary_parts = [f"✓ {len(mapping_dict)} mapping rule(s) defined"]
-        if has_wildcard:
-            summary_parts.append("✓ Catch-all wildcard (*) included")
-        if has_blank:
-            summary_parts.append("✓ Blank value (<BLANK>) rule included")
-        if pattern_count > 0:
-            summary_parts.append(f"✓ {pattern_count} pattern matching rule(s) included")
-        
-        # Confirm with user
-        confirm_msg = f"Add default column '{new_col}' based on '{source_col}'?\n\n" + "\n".join(summary_parts)
-        if messagebox.askyesno("Confirm Mapping", confirm_msg):
-            default_columns.append((new_col, source_col, mapping_dict))
-            
-            # Display in listbox with indicators
-            display_text = f'{new_col} ← {source_col}'
-            indicators = []
-            if has_wildcard:
-                indicators.append('*')
-            if has_blank:
-                indicators.append('B')
-            if pattern_count > 0:
-                indicators.append(f'P{pattern_count}')
-            
-            if indicators:
-                display_text += f' [{", ".join(indicators)}]'
-            
-            add_listbox.insert(tk.END, display_text)
-            detail_popup.destroy()
+            if table:
+                rows = table.find_all("tr")
+                for row in rows:
+                    cols = row.find_all(["td", "th"])
+                    if not cols:
+                        continue
+                    row_data = []
+                    for col in cols:
+                        text = col.get_text(strip=True)
+                        link = col.find("a")
+                        href = link["href"] if link and link.has_attr("href") else None
+                        href = urljoin(next_page, href) if href else None
+                        value = f'<a href="{href}">{text}</a>' if href else text
+                        row_data.append(value)
+                    page_data.append(row_data)
+                if not headers and page_data:
+                    headers = [f"Column_{i+1}" for i in range(len(page_data[0]))]
 
-    button_frame = ttk.Frame(detail_popup)
-    button_frame.grid(row=8, column=0, columnspan=2, pady=10)
-    
-    ttk.Button(button_frame, text='Save Mapping', 
-               command=save_mapping, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-    ttk.Button(button_frame, text='Cancel', 
-               command=detail_popup.destroy).pack(side=tk.LEFT, padx=5)
+            elif list_items and len(list_items) > 3:
+                for li in list_items:
+                    text = li.get_text(strip=True)
+                    link = li.find("a")
+                    href = link["href"] if link and link.has_attr("href") else None
+                    href = urljoin(next_page, href) if href else None
+                    value = f'<a href="{href}">{text}</a>' if href else text
+                    page_data.append([value])
+                if not headers:
+                    headers = ["List_Item"]
+
+            elif cards and len(cards) > 2:
+                for card in cards:
+                    text = card.get_text(" ", strip=True)
+                    link = card.find("a")
+                    href = link["href"] if link and link.has_attr("href") else None
+                    href = urljoin(next_page, href) if href else None
+                    value = f'<a href="{href}">{text}</a>' if href else text
+                    page_data.append([value])
+                if not headers:
+                    headers = ["Card_Detail"]
+
+            else:
+                messagebox.showwarning("Warning", f"Could not auto-detect structure on page {page_num}.")
+                break
+
+            all_data.extend(page_data)
+
+            # --- Find next page link ---
+            next_link = (
+                soup.select_one("a[rel='next']")
+                or soup.find("a", string=lambda s: s and "next" in s.lower())
+                or soup.find("a", string=lambda s: s and "›" in s)
+            )
+
+            if next_link and next_link.has_attr("href"):
+                next_page = urljoin(next_page, next_link["href"])
+                page_num += 1
+                time.sleep(delay)
+            else:
+                next_page = None
+
+        # --- Save everything to CSV ---
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+            writer.writerows(all_data)
+
+        messagebox.showinfo("Success", f"✅ All pages scraped and saved to '{output_csv}'!")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred:\n{e}")
+        return
+
+    if progress_var:
+        progress_var.set("Scraping completed ✅")
 
 
+def start_scraping():
+    url = url_entry.get().strip()
+    if not url:
+        messagebox.showwarning("Input required", "Please enter a URL.")
+        return
+
+    output_csv = filedialog.asksaveasfilename(
+        defaultextension=".csv",
+        filetypes=[("CSV Files", "*.csv")],
+        title="Save scraped data as..."
+    )
+
+    if not output_csv:
+        return
+
+    progress_var.set("Starting...")
+    root.update_idletasks()
+    scrape_page(url, output_csv, progress_var=progress_var)
 
 
+# --- Tkinter GUI ---
+root = tk.Tk()
+root.title("🌐 Universal Web Scraper")
+root.geometry("500x250")
+root.resizable(False, False)
 
+frame = ttk.Frame(root, padding=20)
+frame.pack(fill="both", expand=True)
 
+ttk.Label(frame, text="Enter webpage URL to scrape:", font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 5))
+url_entry = ttk.Entry(frame, width=70)
+url_entry.pack(fill="x", pady=(0, 10))
 
+scrape_btn = ttk.Button(frame, text="Start Scraping", command=start_scraping)
+scrape_btn.pack(pady=10)
 
+progress_var = tk.StringVar()
+progress_label = ttk.Label(frame, textvariable=progress_var, font=("Segoe UI", 9, "italic"), foreground="#555")
+progress_label.pack(anchor="center", pady=10)
 
+ttk.Label(frame, text="Output will be saved as CSV with clickable links.", font=("Segoe UI", 8)).pack(pady=(10, 0))
 
-
-
-
-###################
-
-
-Update the export_data Method - Enhanced Pattern MatchingReplace the default column application section in export_data() with this comprehensive pattern-matching version:
-
-
-
-
-
-# Apply default column additions with wildcard, blank, and pattern support
-        for new_col, source_col, mapping_dict in step_a_result['default_columns']:
-            if source_col in df_export.columns:
-                def map_value(val):
-                    # Handle null/NaN/None values
-                    if pd.isna(val) or val is None:
-                        val_str = ""
-                    else:
-                        val_str = str(val).strip()
-                    
-                    # Priority 1: Check for exact match (case-sensitive)
-                    if val_str in mapping_dict:
-                        return mapping_dict[val_str]
-                    
-                    # Priority 2: Check for pattern matches (prefix, suffix, contains)
-                    # Only check patterns if value is not blank
-                    if val_str != "":
-                        for pattern, output in mapping_dict.items():
-                            # Skip special keys
-                            if pattern in ['*', '<BLANK>']:
-                                continue
-                            
-                            # Check if pattern contains wildcards
-                            if '*' in pattern:
-                                # Pattern: *text* (contains)
-                                if pattern.startswith('*') and pattern.endswith('*') and len(pattern) > 2:
-                                    search_text = pattern[1:-1]  # Remove both *
-                                    if search_text in val_str:
-                                        return output
-                                
-                                # Pattern: *text (ends with)
-                                elif pattern.startswith('*') and not pattern.endswith('*'):
-                                    suffix = pattern[1:]  # Remove leading *
-                                    if val_str.endswith(suffix):
-                                        return output
-                                
-                                # Pattern: text* (starts with)
-                                elif pattern.endswith('*') and not pattern.startswith('*'):
-                                    prefix = pattern[:-1]  # Remove trailing *
-                                    if val_str.startswith(prefix):
-                                        return output
-                    
-                    # Priority 3: Check for blank/empty values
-                    if val_str == "" and '<BLANK>' in mapping_dict:
-                        return mapping_dict['<BLANK>']
-                    
-                    # Priority 4: Check for wildcard (only for non-blank values)
-                    if val_str != "" and '*' in mapping_dict:
-                        return mapping_dict['*']
-                    
-                    # Priority 5: No match found, return empty string
-                    return ""
-                
-                df_export[new_col] = df_export[source_col].apply(map_value)
-                
-                # Log the mapping result
-                print(f"\n=== Default Column Mapping Applied ===")
-                print(f"New Column: {new_col}")
-                print(f"Source Column: {source_col}")
-                print(f"Mapping Rules: {len(mapping_dict)}")
-                
-                # Analyze mapping rules
-                exact_matches = [k for k in mapping_dict.keys() if '*' not in k and k != '<BLANK>']
-                patterns = [k for k in mapping_dict.keys() if '*' in k and k != '*']
-                
-                if exact_matches:
-                    print(f"  - Exact matches: {len(exact_matches)}")
-                if patterns:
-                    print(f"  - Pattern rules: {len(patterns)}")
-                    for p in patterns:
-                        if p.startswith('*') and p.endswith('*') and len(p) > 2:
-                            print(f"    • Contains: '{p[1:-1]}'")
-                        elif p.startswith('*'):
-                            print(f"    • Ends with: '{p[1:]}'")
-                        elif p.endswith('*'):
-                            print(f"    • Starts with: '{p[:-1]}'")
-                if '<BLANK>' in mapping_dict:
-                    print(f"  - Blank values → '{mapping_dict['<BLANK>']}'")
-                if '*' in mapping_dict:
-                    print(f"  - Catch-all wildcard (*) → '{mapping_dict['*']}'")
-                
-                print(f"Unique values generated: {df_export[new_col].nunique()}")
-                print(f"Sample output values: {list(df_export[new_col].unique())[:5]}")
-                print("=" * 40)
-
-
-
-
-
+root.mainloop()
