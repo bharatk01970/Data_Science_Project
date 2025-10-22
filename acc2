@@ -3,13 +3,23 @@ from bs4 import BeautifulSoup
 import csv
 from urllib.parse import urljoin
 import time
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from requests.exceptions import RequestException, ConnectionError
 
-def scrape_page(url, output_csv, delay=1.5, progress_var=None):
+def scrape_page(url, output_csv, delay=1.5, progress_var=None, max_retries=3):
     all_data = []
     headers = []
     session = requests.Session()
+
+    # Add browser-like headers to avoid being blocked
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/129.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+
     next_page = url
     page_num = 1
 
@@ -18,8 +28,20 @@ def scrape_page(url, output_csv, delay=1.5, progress_var=None):
             if progress_var:
                 progress_var.set(f"Scraping page {page_num}...")
 
-            response = session.get(next_page)
-            response.raise_for_status()
+            # Retry block for unstable connections
+            for attempt in range(max_retries):
+                try:
+                    response = session.get(next_page, timeout=15)
+                    response.raise_for_status()
+                    break
+                except (ConnectionError, RequestException) as e:
+                    print(f"⚠️ Network error: {e} (attempt {attempt+1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)  # exponential backoff
+                        continue
+                    else:
+                        raise
+
             soup = BeautifulSoup(response.text, "html.parser")
 
             # --- Detect structure ---
@@ -70,12 +92,12 @@ def scrape_page(url, output_csv, delay=1.5, progress_var=None):
                     headers = ["Card_Detail"]
 
             else:
-                messagebox.showwarning("Warning", f"Could not auto-detect structure on page {page_num}.")
+                print(f"⚠️ No recognizable data structure on page {page_num}.")
                 break
 
             all_data.extend(page_data)
 
-            # --- Find next page link ---
+            # --- Find the next page link ---
             next_link = (
                 soup.select_one("a[rel='next']")
                 or soup.find("a", string=lambda s: s and "next" in s.lower())
@@ -95,56 +117,12 @@ def scrape_page(url, output_csv, delay=1.5, progress_var=None):
             writer.writerow(headers)
             writer.writerows(all_data)
 
-        messagebox.showinfo("Success", f"✅ All pages scraped and saved to '{output_csv}'!")
+        print(f"✅ All pages scraped and saved to '{output_csv}'")
+        if progress_var:
+            progress_var.set("Scraping completed ✅")
 
     except Exception as e:
+        import tkinter.messagebox as messagebox
         messagebox.showerror("Error", f"An error occurred:\n{e}")
-        return
-
-    if progress_var:
-        progress_var.set("Scraping completed ✅")
-
-
-def start_scraping():
-    url = url_entry.get().strip()
-    if not url:
-        messagebox.showwarning("Input required", "Please enter a URL.")
-        return
-
-    output_csv = filedialog.asksaveasfilename(
-        defaultextension=".csv",
-        filetypes=[("CSV Files", "*.csv")],
-        title="Save scraped data as..."
-    )
-
-    if not output_csv:
-        return
-
-    progress_var.set("Starting...")
-    root.update_idletasks()
-    scrape_page(url, output_csv, progress_var=progress_var)
-
-
-# --- Tkinter GUI ---
-root = tk.Tk()
-root.title("🌐 Universal Web Scraper")
-root.geometry("500x250")
-root.resizable(False, False)
-
-frame = ttk.Frame(root, padding=20)
-frame.pack(fill="both", expand=True)
-
-ttk.Label(frame, text="Enter webpage URL to scrape:", font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 5))
-url_entry = ttk.Entry(frame, width=70)
-url_entry.pack(fill="x", pady=(0, 10))
-
-scrape_btn = ttk.Button(frame, text="Start Scraping", command=start_scraping)
-scrape_btn.pack(pady=10)
-
-progress_var = tk.StringVar()
-progress_label = ttk.Label(frame, textvariable=progress_var, font=("Segoe UI", 9, "italic"), foreground="#555")
-progress_label.pack(anchor="center", pady=10)
-
-ttk.Label(frame, text="Output will be saved as CSV with clickable links.", font=("Segoe UI", 8)).pack(pady=(10, 0))
-
-root.mainloop()
+        if progress_var:
+            progress_var.set("❌ Scraping failed due to connection issues.")
