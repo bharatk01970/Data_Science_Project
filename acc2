@@ -1,128 +1,241 @@
-import requests
-from bs4 import BeautifulSoup
-import csv
-from urllib.parse import urljoin
-import time
-from requests.exceptions import RequestException, ConnectionError
+#!/usr/bin/env python3
+"""
+excel_mailer.py
 
-def scrape_page(url, output_csv, delay=1.5, progress_var=None, max_retries=3):
-    all_data = []
-    headers = []
-    session = requests.Session()
+Capture specified Excel ranges as images and draft/send Outlook emails with flexible placement
+(attachment / inline / both).
 
-    # Add browser-like headers to avoid being blocked
-    session.headers.update({
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/129.0 Safari/537.36"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-    })
+Requirements (Windows):
+  - Excel desktop
+  - Outlook desktop
+  - Python packages: xlwings, pywin32, pillow
+    e.g. pip install xlwings pywin32 pillow
 
-    next_page = url
-    page_num = 1
+Usage examples:
+1) Draft mode (opens Outlook draft):
+   python excel_mailer.py --workbook "C:\\path\\book.xlsx" --captures '[{"sheet":"Sheet1","range":"A1:C6","name":"img1.png","placement":"body"},{"sheet":"Sheet2","range":"A1:B4","name":"img2.png","placement":"attachment"}]' --subject "Report {timestamp}" --body "<h3>See:</h3>{inline_images}" --timezone "Asia/Kolkata" --from-account "me@domain.com" --to "a@x.com;b@y.com" --send false
 
+2) Send immediately:
+   python excel_mailer.py --workbook "C:\\path\\book.xlsx" --captures-file captures.json --subject "Quick {timestamp}" --body-file body.html --timezone "UTC" --send true
+
+Notes:
+- Uses COM via xlwings to produce accurate range screenshots (keeps formatting).
+- For inline images, the script adds attachments and sets the MAPI Content-ID so <img src="cid:..."> works in Outlook HTML body.
+- Attempts to set the sending account if provided; falls back to default if it cannot.
+"""
+
+import os
+import sys
+import json
+import tempfile
+import argparse
+from pathlib import Path
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    from backports.zoneinfo import ZoneInfo
+import xlwings as xw
+import win32com.client as win32
+import pythoncom
+
+# MAPI property tag for PR_ATTACH_CONTENT_ID
+PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001F"
+
+def timestamp_for_zone(zone_name):
     try:
-        while next_page:
-            if progress_var:
-                progress_var.set(f"Scraping page {page_num}...")
+        z = ZoneInfo(zone_name)
+    except Exception:
+        z = ZoneInfo("UTC")
+    return datetime.now(tz=z).strftime("%Y-%m-%d %H:%M:%S")
 
-            # Retry block for unstable connections
-            for attempt in range(max_retries):
+def capture_range_as_image(wb_path, sheet_name_or_index, cell_range, out_path):
+    """Capture an Excel range as an image (PNG) using xlwings/COM.
+    Returns full path to saved PNG.
+    """
+    app = xw.App(visible=False, add_book=False)
+    try:
+        wb = app.books.open(wb_path)
+        # Allow sheet by name or index
+        if isinstance(sheet_name_or_index, int):
+            sht = wb.sheets[sheet_name_or_index]
+        else:
+            sht = wb.sheets[sheet_name_or_index]
+        rng = sht.range(cell_range)
+        # Copy as picture
+        # xlScreen = -4147, xlPicture = 1
+        rng.api.CopyPicture(-4147, 1)
+        # Create temporary chart, paste picture, export
+        ch = sht.api.Shapes.AddChart2(201, -1, 0, 0, 300, 200)
+        try:
+            ch.Chart.Paste()
+            # Ensure output directory exists
+            out_dir = os.path.dirname(out_path)
+            os.makedirs(out_dir, exist_ok=True)
+            ch.Chart.Export(out_path)
+        finally:
+            ch.Delete()
+        wb.close(save=False)
+        return os.path.abspath(out_path)
+    finally:
+        try:
+            app.quit()
+        except Exception:
+            pass
+
+def build_and_send_mail(images_info, subject_template, body_template, timezone, from_account, to_list, cc_list, bcc_list, send_flag):
+    """Compose Outlook mail with attachments and inline images, then open draft or send."""
+    pythoncom.CoInitialize()
+    outlook = win32.Dispatch("Outlook.Application")
+    ns = outlook.GetNamespace("MAPI")
+    mail = outlook.CreateItem(0)  # olMailItem
+
+    # Try to set sending account if provided
+    if from_account:
+        try:
+            accounts = ns.Accounts
+            matched = None
+            for i in range(1, accounts.Count + 1):
+                acc = accounts.Item(i)
                 try:
-                    response = session.get(next_page, timeout=15)
-                    response.raise_for_status()
+                    addr = acc.SmtpAddress
+                except Exception:
+                    addr = getattr(acc, "Address", None)
+                if addr and addr.lower() == from_account.lower():
+                    matched = acc
                     break
-                except (ConnectionError, RequestException) as e:
-                    print(f"⚠️ Network error: {e} (attempt {attempt+1}/{max_retries})")
-                    if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)  # exponential backoff
-                        continue
-                    else:
-                        raise
-
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            # --- Detect structure ---
-            table = soup.find("table")
-            list_items = soup.find_all("li")
-            cards = soup.select("div[class*='card'], div[class*='item'], div[class*='listing']")
-
-            page_data = []
-
-            if table:
-                rows = table.find_all("tr")
-                for row in rows:
-                    cols = row.find_all(["td", "th"])
-                    if not cols:
-                        continue
-                    row_data = []
-                    for col in cols:
-                        text = col.get_text(strip=True)
-                        link = col.find("a")
-                        href = link["href"] if link and link.has_attr("href") else None
-                        href = urljoin(next_page, href) if href else None
-                        value = f'<a href="{href}">{text}</a>' if href else text
-                        row_data.append(value)
-                    page_data.append(row_data)
-                if not headers and page_data:
-                    headers = [f"Column_{i+1}" for i in range(len(page_data[0]))]
-
-            elif list_items and len(list_items) > 3:
-                for li in list_items:
-                    text = li.get_text(strip=True)
-                    link = li.find("a")
-                    href = link["href"] if link and link.has_attr("href") else None
-                    href = urljoin(next_page, href) if href else None
-                    value = f'<a href="{href}">{text}</a>' if href else text
-                    page_data.append([value])
-                if not headers:
-                    headers = ["List_Item"]
-
-            elif cards and len(cards) > 2:
-                for card in cards:
-                    text = card.get_text(" ", strip=True)
-                    link = card.find("a")
-                    href = link["href"] if link and link.has_attr("href") else None
-                    href = urljoin(next_page, href) if href else None
-                    value = f'<a href="{href}">{text}</a>' if href else text
-                    page_data.append([value])
-                if not headers:
-                    headers = ["Card_Detail"]
-
+            if matched:
+                try:
+                    # Best-effort: set SendUsingAccount
+                    mail.SendUsingAccount = matched
+                except Exception:
+                    try:
+                        mail._oleobj_.Invoke(*(64209, 0, 1, matched))
+                    except Exception:
+                        print("Warning: couldn't set SendUsingAccount; continuing with default account.", file=sys.stderr)
             else:
-                print(f"⚠️ No recognizable data structure on page {page_num}.")
-                break
+                print("Warning: specified from-account not found; using default account.", file=sys.stderr)
+        except Exception as e:
+            print("Warning: error while selecting account:", e, file=sys.stderr)
 
-            all_data.extend(page_data)
+    # Recipients
+    def join_recipients(lst):
+        return ";".join([x.strip() for x in lst if x and x.strip()])
+    if to_list:
+        mail.To = join_recipients(to_list)
+    if cc_list:
+        mail.CC = join_recipients(cc_list)
+    if bcc_list:
+        mail.BCC = join_recipients(bcc_list)
 
-            # --- Find the next page link ---
-            next_link = (
-                soup.select_one("a[rel='next']")
-                or soup.find("a", string=lambda s: s and "next" in s.lower())
-                or soup.find("a", string=lambda s: s and "›" in s)
-            )
+    # Subject with timestamp
+    tzname = timezone or "UTC"
+    ts = timestamp_for_zone(tzname)
+    subject = subject_template.replace("{timestamp}", ts) if subject_template else f"Mail {ts}"
+    mail.Subject = subject
 
-            if next_link and next_link.has_attr("href"):
-                next_page = urljoin(next_page, next_link["href"])
-                page_num += 1
-                time.sleep(delay)
-            else:
-                next_page = None
+    # Attach images and prepare inline HTML
+    inline_html_parts = []
+    for img in images_info:
+        filepath = img["filepath"]
+        placement = img.get("placement", "attachment").lower()
+        cid = img.get("cid") or Path(filepath).name
+        if placement in ("body", "both"):
+            attachment = mail.Attachments.Add(os.path.abspath(filepath))
+            try:
+                pa = attachment.PropertyAccessor
+                pa.SetProperty(PR_ATTACH_CONTENT_ID, cid)
+            except Exception as e:
+                print("Warning: couldn't set Content-ID for attachment:", e, file=sys.stderr)
+            inline_html_parts.append(f'<div><img src="cid:{cid}" alt="{Path(filepath).name}"></div>')
+        if placement == "attachment":
+            mail.Attachments.Add(os.path.abspath(filepath))
 
-        # --- Save everything to CSV ---
-        with open(output_csv, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            writer.writerows(all_data)
+    inline_images_html = "\n".join(inline_html_parts)
+    final_body = (body_template or "").replace("{timestamp}", ts).replace("{inline_images}", inline_images_html)
+    if not final_body.lower().strip().startswith("<html"):
+        final_body = f"<html><body>{final_body}</body></html>"
+    # Prepend or set HTMLBody
+    try:
+        mail.HTMLBody = final_body + mail.HTMLBody
+    except Exception:
+        mail.Body = final_body  # fallback to plain body
 
-        print(f"✅ All pages scraped and saved to '{output_csv}'")
-        if progress_var:
-            progress_var.set("Scraping completed ✅")
+    # Display or send
+    if send_flag:
+        mail.Send()
+        print("Mail sent.")
+    else:
+        mail.Display()
+        print("Draft opened in Outlook (not sent).")
 
-    except Exception as e:
-        import tkinter.messagebox as messagebox
-        messagebox.showerror("Error", f"An error occurred:\n{e}")
-        if progress_var:
-            progress_var.set("❌ Scraping failed due to connection issues.")
+
+def parse_captures_arg(captures_json_or_path):
+    """Return list of captures from JSON string or JSON file path."""
+    if os.path.exists(captures_json_or_path):
+        with open(captures_json_or_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = json.loads(captures_json_or_path)
+    return data
+
+def main():
+    parser = argparse.ArgumentParser(description="Capture Excel ranges and create Outlook mail with images.")
+    parser.add_argument("--workbook", required=True, help="Path to Excel workbook (.xlsx)")
+    parser.add_argument("--captures", help='JSON string for captures. Example: \'[{"sheet":"Sheet1","range":"A1:C6","name":"img1.png","placement":"body"}]\'', default=None)
+    parser.add_argument("--captures-file", help="JSON file path for captures", default=None)
+    parser.add_argument("--subject", help="Subject template (use {timestamp})", default="Excel screenshots {timestamp}")
+    parser.add_argument("--body-file", help="HTML body file (may include {timestamp} and {inline_images})", default=None)
+    parser.add_argument("--body", help="Inline body HTML (use {timestamp} and {inline_images})", default=None)
+    parser.add_argument("--timezone", help="Timezone (IANA), e.g. Asia/Kolkata, UTC, Europe/London", default="UTC")
+    parser.add_argument("--from-account", help="Email address of Outlook account to send from (optional)", default=None)
+    parser.add_argument("--to", help="Semicolon-separated recipients for To", default="")
+    parser.add_argument("--cc", help="Semicolon-separated CC list", default="")
+    parser.add_argument("--bcc", help="Semicolon-separated BCC list", default="")
+    parser.add_argument("--out-dir", help="Directory to store temporary images", default=None)
+    parser.add_argument("--send", help="If true send; otherwise open draft", default="false")
+    args = parser.parse_args()
+
+    if not args.captures and not args.captures_file:
+        print("Error: either --captures or --captures-file must be provided.", file=sys.stderr)
+        sys.exit(2)
+
+    captures_input = args.captures_file if args.captures_file else args.captures
+    captures = parse_captures_arg(captures_input)
+
+    tmpdir = args.out_dir if args.out_dir else tempfile.mkdtemp(prefix="excel_screens_")
+    os.makedirs(tmpdir, exist_ok=True)
+
+    images_info = []
+    for idx, cap in enumerate(captures):
+        sheet = cap.get("sheet")
+        cell_range = cap.get("range")
+        name = cap.get("name") or f"img_{idx+1}.png"
+        placement = cap.get("placement", "attachment").lower()
+        out_path = os.path.join(tmpdir, name)
+        print(f"Capturing {sheet} {cell_range} -> {out_path} ...")
+        try:
+            saved = capture_range_as_image(args.workbook, sheet, cell_range, out_path)
+        except Exception as e:
+            print("Error capturing range:", e, file=sys.stderr)
+            continue
+        cid = f"img{idx+1}@excelmailer.local"
+        images_info.append({"filepath": saved, "placement": placement, "cid": cid})
+
+    # Load body template
+    body_template = ""
+    if args.body_file:
+        with open(args.body_file, "r", encoding="utf-8") as f:
+            body_template = f.read()
+    elif args.body:
+        body_template = args.body
+
+    to_list = [x.strip() for x in (args.to or "").split(";") if x.strip()]
+    cc_list = [x.strip() for x in (args.cc or "").split(";") if x.strip()]
+    bcc_list = [x.strip() for x in (args.bcc or "").split(";") if x.strip()]
+
+    send_flag = str(args.send).lower() in ("1", "true", "yes")
+    build_and_send_mail(images_info, args.subject, body_template, args.timezone, args.from_account, to_list, cc_list, bcc_list, send_flag)
+
+if __name__ == "__main__":
+    main()
