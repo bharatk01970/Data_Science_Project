@@ -16,29 +16,83 @@ from io import BytesIO
 import time
 
 class ExcelOutlookEmailer:
-    def __init__(self, excel_path):
-        """Initialize with path to Excel workbook"""
+    def __init__(self, excel_path=None, use_active_workbook=False):
+        """
+        Initialize with path to Excel workbook or use active workbook
+        
+        Args:
+            excel_path: Path to Excel file (if not using active workbook)
+            use_active_workbook: If True, use currently open Excel workbook
+        """
         self.excel_path = excel_path
+        self.use_active_workbook = use_active_workbook
         self.excel = None
         self.outlook = None
         self.workbook = None
+        self.created_excel_instance = False
         
     def __enter__(self):
         """Context manager entry"""
         pythoncom.CoInitialize()
-        self.excel = win32com.client.Dispatch("Excel.Application")
-        self.outlook = win32com.client.Dispatch("Outlook.Application")
-        self.workbook = self.excel.Workbooks.Open(os.path.abspath(self.excel_path))
-        self.excel.Visible = False
-        return self
+        try:
+            self.outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
+            
+            if self.use_active_workbook:
+                # Connect to existing Excel instance
+                try:
+                    self.excel = win32com.client.GetActiveObject("Excel.Application")
+                    self.workbook = self.excel.ActiveWorkbook
+                    if self.workbook is None:
+                        raise Exception("No active workbook found in Excel")
+                    print(f"Connected to active workbook: {self.workbook.Name}")
+                    self.created_excel_instance = False
+                except:
+                    raise Exception("No Excel instance running or no active workbook")
+            else:
+                # Create new Excel instance and open file
+                self.excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+                self.excel.Visible = False
+                self.excel.DisplayAlerts = False
+                self.created_excel_instance = True
+                
+                # Normalize path
+                abs_path = os.path.abspath(self.excel_path)
+                if not os.path.exists(abs_path):
+                    raise FileNotFoundError(f"Excel file not found: {abs_path}")
+                
+                # Open workbook with parameters
+                self.workbook = self.excel.Workbooks.Open(
+                    Filename=abs_path,
+                    UpdateLinks=0,
+                    ReadOnly=True,
+                    IgnoreReadOnlyRecommended=True
+                )
+            return self
+        except Exception as e:
+            # Cleanup on error
+            if self.created_excel_instance and self.excel:
+                try:
+                    self.excel.Quit()
+                except:
+                    pass
+            pythoncom.CoUninitialize()
+            raise Exception(f"Failed to initialize: {str(e)}")
         
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - cleanup"""
-        if self.workbook:
-            self.workbook.Close(SaveChanges=False)
-        if self.excel:
-            self.excel.Quit()
-        pythoncom.CoUninitialize()
+        try:
+            # Only close workbook and quit Excel if we created the instance
+            if self.created_excel_instance:
+                if self.workbook:
+                    self.workbook.Close(SaveChanges=False)
+                if self.excel:
+                    self.excel.Quit()
+        except:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except:
+            pass
         
     def get_available_accounts(self):
         """Get list of Outlook accounts"""
@@ -213,10 +267,12 @@ class ExcelOutlookEmailer:
 def main():
     """Example usage"""
     
-    # Configuration
-    excel_path = r"C:\path\to\your\workbook.xlsx"
+    # ============================================
+    # OPTION 1: Use currently open Excel file
+    # ============================================
+    # Open your Excel file first, then run this script
+    # The file will remain open and unsaved after email creation
     
-    # Define screenshots to capture
     screenshots_config = [
         {
             'sheet_name': 'Sheet1',
@@ -241,8 +297,8 @@ def main():
         }
     ]
     
-    # Create email
-    with ExcelOutlookEmailer(excel_path) as emailer:
+    # Use active workbook (file must be open in Excel)
+    with ExcelOutlookEmailer(use_active_workbook=True) as emailer:
         # Get available accounts
         accounts = emailer.get_available_accounts()
         print("Available Outlook accounts:")
@@ -257,12 +313,39 @@ def main():
             to_recipients=["recipient1@example.com", "recipient2@example.com"],
             cc_recipients=["cc@example.com"],
             bcc_recipients=["bcc@example.com"],
-            sender_account=accounts[0] if accounts else None,  # Use first account
-            timezone='IST',  # Options: 'IST', 'UK', 'GMT'
+            sender_account=accounts[0] if accounts else None,
+            timezone='IST',
             send=False  # Set to True to send immediately
         )
         
         print(result)
+        print("Your Excel file remains open and unsaved!")
+    
+    # ============================================
+    # OPTION 2: Open Excel file from path
+    # ============================================
+    # Uncomment below to use a file path instead
+    """
+    excel_path = r"C:\path\to\your\workbook.xlsx"
+    
+    with ExcelOutlookEmailer(excel_path=excel_path) as emailer:
+        accounts = emailer.get_available_accounts()
+        print("Available Outlook accounts:")
+        for i, account in enumerate(accounts, 1):
+            print(f"{i}. {account}")
+        
+        result = emailer.create_email(
+            screenshots_config=screenshots_config,
+            subject="Weekly Excel Report",
+            body_text="Please find the Excel screenshots below and attached.",
+            to_recipients=["recipient1@example.com"],
+            sender_account=accounts[0] if accounts else None,
+            timezone='IST',
+            send=False
+        )
+        
+        print(result)
+    """
 
 
 if __name__ == "__main__":
