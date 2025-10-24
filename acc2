@@ -94,11 +94,47 @@ class ExcelOutlookEmailer:
         except:
             pass
         
-    def get_available_accounts(self):
-        """Get list of Outlook accounts"""
+    def get_available_accounts(self, detailed=False):
+        """
+        Get list of Outlook accounts with detailed information
+        
+        Args:
+            detailed: If True, return dict with account info; if False, return list of names
+        
+        Returns:
+            List of account names or list of dicts with account details
+        """
         accounts = []
-        for account in self.outlook.Session.Accounts:
-            accounts.append(account.DisplayName)
+        try:
+            namespace = self.outlook.GetNamespace("MAPI")
+            
+            for idx, account in enumerate(namespace.Accounts):
+                if detailed:
+                    account_info = {
+                        'index': idx,
+                        'display_name': account.DisplayName,
+                        'smtp_address': account.SmtpAddress if hasattr(account, 'SmtpAddress') else 'N/A',
+                        'account_type': account.AccountType if hasattr(account, 'AccountType') else 'Unknown',
+                        'user_name': account.UserName if hasattr(account, 'UserName') else 'N/A'
+                    }
+                    accounts.append(account_info)
+                    print(f"{idx}: {account_info['display_name']} ({account_info['smtp_address']})")
+                else:
+                    accounts.append(account.DisplayName)
+            
+            if not accounts:
+                print("Warning: No accounts found in Outlook Session.Accounts")
+                # Try alternate method
+                for folder in namespace.Folders:
+                    store_name = folder.Name
+                    if store_name not in accounts:
+                        accounts.append(store_name)
+                        if detailed:
+                            print(f"Found via Folders: {store_name}")
+                            
+        except Exception as e:
+            print(f"Error getting accounts: {str(e)}")
+            
         return accounts
         
     def capture_range_screenshot(self, sheet_name, cell_range):
@@ -142,6 +178,7 @@ class ExcelOutlookEmailer:
                      cc_recipients=None,
                      bcc_recipients=None,
                      sender_account=None,
+                     sender_email=None,
                      timezone='IST',
                      send=False):
         """
@@ -159,7 +196,8 @@ class ExcelOutlookEmailer:
             to_recipients: List of email addresses
             cc_recipients: List of CC email addresses
             bcc_recipients: List of BCC email addresses
-            sender_account: Sender account name
+            sender_account: Sender account display name (e.g., "John Doe")
+            sender_email: Sender email address (e.g., "john@example.com") - alternative to sender_account
             timezone: Timezone for timestamp ('IST', 'UK', 'GMT')
             send: If True, send email; if False, save as draft
         """
@@ -167,12 +205,57 @@ class ExcelOutlookEmailer:
         # Create mail item
         mail = self.outlook.CreateItem(0)  # 0 = olMailItem
         
-        # Set sender account if specified
-        if sender_account:
-            for account in self.outlook.Session.Accounts:
-                if account.DisplayName == sender_account:
+        # Set sender account - try multiple methods
+        account_set = False
+        
+        # Method 1: By display name
+        if sender_account and not account_set:
+            try:
+                for account in self.outlook.Session.Accounts:
+                    if account.DisplayName == sender_account or \
+                       (hasattr(account, 'SmtpAddress') and account.SmtpAddress == sender_account):
+                        mail.SendUsingAccount = account
+                        account_set = True
+                        print(f"✓ Using account: {account.DisplayName}")
+                        break
+            except Exception as e:
+                print(f"Method 1 failed: {str(e)}")
+        
+        # Method 2: By email address using SendUsingAccount
+        if sender_email and not account_set:
+            try:
+                for account in self.outlook.Session.Accounts:
+                    if hasattr(account, 'SmtpAddress') and account.SmtpAddress.lower() == sender_email.lower():
+                        mail.SendUsingAccount = account
+                        account_set = True
+                        print(f"✓ Using account: {account.DisplayName} ({sender_email})")
+                        break
+            except Exception as e:
+                print(f"Method 2 failed: {str(e)}")
+        
+        # Method 3: Set SentOnBehalfOfName (alternative approach)
+        if sender_email and not account_set:
+            try:
+                mail.SentOnBehalfOfName = sender_email
+                account_set = True
+                print(f"✓ Using SentOnBehalfOfName: {sender_email}")
+            except Exception as e:
+                print(f"Method 3 failed: {str(e)}")
+        
+        # Method 4: Try using account by index
+        if sender_account and not account_set:
+            try:
+                # If sender_account is a number, use it as index
+                if isinstance(sender_account, int):
+                    account = self.outlook.Session.Accounts.Item(sender_account + 1)  # 1-indexed
                     mail.SendUsingAccount = account
-                    break
+                    account_set = True
+                    print(f"✓ Using account by index {sender_account}: {account.DisplayName}")
+            except Exception as e:
+                print(f"Method 4 failed: {str(e)}")
+        
+        if not account_set and (sender_account or sender_email):
+            print(f"⚠ Warning: Could not set sender account. Using default account.")
         
         # Set recipients
         if to_recipients:
@@ -299,11 +382,22 @@ def main():
     
     # Use active workbook (file must be open in Excel)
     with ExcelOutlookEmailer(use_active_workbook=True) as emailer:
-        # Get available accounts
-        accounts = emailer.get_available_accounts()
-        print("Available Outlook accounts:")
-        for i, account in enumerate(accounts, 1):
-            print(f"{i}. {account}")
+        # Get available accounts with detailed info
+        print("\n=== Checking Outlook Accounts ===")
+        accounts = emailer.get_available_accounts(detailed=True)
+        
+        # ============================================
+        # MULTIPLE WAYS TO SPECIFY SENDER ACCOUNT:
+        # ============================================
+        
+        # Option 1: By display name (if account shows up in list)
+        sender = accounts[0]['display_name'] if accounts else None
+        
+        # Option 2: By email address directly (works even if not in list)
+        # sender_email = "your.secondary@email.com"
+        
+        # Option 3: By account index
+        # sender = 1  # Use second account (0-indexed)
         
         # Create email draft
         result = emailer.create_email(
@@ -313,7 +407,13 @@ def main():
             to_recipients=["recipient1@example.com", "recipient2@example.com"],
             cc_recipients=["cc@example.com"],
             bcc_recipients=["bcc@example.com"],
-            sender_account=accounts[0] if accounts else None,
+            
+            # METHOD 1: Use sender_account with display name
+            sender_account=sender,
+            
+            # METHOD 2: Use sender_email (uncomment to use)
+            # sender_email="your.secondary@email.com",
+            
             timezone='IST',
             send=False  # Set to True to send immediately
         )
