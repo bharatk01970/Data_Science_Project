@@ -1,507 +1,269 @@
 """
-Excel Screenshot to Outlook Email Tool
-Captures screenshots from Excel worksheets and creates Outlook draft emails
+Excel to Outlook Email Utility
+Captures screenshots from Excel workbook cells and creates Outlook email drafts
 """
 
-import os
-import sys
-import json
-import argparse
-from pathlib import Path
-from datetime import datetime
-import pytz
-import re
-from typing import List, Dict, Optional, Tuple
 import win32com.client
-from openpyxl import load_workbook
+import openpyxl
+from openpyxl.utils import get_column_letter
 from PIL import ImageGrab, Image
 import pythoncom
+from datetime import datetime
+import pytz
+import os
+import base64
+from io import BytesIO
+import time
 
-
-class ExcelScreenshotCapture:
-    """Handles Excel workbook operations and screenshot capture"""
-    
-    TIMEZONE_MAP = {
-        'IST': 'Asia/Kolkata',
-        'UK': 'Europe/London',
-        'GMT': 'GMT'
-    }
-    
-    def __init__(self, workbook_path: str):
-        """
-        Initialize Excel screenshot capture
-        
-        Args:
-            workbook_path: Path to Excel workbook file
-        """
-        if not os.path.exists(workbook_path):
-            raise FileNotFoundError(f"Workbook not found: {workbook_path}")
-        
-        self.workbook_path = os.path.abspath(workbook_path)
+class ExcelOutlookEmailer:
+    def __init__(self, excel_path):
+        """Initialize with path to Excel workbook"""
+        self.excel_path = excel_path
         self.excel = None
+        self.outlook = None
         self.workbook = None
-        self.temp_images = []
         
     def __enter__(self):
-        """Context manager entry - initialize Excel COM object"""
+        """Context manager entry"""
         pythoncom.CoInitialize()
         self.excel = win32com.client.Dispatch("Excel.Application")
+        self.outlook = win32com.client.Dispatch("Outlook.Application")
+        self.workbook = self.excel.Workbooks.Open(os.path.abspath(self.excel_path))
         self.excel.Visible = False
-        self.excel.DisplayAlerts = False
-        self.workbook = self.excel.Workbooks.Open(self.workbook_path)
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - cleanup Excel"""
+        """Context manager exit - cleanup"""
+        if self.workbook:
+            self.workbook.Close(SaveChanges=False)
+        if self.excel:
+            self.excel.Quit()
+        pythoncom.CoUninitialize()
+        
+    def get_available_accounts(self):
+        """Get list of Outlook accounts"""
+        accounts = []
+        for account in self.outlook.Session.Accounts:
+            accounts.append(account.DisplayName)
+        return accounts
+        
+    def capture_range_screenshot(self, sheet_name, cell_range):
+        """Capture screenshot of specified Excel range"""
         try:
-            if self.workbook:
-                self.workbook.Close(SaveChanges=False)
-            if self.excel:
-                self.excel.Quit()
-        finally:
-            pythoncom.CoUninitialize()
-    
-    def get_sheet(self, sheet_name: Optional[str] = None, 
-                  sheet_index: Optional[int] = None):
-        """
-        Get worksheet by name or index
-        
-        Args:
-            sheet_name: Name of the worksheet
-            sheet_index: Zero-based index of the worksheet
-            
-        Returns:
-            Excel worksheet object
-        """
-        if sheet_name:
-            try:
-                return self.workbook.Worksheets(sheet_name)
-            except Exception as e:
-                raise ValueError(f"Sheet '{sheet_name}' not found: {str(e)}")
-        elif sheet_index is not None:
-            try:
-                # Excel uses 1-based indexing
-                return self.workbook.Worksheets(sheet_index + 1)
-            except Exception as e:
-                raise ValueError(f"Sheet index {sheet_index} not found: {str(e)}")
-        else:
-            raise ValueError("Either sheet_name or sheet_index must be provided")
-    
-    def capture_range(self, sheet_name: Optional[str], 
-                      sheet_index: Optional[int],
-                      cell_range: str, 
-                      output_path: str) -> str:
-        """
-        Capture screenshot of specified cell range
-        
-        Args:
-            sheet_name: Name of the worksheet
-            sheet_index: Index of the worksheet
-            cell_range: Cell range (e.g., 'A1:F10')
-            output_path: Output file path for screenshot
-            
-        Returns:
-            Path to saved screenshot
-        """
-        sheet = self.get_sheet(sheet_name, sheet_index)
-        
-        try:
-            # Select the range
+            sheet = self.workbook.Sheets(sheet_name)
             range_obj = sheet.Range(cell_range)
-            range_obj.Select()
             
-            # Copy as picture
-            range_obj.CopyPicture(Format=2)  # 2 = xlBitmap
+            # Copy range as picture
+            range_obj.CopyPicture(Format=2)  # xlBitmap
+            time.sleep(0.5)  # Wait for clipboard
             
-            # Get the range position and size for screenshot
-            left = range_obj.Left
-            top = range_obj.Top
-            width = range_obj.Width
-            height = range_obj.Height
+            # Grab from clipboard
+            img = ImageGrab.grabclipboard()
             
-            # Make Excel visible temporarily for screenshot
-            self.excel.Visible = True
-            
-            # Get Excel window position
-            excel_left = self.excel.Left
-            excel_top = self.excel.Top
-            
-            # Calculate absolute screen coordinates
-            abs_left = int(excel_left + left)
-            abs_top = int(excel_top + top + 100)  # Adjust for ribbon
-            abs_right = int(abs_left + width)
-            abs_bottom = int(abs_top + height)
-            
-            # Capture screenshot
-            screenshot = ImageGrab.grab(bbox=(abs_left, abs_top, abs_right, abs_bottom))
-            
-            # Hide Excel again
-            self.excel.Visible = False
-            
-            # Save screenshot
-            screenshot.save(output_path, 'PNG')
-            self.temp_images.append(output_path)
-            
-            return output_path
+            if img is None:
+                raise Exception(f"Failed to capture {sheet_name}!{cell_range}")
+                
+            return img
             
         except Exception as e:
-            raise RuntimeError(f"Failed to capture range '{cell_range}': {str(e)}")
+            raise Exception(f"Error capturing {sheet_name}!{cell_range}: {str(e)}")
     
-    def cleanup_temp_images(self):
-        """Remove temporary image files"""
-        for img_path in self.temp_images:
-            try:
-                if os.path.exists(img_path):
-                    os.remove(img_path)
-            except Exception:
-                pass
-
-
-class OutlookEmailDrafter:
-    """Handles Outlook email draft creation"""
+    def get_timestamp(self, timezone='IST'):
+        """Get formatted timestamp in specified timezone"""
+        tz_map = {
+            'IST': pytz.timezone('Asia/Kolkata'),
+            'UK': pytz.timezone('Europe/London'),
+            'GMT': pytz.timezone('GMT')
+        }
+        
+        tz = tz_map.get(timezone, pytz.timezone('Asia/Kolkata'))
+        now = datetime.now(tz)
+        return now.strftime('%Y-%m-%d %H:%M:%S %Z')
     
-    def __init__(self, outlook_account: Optional[str] = None):
+    def create_email(self, 
+                     screenshots_config,
+                     subject=None,
+                     body_text="",
+                     to_recipients=None,
+                     cc_recipients=None,
+                     bcc_recipients=None,
+                     sender_account=None,
+                     timezone='IST',
+                     send=False):
         """
-        Initialize Outlook email drafter
+        Create Outlook email with screenshots
         
         Args:
-            outlook_account: Email address of Outlook account to use
+            screenshots_config: List of dicts with keys:
+                - sheet_name: Excel sheet name
+                - cell_range: Cell range (e.g., 'A1:D10')
+                - embed: Boolean, embed in body
+                - attach: Boolean, attach as file
+                - name: Screenshot name/filename
+            subject: Email subject (None for default)
+            body_text: Additional body text
+            to_recipients: List of email addresses
+            cc_recipients: List of CC email addresses
+            bcc_recipients: List of BCC email addresses
+            sender_account: Sender account name
+            timezone: Timezone for timestamp ('IST', 'UK', 'GMT')
+            send: If True, send email; if False, save as draft
         """
-        pythoncom.CoInitialize()
-        self.outlook = win32com.client.Dispatch("Outlook.Application")
-        self.namespace = self.outlook.GetNamespace("MAPI")
-        self.outlook_account = outlook_account
-        
-    def validate_email(self, email: str) -> bool:
-        """Validate email address format"""
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        return re.match(pattern, email.strip()) is not None
-    
-    def validate_emails(self, emails: List[str]) -> Tuple[List[str], List[str]]:
-        """
-        Validate list of email addresses
-        
-        Returns:
-            Tuple of (valid_emails, invalid_emails)
-        """
-        valid = []
-        invalid = []
-        for email in emails:
-            email = email.strip()
-            if email:
-                if self.validate_email(email):
-                    valid.append(email)
-                else:
-                    invalid.append(email)
-        return valid, invalid
-    
-    def create_draft(self, 
-                     subject: str,
-                     body_html: str,
-                     to: List[str],
-                     cc: List[str] = None,
-                     bcc: List[str] = None,
-                     attachments: List[str] = None,
-                     inline_images: Dict[str, str] = None) -> None:
-        """
-        Create draft email in Outlook
-        
-        Args:
-            subject: Email subject
-            body_html: Email body in HTML format
-            to: List of recipient email addresses
-            cc: List of CC email addresses
-            bcc: List of BCC email addresses
-            attachments: List of file paths to attach
-            inline_images: Dict mapping CID to image file paths
-        """
-        # Validate recipients
-        valid_to, invalid_to = self.validate_emails(to)
-        if invalid_to:
-            raise ValueError(f"Invalid TO email addresses: {', '.join(invalid_to)}")
-        if not valid_to:
-            raise ValueError("At least one valid TO email address is required")
-        
-        if cc:
-            valid_cc, invalid_cc = self.validate_emails(cc)
-            if invalid_cc:
-                raise ValueError(f"Invalid CC email addresses: {', '.join(invalid_cc)}")
-        else:
-            valid_cc = []
-            
-        if bcc:
-            valid_bcc, invalid_bcc = self.validate_emails(bcc)
-            if invalid_bcc:
-                raise ValueError(f"Invalid BCC email addresses: {', '.join(invalid_bcc)}")
-        else:
-            valid_bcc = []
         
         # Create mail item
         mail = self.outlook.CreateItem(0)  # 0 = olMailItem
         
-        # Set account if specified
-        if self.outlook_account:
-            try:
-                for account in self.namespace.Accounts:
-                    if account.SmtpAddress.lower() == self.outlook_account.lower():
-                        mail._oleobj_.Invoke(*(64209, 0, 8, 0, account))
-                        break
-            except Exception as e:
-                print(f"Warning: Could not set account '{self.outlook_account}': {str(e)}")
+        # Set sender account if specified
+        if sender_account:
+            for account in self.outlook.Session.Accounts:
+                if account.DisplayName == sender_account:
+                    mail.SendUsingAccount = account
+                    break
         
         # Set recipients
-        mail.To = '; '.join(valid_to)
-        if valid_cc:
-            mail.CC = '; '.join(valid_cc)
-        if valid_bcc:
-            mail.BCC = '; '.join(valid_bcc)
+        if to_recipients:
+            mail.To = "; ".join(to_recipients)
+        if cc_recipients:
+            mail.CC = "; ".join(cc_recipients)
+        if bcc_recipients:
+            mail.BCC = "; ".join(bcc_recipients)
         
-        # Set subject and body
+        # Generate timestamp
+        timestamp = self.get_timestamp(timezone)
+        
+        # Set subject
+        if subject is None:
+            subject = f"Excel Report - {timestamp}"
+        else:
+            subject = f"{subject} - {timestamp}"
         mail.Subject = subject
-        mail.HTMLBody = body_html
         
-        # Add attachments
-        if attachments:
-            for filepath in attachments:
-                if os.path.exists(filepath):
-                    mail.Attachments.Add(os.path.abspath(filepath))
+        # Build email body
+        html_body = f"""
+        <html>
+        <body>
+        <p>{body_text}</p>
+        <p><strong>Generated:</strong> {timestamp}</p>
+        <br>
+        """
         
-        # Add inline images
-        if inline_images:
-            for cid, filepath in inline_images.items():
-                if os.path.exists(filepath):
-                    attachment = mail.Attachments.Add(os.path.abspath(filepath))
-                    attachment.PropertyAccessor.SetProperty(
-                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", 
-                        cid
-                    )
+        # Process screenshots
+        temp_files = []
+        embed_count = 0
         
-        # Display the draft
-        mail.Display(False)
-
-
-def get_timestamp(timezone: str) -> str:
-    """
-    Get current timestamp in specified timezone
-    
-    Args:
-        timezone: Timezone identifier ('IST', 'UK', 'GMT')
-        
-    Returns:
-        Formatted timestamp string
-    """
-    tz_name = ExcelScreenshotCapture.TIMEZONE_MAP.get(timezone, 'UTC')
-    tz = pytz.timezone(tz_name)
-    now = datetime.now(tz)
-    return now.strftime('%Y-%m-%d %H:%M:%S %Z')
-
-
-def process_captures(workbook_path: str,
-                     capture_instructions: List[Dict],
-                     placement_instructions: List[str]) -> Tuple[List[str], Dict[str, str], List[str]]:
-    """
-    Process all screenshot captures
-    
-    Returns:
-        Tuple of (attachments, inline_images, all_image_paths)
-    """
-    if len(capture_instructions) != len(placement_instructions):
-        raise ValueError("Number of captures must match number of placement instructions")
-    
-    attachments = []
-    inline_images = {}
-    all_image_paths = []
-    
-    with ExcelScreenshotCapture(workbook_path) as capturer:
-        for idx, (capture, placement) in enumerate(zip(capture_instructions, placement_instructions)):
-            sheet_name = capture.get('sheet_name')
-            sheet_index = capture.get('sheet_index')
-            cell_range = capture['cell_range']
-            output_name = capture['output_name']
+        for idx, config in enumerate(screenshots_config):
+            sheet_name = config['sheet_name']
+            cell_range = config['cell_range']
+            embed = config.get('embed', False)
+            attach = config.get('attach', False)
+            name = config.get('name', f'screenshot_{idx+1}')
             
-            # Generate output path
-            output_path = f"{output_name}.png"
+            # Capture screenshot
+            img = self.capture_range_screenshot(sheet_name, cell_range)
             
-            print(f"Capturing {output_name} from range {cell_range}...")
-            capturer.capture_range(sheet_name, sheet_index, cell_range, output_path)
+            # Save to temporary file
+            temp_path = os.path.join(os.environ['TEMP'], f"{name}.png")
+            img.save(temp_path, 'PNG')
+            temp_files.append(temp_path)
             
-            all_image_paths.append(output_path)
+            # Embed in body
+            if embed:
+                cid = f"image_{embed_count}"
+                html_body += f'<p><strong>{name}</strong></p>'
+                html_body += f'<img src="cid:{cid}" alt="{name}"><br><br>'
+                
+                # Add as inline attachment
+                attachment = mail.Attachments.Add(temp_path)
+                attachment.PropertyAccessor.SetProperty(
+                    "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
+                    cid
+                )
+                embed_count += 1
             
-            # Handle placement
-            if placement == 'attachment':
-                attachments.append(output_path)
-            elif placement == 'body':
-                inline_images[output_name] = output_path
-            elif placement == 'both':
-                attachments.append(output_path)
-                inline_images[output_name] = output_path
-            else:
-                raise ValueError(f"Invalid placement '{placement}' for capture {idx}")
-    
-    return attachments, inline_images, all_image_paths
-
-
-def create_email_body(body_template: str, 
-                      timestamp: str,
-                      inline_images: Dict[str, str]) -> str:
-    """
-    Create HTML email body from template
-    
-    Args:
-        body_template: Template string with placeholders
-        timestamp: Current timestamp
-        inline_images: Dict mapping CID to image paths
+            # Attach as file
+            if attach:
+                mail.Attachments.Add(temp_path)
         
-    Returns:
-        HTML formatted email body
-    """
-    # Replace timestamp
-    body = body_template.replace('{timestamp}', timestamp)
-    
-    # Create inline images HTML
-    images_html = ""
-    if inline_images:
-        for cid in inline_images.keys():
-            images_html += f'<p><img src="cid:{cid}" alt="{cid}"></p>\n'
-    
-    # Replace inline_images placeholder
-    body = body.replace('{inline_images}', images_html)
-    
-    # Convert to HTML with line breaks
-    body_html = body.replace('\n', '<br>\n')
-    
-    return f"<html><body>{body_html}</body></html>"
-
-
-def run_email_tool(config: Dict) -> None:
-    """
-    Main function to run the email tool
-    
-    Args:
-        config: Configuration dictionary
-    """
-    print("Excel Screenshot to Outlook Email Tool")
-    print("=" * 50)
-    
-    try:
-        # Extract configuration
-        workbook_path = config['workbook_path']
-        capture_instructions = config['capture_instructions']
-        placement_instructions = config['placement_instructions']
-        subject = config.get('subject', f"Excel Report - {datetime.now().strftime('%Y-%m-%d')}")
-        body_template = config['body_template']
-        timezone = config['timestamp_timezone']
-        to = config['to']
-        cc = config.get('cc', [])
-        bcc = config.get('bcc', [])
-        outlook_account = config.get('outlook_account')
+        html_body += """
+        </body>
+        </html>
+        """
         
-        # Get timestamp
-        timestamp = get_timestamp(timezone)
-        print(f"\nTimestamp ({timezone}): {timestamp}")
+        mail.HTMLBody = html_body
         
-        # Process captures
-        print(f"\nProcessing {len(capture_instructions)} screenshot(s)...")
-        attachments, inline_images, all_image_paths = process_captures(
-            workbook_path, capture_instructions, placement_instructions
-        )
+        # Send or save as draft
+        if send:
+            mail.Send()
+            result = "Email sent successfully"
+        else:
+            mail.Save()
+            result = "Email draft created successfully"
         
-        print(f"✓ Captured {len(all_image_paths)} screenshot(s)")
-        print(f"  - {len(attachments)} attachment(s)")
-        print(f"  - {len(inline_images)} inline image(s)")
+        # Cleanup temp files
+        time.sleep(1)  # Wait for Outlook to process
+        for temp_file in temp_files:
+            try:
+                os.remove(temp_file)
+            except:
+                pass
         
-        # Create email body
-        body_html = create_email_body(body_template, timestamp, inline_images)
-        
-        # Create Outlook draft
-        print("\nCreating Outlook draft...")
-        drafter = OutlookEmailDrafter(outlook_account)
-        drafter.create_draft(
-            subject=subject,
-            body_html=body_html,
-            to=to,
-            cc=cc,
-            bcc=bcc,
-            attachments=attachments,
-            inline_images=inline_images
-        )
-        
-        print("✓ Outlook draft created successfully!")
-        print(f"\nRecipients:")
-        print(f"  TO:  {', '.join(to)}")
-        if cc:
-            print(f"  CC:  {', '.join(cc)}")
-        if bcc:
-            print(f"  BCC: {', '.join(bcc)}")
-        
-        print(f"\nSubject: {subject}")
-        print("\nThe draft email is now open in Outlook. Review and send when ready.")
-        
-    except FileNotFoundError as e:
-        print(f"\n❌ Error: {str(e)}")
-        sys.exit(1)
-    except ValueError as e:
-        print(f"\n❌ Validation Error: {str(e)}")
-        sys.exit(1)
-    except RuntimeError as e:
-        print(f"\n❌ Runtime Error: {str(e)}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Unexpected Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        return result
 
 
 def main():
-    """CLI entry point"""
-    parser = argparse.ArgumentParser(
-        description='Capture Excel screenshots and draft Outlook emails',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run with config file
-  python excel_outlook_tool.py config.json
-  
-  # Run with preview mode (just capture screenshots)
-  python excel_outlook_tool.py config.json --preview
-        """
-    )
+    """Example usage"""
     
-    parser.add_argument('config_file', help='Path to JSON configuration file')
-    parser.add_argument('--preview', action='store_true', 
-                       help='Preview mode: capture screenshots only, no email')
+    # Configuration
+    excel_path = r"C:\path\to\your\workbook.xlsx"
     
-    args = parser.parse_args()
+    # Define screenshots to capture
+    screenshots_config = [
+        {
+            'sheet_name': 'Sheet1',
+            'cell_range': 'A1:E20',
+            'embed': True,      # Embed in email body
+            'attach': False,    # Don't attach as file
+            'name': 'Summary_Table'
+        },
+        {
+            'sheet_name': 'Sheet2',
+            'cell_range': 'A1:G30',
+            'embed': False,     # Don't embed in body
+            'attach': True,     # Attach as file
+            'name': 'Detailed_Data'
+        },
+        {
+            'sheet_name': 'Sheet3',
+            'cell_range': 'B5:F25',
+            'embed': True,      # Both embed and attach
+            'attach': True,
+            'name': 'Chart_Analysis'
+        }
+    ]
     
-    # Load configuration
-    try:
-        with open(args.config_file, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        print(f"❌ Configuration file not found: {args.config_file}")
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON in configuration file: {str(e)}")
-        sys.exit(1)
-    
-    if args.preview:
-        print("PREVIEW MODE: Capturing screenshots only\n")
-        try:
-            attachments, inline_images, all_image_paths = process_captures(
-                config['workbook_path'],
-                config['capture_instructions'],
-                config['placement_instructions']
-            )
-            print(f"\n✓ Preview complete. {len(all_image_paths)} screenshot(s) saved:")
-            for path in all_image_paths:
-                print(f"  - {path}")
-        except Exception as e:
-            print(f"\n❌ Preview failed: {str(e)}")
-            sys.exit(1)
-    else:
-        run_email_tool(config)
+    # Create email
+    with ExcelOutlookEmailer(excel_path) as emailer:
+        # Get available accounts
+        accounts = emailer.get_available_accounts()
+        print("Available Outlook accounts:")
+        for i, account in enumerate(accounts, 1):
+            print(f"{i}. {account}")
+        
+        # Create email draft
+        result = emailer.create_email(
+            screenshots_config=screenshots_config,
+            subject="Weekly Excel Report",
+            body_text="Please find the Excel screenshots below and attached.",
+            to_recipients=["recipient1@example.com", "recipient2@example.com"],
+            cc_recipients=["cc@example.com"],
+            bcc_recipients=["bcc@example.com"],
+            sender_account=accounts[0] if accounts else None,  # Use first account
+            timezone='IST',  # Options: 'IST', 'UK', 'GMT'
+            send=False  # Set to True to send immediately
+        )
+        
+        print(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
