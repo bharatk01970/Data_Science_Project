@@ -1,452 +1,1067 @@
 """
-Excel to Outlook Email Utility
-Captures screenshots from Excel workbook cells and creates Outlook email drafts
+Excel to Outlook Desktop GUI Application
+A complete GUI for capturing screenshots from Excel files and drafting Outlook emails
+Supports multiple files with individual screenshot and mail draft functionality
 """
 
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 import win32com.client
-import openpyxl
-from openpyxl.utils import get_column_letter
-from PIL import ImageGrab, Image
+from PIL import ImageGrab
 import pythoncom
 from datetime import datetime
 import pytz
 import os
-import base64
-from io import BytesIO
 import time
+import threading
 
-class ExcelOutlookEmailer:
-    def __init__(self, excel_path=None, use_active_workbook=False):
-        """
-        Initialize with path to Excel workbook or use active workbook
-        
-        Args:
-            excel_path: Path to Excel file (if not using active workbook)
-            use_active_workbook: If True, use currently open Excel workbook
-        """
-        self.excel_path = excel_path
-        self.use_active_workbook = use_active_workbook
-        self.excel = None
-        self.outlook = None
-        self.workbook = None
-        self.created_excel_instance = False
-        
-    def __enter__(self):
-        """Context manager entry"""
-        pythoncom.CoInitialize()
-        try:
-            self.outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
-            
-            if self.use_active_workbook:
-                # Connect to existing Excel instance
-                try:
-                    self.excel = win32com.client.GetActiveObject("Excel.Application")
-                    self.workbook = self.excel.ActiveWorkbook
-                    if self.workbook is None:
-                        raise Exception("No active workbook found in Excel")
-                    print(f"Connected to active workbook: {self.workbook.Name}")
-                    self.created_excel_instance = False
-                except:
-                    raise Exception("No Excel instance running or no active workbook")
-            else:
-                # Create new Excel instance and open file
-                self.excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
-                self.excel.Visible = False
-                self.excel.DisplayAlerts = False
-                self.created_excel_instance = True
-                
-                # Normalize path
-                abs_path = os.path.abspath(self.excel_path)
-                if not os.path.exists(abs_path):
-                    raise FileNotFoundError(f"Excel file not found: {abs_path}")
-                
-                # Open workbook with parameters
-                self.workbook = self.excel.Workbooks.Open(
-                    Filename=abs_path,
-                    UpdateLinks=0,
-                    ReadOnly=True,
-                    IgnoreReadOnlyRecommended=True
-                )
-            return self
-        except Exception as e:
-            # Cleanup on error
-            if self.created_excel_instance and self.excel:
-                try:
-                    self.excel.Quit()
-                except:
-                    pass
-            pythoncom.CoUninitialize()
-            raise Exception(f"Failed to initialize: {str(e)}")
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - cleanup"""
-        try:
-            # Only close workbook and quit Excel if we created the instance
-            if self.created_excel_instance:
-                if self.workbook:
-                    self.workbook.Close(SaveChanges=False)
-                if self.excel:
-                    self.excel.Quit()
-        except:
-            pass
-        try:
-            pythoncom.CoUninitialize()
-        except:
-            pass
-        
-    def get_available_accounts(self, detailed=False):
-        """
-        Get list of Outlook accounts with detailed information
-        
-        Args:
-            detailed: If True, return dict with account info; if False, return list of names
-        
-        Returns:
-            List of account names or list of dicts with account details
-        """
-        accounts = []
-        try:
-            namespace = self.outlook.GetNamespace("MAPI")
-            
-            for idx, account in enumerate(namespace.Accounts):
-                if detailed:
-                    account_info = {
-                        'index': idx,
-                        'display_name': account.DisplayName,
-                        'smtp_address': account.SmtpAddress if hasattr(account, 'SmtpAddress') else 'N/A',
-                        'account_type': account.AccountType if hasattr(account, 'AccountType') else 'Unknown',
-                        'user_name': account.UserName if hasattr(account, 'UserName') else 'N/A'
-                    }
-                    accounts.append(account_info)
-                    print(f"{idx}: {account_info['display_name']} ({account_info['smtp_address']})")
-                else:
-                    accounts.append(account.DisplayName)
-            
-            if not accounts:
-                print("Warning: No accounts found in Outlook Session.Accounts")
-                # Try alternate method
-                for folder in namespace.Folders:
-                    store_name = folder.Name
-                    if store_name not in accounts:
-                        accounts.append(store_name)
-                        if detailed:
-                            print(f"Found via Folders: {store_name}")
-                            
-        except Exception as e:
-            print(f"Error getting accounts: {str(e)}")
-            
-        return accounts
-        
-    def capture_range_screenshot(self, sheet_name, cell_range):
-        """Capture screenshot of specified Excel range"""
-        try:
-            sheet = self.workbook.Sheets(sheet_name)
-            range_obj = sheet.Range(cell_range)
-            
-            # Copy range as picture
-            range_obj.CopyPicture(Format=2)  # xlBitmap
-            time.sleep(0.5)  # Wait for clipboard
-            
-            # Grab from clipboard
-            img = ImageGrab.grabclipboard()
-            
-            if img is None:
-                raise Exception(f"Failed to capture {sheet_name}!{cell_range}")
-                
-            return img
-            
-        except Exception as e:
-            raise Exception(f"Error capturing {sheet_name}!{cell_range}: {str(e)}")
+class ExcelOutlookGUI:
+    """
+    Main GUI application class that handles the interface and orchestrates
+    screenshot capture and email drafting for multiple Excel files
+    """
     
-    def get_timestamp(self, timezone='IST'):
-        """Get formatted timestamp in specified timezone"""
-        tz_map = {
-            'IST': pytz.timezone('Asia/Kolkata'),
-            'UK': pytz.timezone('Europe/London'),
-            'GMT': pytz.timezone('GMT')
+    def __init__(self, root):
+        """
+        Initialize the GUI application
+        
+        Args:
+            root: The main tkinter window object
+        """
+        self.root = root
+        self.root.title("Excel to Outlook Email Utility")
+        self.root.geometry("1000x800")  # Set window size (width x height)
+        
+        # ============================================
+        # CONFIGURATION SECTION
+        # ============================================
+        
+        # Number of files to handle (MODIFY THIS to add/remove file sections)
+        # To handle more files: increase this number and add file configs below
+        # To handle fewer files: decrease this number
+        self.num_files = 4
+        
+        # Pre-defined file paths for each file (Method B)
+        # These are the default paths that will be pre-filled
+        # Edit these paths according to your file locations
+        self.file_configs = {
+            'File 1': {
+                'path': r'C:\Users\YourName\Desktop\File1.xlsm',
+                'name': 'Monthly Report',  # Display name for the file
+                'screenshots': [  # List of screenshots to capture from this file
+                    {
+                        'sheet_name': 'Sheet1',
+                        'cell_range': 'A1:E20',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Summary_Table'
+                    },
+                    {
+                        'sheet_name': 'Sheet2',
+                        'cell_range': 'A1:G30',
+                        'embed': False,
+                        'attach': True,
+                        'name': 'Details'
+                    }
+                ]
+            },
+            'File 2': {
+                'path': r'C:\Users\YourName\Desktop\File2.xlsx',
+                'name': 'Sales Data',
+                'screenshots': [
+                    {
+                        'sheet_name': 'Summary',
+                        'cell_range': 'A1:F25',
+                        'embed': True,
+                        'attach': True,
+                        'name': 'Sales_Chart'
+                    }
+                ]
+            },
+            'File 3': {
+                'path': r'C:\Users\YourName\Desktop\File3.xlsm',
+                'name': 'Inventory Report',
+                'screenshots': [
+                    {
+                        'sheet_name': 'Main',
+                        'cell_range': 'B5:H30',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Inventory_Status'
+                    }
+                ]
+            },
+            'File 4': {
+                'path': r'C:\Users\YourName\Desktop\File4.xlsx',
+                'name': 'Budget Analysis',
+                'screenshots': [
+                    {
+                        'sheet_name': 'Analysis',
+                        'cell_range': 'A1:J40',
+                        'embed': True,
+                        'attach': True,
+                        'name': 'Budget_Breakdown'
+                    }
+                ]
+            }
+            # TO ADD MORE FILES: Copy the above block and add 'File 5', 'File 6', etc.
+            # Remember to increase self.num_files accordingly
         }
         
-        tz = tz_map.get(timezone, pytz.timezone('Asia/Kolkata'))
-        now = datetime.now(tz)
-        return now.strftime('%Y-%m-%d %H:%M:%S %Z')
+        # Email configuration (common for all files)
+        self.email_config = {
+            'to_recipients': ['recipient1@example.com', 'recipient2@example.com'],
+            'cc_recipients': ['cc@example.com'],
+            'bcc_recipients': [],
+            'sender_email': 'your.secondary@email.com',  # Your sender email
+            'timezone': 'IST',  # Options: 'IST', 'UK', 'GMT'
+            'signature': '\n\nBest Regards,\nYour Name\nYour Title\nYour Company',
+            'disclaimer': '\n\n---\nThis is an automated email. Please do not reply to this message.\nCONFIDENTIAL: This email and any attachments are confidential and intended solely for the addressee.'
+        }
+        
+        # ============================================
+        # INITIALIZE DATA STRUCTURES
+        # ============================================
+        
+        # Dictionary to store GUI widgets for each file
+        self.file_widgets = {}
+        
+        # Dictionary to store screenshot file paths for each file
+        self.screenshot_paths = {}
+        
+        # Initialize COM for Outlook operations
+        pythoncom.CoInitialize()
+        
+        # Create the GUI layout
+        self.create_gui()
     
-    def create_email(self, 
-                     screenshots_config,
-                     subject=None,
-                     body_text="",
-                     to_recipients=None,
-                     cc_recipients=None,
-                     bcc_recipients=None,
-                     sender_account=None,
-                     sender_email=None,
-                     timezone='IST',
-                     send=False):
+    def create_gui(self):
         """
-        Create Outlook email with screenshots
+        Create the complete GUI layout with all widgets
+        This method sets up the main interface structure
+        """
+        # Create main container with scrollbar (for handling many files)
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure grid weights for responsive resizing
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        
+        # ============================================
+        # HEADER SECTION
+        # ============================================
+        
+        # Application title
+        title_label = ttk.Label(
+            main_frame, 
+            text="Excel to Outlook Email Utility", 
+            font=('Arial', 16, 'bold')
+        )
+        title_label.grid(row=0, column=0, columnspan=3, pady=10)
+        
+        # ============================================
+        # AUTO SAVE/DELETE CHECKBOX
+        # ============================================
+        
+        # Frame for global options
+        options_frame = ttk.LabelFrame(main_frame, text="Global Options", padding="5")
+        options_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        
+        # Checkbox to enable/disable automatic screenshot save and delete
+        self.auto_delete_var = tk.BooleanVar(value=True)  # Default: enabled
+        auto_delete_check = ttk.Checkbutton(
+            options_frame,
+            text="Automatically save and delete screenshots",
+            variable=self.auto_delete_var
+        )
+        auto_delete_check.grid(row=0, column=0, sticky=tk.W, padx=5)
+        
+        # Tooltip label explaining the checkbox
+        tooltip_label = ttk.Label(
+            options_frame,
+            text="(Screenshots will be saved in same folder as Excel file, then deleted after email draft)",
+            font=('Arial', 8),
+            foreground='gray'
+        )
+        tooltip_label.grid(row=0, column=1, sticky=tk.W, padx=5)
+        
+        # ============================================
+        # FILE SECTIONS (Dynamic based on num_files)
+        # ============================================
+        
+        current_row = 2  # Starting row for file sections
+        
+        # Loop through each file and create its section
+        for i in range(1, self.num_files + 1):
+            file_key = f'File {i}'
+            
+            # Get configuration for this file
+            file_config = self.file_configs.get(file_key, {})
+            file_name = file_config.get('name', file_key)
+            file_path = file_config.get('path', '')
+            
+            # Create a labeled frame for this file
+            file_frame = ttk.LabelFrame(
+                main_frame, 
+                text=f"{file_key}: {file_name}", 
+                padding="10"
+            )
+            file_frame.grid(
+                row=current_row, 
+                column=0, 
+                columnspan=3, 
+                sticky=(tk.W, tk.E), 
+                pady=10
+            )
+            
+            # ============================================
+            # FILE PATH INPUT SECTION
+            # ============================================
+            
+            # Label for file path
+            path_label = ttk.Label(file_frame, text="File Path:")
+            path_label.grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+            
+            # Entry widget for file path (pre-filled with config path)
+            path_entry = ttk.Entry(file_frame, width=60)
+            path_entry.insert(0, file_path)  # Pre-fill with configured path
+            path_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+            
+            # Browse button to select file using file dialog
+            # CURRENTLY COMMENTED - Uncomment to enable file browsing (Method A)
+            """
+            browse_button = ttk.Button(
+                file_frame,
+                text="Browse",
+                command=lambda e=path_entry: self.browse_file(e)
+            )
+            browse_button.grid(row=0, column=2, padx=5, pady=5)
+            """
+            
+            # Use Active Workbook button (Method C)
+            # CURRENTLY COMMENTED - Uncomment to enable using currently open file
+            """
+            active_button = ttk.Button(
+                file_frame,
+                text="Use Open File",
+                command=lambda e=path_entry, fk=file_key: self.use_active_workbook(e, fk)
+            )
+            active_button.grid(row=0, column=3, padx=5, pady=5)
+            """
+            
+            # ============================================
+            # ACTION BUTTONS SECTION
+            # ============================================
+            
+            # Frame to hold action buttons horizontally
+            button_frame = ttk.Frame(file_frame)
+            button_frame.grid(row=1, column=0, columnspan=3, pady=10)
+            
+            # Take Screenshot button
+            screenshot_btn = ttk.Button(
+                button_frame,
+                text="Take Screenshot",
+                command=lambda fk=file_key: self.take_screenshot(fk)
+            )
+            screenshot_btn.grid(row=0, column=0, padx=5)
+            
+            # Draft Mail button
+            draft_btn = ttk.Button(
+                button_frame,
+                text="Draft Mail",
+                command=lambda fk=file_key: self.draft_mail(fk)
+            )
+            draft_btn.grid(row=0, column=1, padx=5)
+            
+            # Status label to show current state for this file
+            status_label = ttk.Label(
+                file_frame,
+                text="Ready",
+                foreground="blue"
+            )
+            status_label.grid(row=2, column=0, columnspan=3, pady=5)
+            
+            # Store widgets for this file in dictionary for later access
+            self.file_widgets[file_key] = {
+                'path_entry': path_entry,
+                'screenshot_btn': screenshot_btn,
+                'draft_btn': draft_btn,
+                'status_label': status_label,
+                'frame': file_frame
+            }
+            
+            # Initialize empty list for screenshot paths
+            self.screenshot_paths[file_key] = []
+            
+            current_row += 1
+        
+        # ============================================
+        # EMAIL CONFIGURATION SECTION
+        # ============================================
+        
+        # Frame for email settings
+        email_frame = ttk.LabelFrame(main_frame, text="Email Configuration", padding="10")
+        email_frame.grid(row=current_row, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=10)
+        
+        # Subject field
+        ttk.Label(email_frame, text="Subject:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.subject_entry = ttk.Entry(email_frame, width=60)
+        self.subject_entry.insert(0, "Weekly Excel Report")  # Default subject
+        self.subject_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # Body text field (multiline)
+        ttk.Label(email_frame, text="Body Text:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.body_text = scrolledtext.ScrolledText(email_frame, width=60, height=5)
+        self.body_text.insert('1.0', "Please find the Excel screenshots below and attached.")
+        self.body_text.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # To Recipients field
+        ttk.Label(email_frame, text="To:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.to_entry = ttk.Entry(email_frame, width=60)
+        self.to_entry.insert(0, "; ".join(self.email_config['to_recipients']))
+        self.to_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # CC Recipients field
+        ttk.Label(email_frame, text="CC:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
+        self.cc_entry = ttk.Entry(email_frame, width=60)
+        self.cc_entry.insert(0, "; ".join(self.email_config['cc_recipients']))
+        self.cc_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # Sender Email field
+        ttk.Label(email_frame, text="From:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
+        self.sender_entry = ttk.Entry(email_frame, width=60)
+        self.sender_entry.insert(0, self.email_config['sender_email'])
+        self.sender_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # ============================================
+        # LOG/STATUS SECTION
+        # ============================================
+        
+        # Frame for log area
+        log_frame = ttk.LabelFrame(main_frame, text="Activity Log", padding="5")
+        log_frame.grid(row=current_row + 1, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        
+        # Scrolled text widget for displaying log messages
+        self.log_text = scrolledtext.ScrolledText(log_frame, width=80, height=10, state='disabled')
+        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure text tags for colored log messages
+        self.log_text.tag_config('info', foreground='blue')
+        self.log_text.tag_config('success', foreground='green')
+        self.log_text.tag_config('error', foreground='red')
+        self.log_text.tag_config('warning', foreground='orange')
+        
+        # Configure grid weights for log frame to expand
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(current_row + 1, weight=1)
+        
+        # Log initial message
+        self.log_message("Application initialized. Ready to process files.", 'info')
+    
+    def browse_file(self, entry_widget):
+        """
+        Open file dialog to browse and select an Excel file
+        Updates the entry widget with selected file path
         
         Args:
-            screenshots_config: List of dicts with keys:
-                - sheet_name: Excel sheet name
-                - cell_range: Cell range (e.g., 'A1:D10')
-                - embed: Boolean, embed in body
-                - attach: Boolean, attach as file
-                - name: Screenshot name/filename
-            subject: Email subject (None for default)
-            body_text: Additional body text
-            to_recipients: List of email addresses
-            cc_recipients: List of CC email addresses
-            bcc_recipients: List of BCC email addresses
-            sender_account: Sender account display name (e.g., "John Doe")
-            sender_email: Sender email address (e.g., "john@example.com") - alternative to sender_account
-            timezone: Timezone for timestamp ('IST', 'UK', 'GMT')
-            send: If True, send email; if False, save as draft
+            entry_widget: The tkinter Entry widget to update with file path
         """
+        # Open file dialog with Excel file filters
+        filename = filedialog.askopenfilename(
+            title="Select Excel File",
+            filetypes=[
+                ("Excel Files", "*.xlsx *.xlsm *.xls"),
+                ("CSV Files", "*.csv"),
+                ("All Files", "*.*")
+            ]
+        )
         
-        # Create mail item
-        mail = self.outlook.CreateItem(0)  # 0 = olMailItem
-        
-        # Set sender account - try multiple methods
-        account_set = False
-        
-        # Method 1: By display name
-        if sender_account and not account_set:
-            try:
-                for account in self.outlook.Session.Accounts:
-                    if account.DisplayName == sender_account or \
-                       (hasattr(account, 'SmtpAddress') and account.SmtpAddress == sender_account):
-                        mail.SendUsingAccount = account
-                        account_set = True
-                        print(f"✓ Using account: {account.DisplayName}")
-                        break
-            except Exception as e:
-                print(f"Method 1 failed: {str(e)}")
-        
-        # Method 2: By email address using SendUsingAccount
-        if sender_email and not account_set:
-            try:
-                for account in self.outlook.Session.Accounts:
-                    if hasattr(account, 'SmtpAddress') and account.SmtpAddress.lower() == sender_email.lower():
-                        mail.SendUsingAccount = account
-                        account_set = True
-                        print(f"✓ Using account: {account.DisplayName} ({sender_email})")
-                        break
-            except Exception as e:
-                print(f"Method 2 failed: {str(e)}")
-        
-        # Method 3: Set SentOnBehalfOfName (alternative approach)
-        if sender_email and not account_set:
-            try:
-                mail.SentOnBehalfOfName = sender_email
-                account_set = True
-                print(f"✓ Using SentOnBehalfOfName: {sender_email}")
-            except Exception as e:
-                print(f"Method 3 failed: {str(e)}")
-        
-        # Method 4: Try using account by index
-        if sender_account and not account_set:
-            try:
-                # If sender_account is a number, use it as index
-                if isinstance(sender_account, int):
-                    account = self.outlook.Session.Accounts.Item(sender_account + 1)  # 1-indexed
-                    mail.SendUsingAccount = account
-                    account_set = True
-                    print(f"✓ Using account by index {sender_account}: {account.DisplayName}")
-            except Exception as e:
-                print(f"Method 4 failed: {str(e)}")
-        
-        if not account_set and (sender_account or sender_email):
-            print(f"⚠ Warning: Could not set sender account. Using default account.")
-        
-        # Set recipients
-        if to_recipients:
-            mail.To = "; ".join(to_recipients)
-        if cc_recipients:
-            mail.CC = "; ".join(cc_recipients)
-        if bcc_recipients:
-            mail.BCC = "; ".join(bcc_recipients)
-        
-        # Generate timestamp
-        timestamp = self.get_timestamp(timezone)
-        
-        # Set subject
-        if subject is None:
-            subject = f"Excel Report - {timestamp}"
-        else:
-            subject = f"{subject} - {timestamp}"
-        mail.Subject = subject
-        
-        # Build email body
-        html_body = f"""
-        <html>
-        <body>
-        <p>{body_text}</p>
-        <p><strong>Generated:</strong> {timestamp}</p>
-        <br>
+        # If user selected a file, update the entry widget
+        if filename:
+            entry_widget.delete(0, tk.END)  # Clear current content
+            entry_widget.insert(0, filename)  # Insert new file path
+            self.log_message(f"File selected: {filename}", 'info')
+    
+    def use_active_workbook(self, entry_widget, file_key):
         """
+        Use currently open Excel workbook instead of file path
+        Connects to active Excel instance and gets the workbook name
         
-        # Process screenshots
-        temp_files = []
-        embed_count = 0
+        Args:
+            entry_widget: The tkinter Entry widget to update
+            file_key: The file identifier (e.g., 'File 1')
+        """
+        try:
+            # Connect to running Excel instance
+            excel = win32com.client.GetActiveObject("Excel.Application")
+            
+            # Get active workbook
+            workbook = excel.ActiveWorkbook
+            
+            if workbook is None:
+                self.log_message("No active workbook found in Excel", 'error')
+                messagebox.showerror("Error", "No active workbook found. Please open an Excel file.")
+                return
+            
+            # Get full path of active workbook
+            workbook_path = workbook.FullName
+            
+            # Update entry widget with active workbook path
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, workbook_path)
+            
+            self.log_message(f"{file_key}: Using active workbook - {workbook.Name}", 'success')
+            
+        except Exception as e:
+            self.log_message(f"Error accessing active workbook: {str(e)}", 'error')
+            messagebox.showerror("Error", f"Could not access active Excel workbook:\n{str(e)}")
+    
+    def log_message(self, message, tag='info'):
+        """
+        Add a timestamped message to the log area
         
-        for idx, config in enumerate(screenshots_config):
-            sheet_name = config['sheet_name']
-            cell_range = config['cell_range']
-            embed = config.get('embed', False)
-            attach = config.get('attach', False)
-            name = config.get('name', f'screenshot_{idx+1}')
+        Args:
+            message: The message text to log
+            tag: The tag for text formatting ('info', 'success', 'error', 'warning')
+        """
+        # Enable text widget for editing
+        self.log_text.config(state='normal')
+        
+        # Get current timestamp
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        
+        # Insert timestamped message with appropriate tag
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        
+        # Auto-scroll to bottom
+        self.log_text.see(tk.END)
+        
+        # Disable text widget to prevent user editing
+        self.log_text.config(state='disabled')
+        
+        # Update GUI to show message immediately
+        self.root.update_idletasks()
+    
+    def update_file_status(self, file_key, message, color='blue'):
+        """
+        Update the status label for a specific file
+        
+        Args:
+            file_key: The file identifier (e.g., 'File 1')
+            message: Status message to display
+            color: Color for the status text
+        """
+        # Get the status label for this file
+        status_label = self.file_widgets[file_key]['status_label']
+        
+        # Update label text and color
+        status_label.config(text=message, foreground=color)
+        
+        # Update GUI
+        self.root.update_idletasks()
+    
+    def take_screenshot(self, file_key):
+        """
+        Capture screenshots from specified Excel file
+        Runs in a separate thread to prevent GUI freezing
+        
+        Args:
+            file_key: The file identifier (e.g., 'File 1')
+        """
+        # Run screenshot capture in separate thread
+        thread = threading.Thread(target=self._take_screenshot_thread, args=(file_key,))
+        thread.daemon = True  # Thread will close when main program closes
+        thread.start()
+    
+    def _take_screenshot_thread(self, file_key):
+        """
+        Thread worker function for taking screenshots
+        This runs in background to keep GUI responsive
+        
+        Args:
+            file_key: The file identifier (e.g., 'File 1')
+        """
+        try:
+            # Update status
+            self.update_file_status(file_key, "Taking screenshots...", 'orange')
+            self.log_message(f"{file_key}: Starting screenshot capture", 'info')
             
-            # Capture screenshot
-            img = self.capture_range_screenshot(sheet_name, cell_range)
+            # Get file path from entry widget
+            file_path = self.file_widgets[file_key]['path_entry'].get()
             
-            # Save to temporary file
-            temp_path = os.path.join(os.environ['TEMP'], f"{name}.png")
-            img.save(temp_path, 'PNG')
-            temp_files.append(temp_path)
+            # Validate file path
+            if not file_path or not os.path.exists(file_path):
+                self.log_message(f"{file_key}: Invalid file path - {file_path}", 'error')
+                self.update_file_status(file_key, "Error: Invalid file path", 'red')
+                return
             
-            # Embed in body
-            if embed:
-                cid = f"image_{embed_count}"
-                html_body += f'<p><strong>{name}</strong></p>'
-                html_body += f'<img src="cid:{cid}" alt="{name}"><br><br>'
+            # Get screenshot configurations for this file
+            file_config = self.file_configs.get(file_key, {})
+            screenshots_config = file_config.get('screenshots', [])
+            
+            if not screenshots_config:
+                self.log_message(f"{file_key}: No screenshot configuration found", 'warning')
+                self.update_file_status(file_key, "Warning: No screenshots configured", 'orange')
+                return
+            
+            # Initialize COM for this thread
+            pythoncom.CoInitialize()
+            
+            # Open Excel application
+            excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+            excel.Visible = False  # Hide Excel window
+            excel.DisplayAlerts = False  # Suppress Excel alerts
+            
+            # Open the workbook
+            workbook = excel.Workbooks.Open(
+                Filename=os.path.abspath(file_path),
+                UpdateLinks=0,
+                ReadOnly=True,
+                IgnoreReadOnlyRecommended=True
+            )
+            
+            # Get folder where Excel file is located (for saving screenshots)
+            file_folder = os.path.dirname(os.path.abspath(file_path))
+            
+            # Clear previous screenshot paths for this file
+            self.screenshot_paths[file_key] = []
+            
+            # Capture each screenshot
+            for idx, config in enumerate(screenshots_config, 1):
+                sheet_name = config['sheet_name']
+                cell_range = config['cell_range']
+                name = config.get('name', f'screenshot_{idx}')
                 
-                # Add as inline attachment
-                attachment = mail.Attachments.Add(temp_path)
-                attachment.PropertyAccessor.SetProperty(
-                    "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
-                    cid
-                )
-                embed_count += 1
+                self.log_message(f"{file_key}: Capturing {name} from {sheet_name}!{cell_range}", 'info')
+                
+                # Get the sheet
+                sheet = workbook.Sheets(sheet_name)
+                
+                # Get the range
+                range_obj = sheet.Range(cell_range)
+                
+                # Copy range as picture to clipboard
+                range_obj.CopyPicture(Format=2)  # 2 = xlBitmap
+                time.sleep(0.5)  # Wait for clipboard operation
+                
+                # Grab image from clipboard
+                img = ImageGrab.grabclipboard()
+                
+                if img is None:
+                    self.log_message(f"{file_key}: Failed to capture {name}", 'error')
+                    continue
+                
+                # Determine save location based on checkbox
+                if self.auto_delete_var.get():
+                    # Save in same folder as Excel file
+                    save_path = os.path.join(file_folder, f"{name}.png")
+                else:
+                    # Save in temp folder
+                    save_path = os.path.join(os.environ['TEMP'], f"{name}.png")
+                
+                # Save the image
+                img.save(save_path, 'PNG')
+                
+                # Store screenshot info
+                screenshot_info = {
+                    'path': save_path,
+                    'name': name,
+                    'embed': config.get('embed', True),
+                    'attach': config.get('attach', False)
+                }
+                self.screenshot_paths[file_key].append(screenshot_info)
+                
+                self.log_message(f"{file_key}: Saved {name} to {save_path}", 'success')
             
-            # Attach as file
-            if attach:
-                mail.Attachments.Add(temp_path)
-        
-        html_body += """
-        </body>
-        </html>
+            # Close workbook without saving
+            workbook.Close(SaveChanges=False)
+            
+            # Quit Excel application
+            excel.Quit()
+            
+            # Uninitialize COM
+            pythoncom.CoUninitialize()
+            
+            # Update status
+            self.update_file_status(file_key, f"Screenshots captured: {len(self.screenshot_paths[file_key])}", 'green')
+            self.log_message(f"{file_key}: Screenshot capture completed - {len(self.screenshot_paths[file_key])} images", 'success')
+            
+        except Exception as e:
+            self.log_message(f"{file_key}: Error taking screenshots - {str(e)}", 'error')
+            self.update_file_status(file_key, "Error taking screenshots", 'red')
+    
+    def draft_mail(self, file_key):
         """
+        Create Outlook email draft using captured screenshots
+        Runs in a separate thread to prevent GUI freezing
         
-        mail.HTMLBody = html_body
+        Args:
+            file_key: The file identifier (e.g., 'File 1')
+        """
+        # Run email drafting in separate thread
+        thread = threading.Thread(target=self._draft_mail_thread, args=(file_key,))
+        thread.daemon = True
+        thread.start()
+    
+    def _draft_mail_thread(self, file_key):
+        """
+        Thread worker function for drafting email
         
-        # Send or save as draft
-        if send:
-            mail.Send()
-            result = "Email sent successfully"
-        else:
+        Args:
+            file_key: The file identifier (e.g., 'File 1')
+        """
+        try:
+            # Update status
+            self.update_file_status(file_key, "Drafting email...", 'orange')
+            self.log_message(f"{file_key}: Starting email draft creation", 'info')
+            
+            # Check if screenshots exist
+            if not self.screenshot_paths.get(file_key):
+                self.log_message(f"{file_key}: No screenshots found. Please take screenshots first.", 'warning')
+                self.update_file_status(file_key, "No screenshots available", 'orange')
+                messagebox.showwarning("No Screenshots", f"Please take screenshots for {file_key} first.")
+                return
+            
+            # Verify all screenshot files exist
+            missing_files = []
+            for screenshot in self.screenshot_paths[file_key]:
+                if not os.path.exists(screenshot['path']):
+                    missing_files.append(screenshot['name'])
+            
+            if missing_files:
+                self.log_message(f"{file_key}: Missing screenshot files: {', '.join(missing_files)}", 'error')
+                self.update_file_status(file_key, "Error: Screenshots not found", 'red')
+                return
+            
+            # Initialize COM for this thread
+            pythoncom.CoInitialize()
+            
+            # Create Outlook application instance
+            outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
+            
+            # Create new mail item
+            mail = outlook.CreateItem(0)  # 0 = olMailItem
+            
+            # Set sender email
+            sender_email = self.sender_entry.get().strip()
+            if sender_email:
+                try:
+                    # Try to find matching account
+                    for account in outlook.Session.Accounts:
+                        if hasattr(account, 'SmtpAddress') and \
+                           account.SmtpAddress.lower() == sender_email.lower():
+                            mail.SendUsingAccount = account
+                            self.log_message(f"{file_key}: Using sender account - {sender_email}", 'info')
+                            break
+                except Exception as e:
+                    self.log_message(f"{file_key}: Could not set sender account: {str(e)}", 'warning')
+            
+            # Set recipients
+            to_recipients = self.to_entry.get().strip()
+            if to_recipients:
+                mail.To = to_recipients
+            
+            cc_recipients = self.cc_entry.get().strip()
+            if cc_recipients:
+                mail.CC = cc_recipients
+            
+            # Get timezone and create timestamp
+            timezone = self.email_config.get('timezone', 'IST')
+            tz_map = {
+                'IST': pytz.timezone('Asia/Kolkata'),
+                'UK': pytz.timezone('Europe/London'),
+                'GMT': pytz.timezone('GMT')
+            }
+            tz = tz_map.get(timezone, pytz.timezone('Asia/Kolkata'))
+            timestamp = datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S %Z')
+            
+            # Build subject with timestamp
+            base_subject = self.subject_entry.get().strip()
+            if not base_subject:
+                base_subject = "Excel Report"
+            mail.Subject = f"{base_subject} - {timestamp}"
+            
+            # Build email body
+            body_text = self.body_text.get('1.0', tk.END).strip()
+            
+            # Get signature and disclaimer
+            signature = self.email_config.get('signature', '')
+            disclaimer = self.email_config.get('disclaimer', '')
+            
+            # Start HTML body
+            html_body = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif;">
+            <p>{body_text.replace(chr(10), '<br>')}</p>
+            <p><strong>Generated:</strong> {timestamp}</p>
+            <br>
+            """
+            
+            # Add embedded screenshots
+            embed_count = 0
+            for screenshot in self.screenshot_paths[file_key]:
+                if screenshot.get('embed', False):
+                    cid = f"image_{embed_count}"
+                    html_body += f'<p><strong>{screenshot["name"]}</strong></p>'
+                    html_body += f'<img src="cid:{cid}" alt="{screenshot["name"]}" style="max-width: 100%;"><br><br>'
+                    
+                    # Add as inline attachment
+                    attachment = mail.Attachments.Add(screenshot['path'])
+                    attachment.PropertyAccessor.SetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
+                        cid
+                    )
+                    embed_count += 1
+                    self.log_message(f"{file_key}: Embedded {screenshot['name']}", 'info')
+                
+                # Add file attachments
+                if screenshot.get('attach', False):
+                    mail.Attachments.Add(screenshot['path'])
+                    self.log_message(f"{file_key}: Attached {screenshot['name']}", 'info')
+            
+            # Add signature (convert newlines to HTML breaks)
+            if signature:
+                html_body += f'<p>{signature.replace(chr(10), "<br>")}</p>'
+            
+            # Add disclaimer in smaller font
+            if disclaimer:
+                html_body += f'<p style="font-size: 10px; color: #666;">{disclaimer.replace(chr(10), "<br>")}</p>'
+            
+            # Close HTML
+            html_body += """
+            </body>
+            </html>
+            """
+            
+            # Set email body
+            mail.HTMLBody = html_body
+            
+            # Save as draft (don't send)
             mail.Save()
-            result = "Email draft created successfully"
+            
+            self.log_message(f"{file_key}: Email draft created successfully in Outlook", 'success')
+            
+            # Delete screenshots if auto-delete is enabled
+            if self.auto_delete_var.get():
+                time.sleep(2)  # Wait for Outlook to process attachments
+                
+                # Delete each screenshot file
+                for screenshot in self.screenshot_paths[file_key]:
+                    try:
+                        if os.path.exists(screenshot['path']):
+                            os.remove(screenshot['path'])
+                            self.log_message(f"{file_key}: Deleted screenshot - {screenshot['name']}", 'info')
+                    except Exception as e:
+                        self.log_message(f"{file_key}: Could not delete {screenshot['name']}: {str(e)}", 'warning')
+                
+                # Clear screenshot paths list
+                self.screenshot_paths[file_key] = []
+                self.log_message(f"{file_key}: Screenshots deleted from disk", 'info')
+            
+            # Uninitialize COM
+            pythoncom.CoUninitialize()
+            
+            # Update status
+            self.update_file_status(file_key, "Email draft created successfully", 'green')
+            self.log_message(f"{file_key}: Email drafting completed", 'success')
+            
+            # Show success message
+            messagebox.showinfo("Success", f"Email draft created successfully for {file_key}!")
+            
+        except Exception as e:
+            self.log_message(f"{file_key}: Error drafting email - {str(e)}", 'error')
+            self.update_file_status(file_key, "Error drafting email", 'red')
+            messagebox.showerror("Error", f"Failed to create email draft:\n{str(e)}")
+    
+    def on_closing(self):
+        """
+        Handle application closing event
+        Clean up resources before exit
+        """
+        try:
+            # Uninitialize COM
+            pythoncom.CoUninitialize()
+        except:
+            pass
         
-        # Cleanup temp files
-        time.sleep(1)  # Wait for Outlook to process
-        for temp_file in temp_files:
-            try:
-                os.remove(temp_file)
-            except:
-                pass
-        
-        return result
+        # Destroy the window
+        self.root.destroy()
 
+
+# ================================================================
+# MAIN EXECUTION
+# ================================================================
 
 def main():
-    """Example usage"""
-    
-    # ============================================
-    # OPTION 1: Use currently open Excel file
-    # ============================================
-    # Open your Excel file first, then run this script
-    # The file will remain open and unsaved after email creation
-    
-    screenshots_config = [
-        {
-            'sheet_name': 'Sheet1',
-            'cell_range': 'A1:E20',
-            'embed': True,      # Embed in email body
-            'attach': False,    # Don't attach as file
-            'name': 'Summary_Table'
-        },
-        {
-            'sheet_name': 'Sheet2',
-            'cell_range': 'A1:G30',
-            'embed': False,     # Don't embed in body
-            'attach': True,     # Attach as file
-            'name': 'Detailed_Data'
-        },
-        {
-            'sheet_name': 'Sheet3',
-            'cell_range': 'B5:F25',
-            'embed': True,      # Both embed and attach
-            'attach': True,
-            'name': 'Chart_Analysis'
-        }
-    ]
-    
-    # Use active workbook (file must be open in Excel)
-    with ExcelOutlookEmailer(use_active_workbook=True) as emailer:
-        # Get available accounts with detailed info
-        print("\n=== Checking Outlook Accounts ===")
-        accounts = emailer.get_available_accounts(detailed=True)
-        
-        # ============================================
-        # MULTIPLE WAYS TO SPECIFY SENDER ACCOUNT:
-        # ============================================
-        
-        # Option 1: By display name (if account shows up in list)
-        sender = accounts[0]['display_name'] if accounts else None
-        
-        # Option 2: By email address directly (works even if not in list)
-        # sender_email = "your.secondary@email.com"
-        
-        # Option 3: By account index
-        # sender = 1  # Use second account (0-indexed)
-        
-        # Create email draft
-        result = emailer.create_email(
-            screenshots_config=screenshots_config,
-            subject="Weekly Excel Report",
-            body_text="Please find the Excel screenshots below and attached.",
-            to_recipients=["recipient1@example.com", "recipient2@example.com"],
-            cc_recipients=["cc@example.com"],
-            bcc_recipients=["bcc@example.com"],
-            
-            # METHOD 1: Use sender_account with display name
-            sender_account=sender,
-            
-            # METHOD 2: Use sender_email (uncomment to use)
-            # sender_email="your.secondary@email.com",
-            
-            timezone='IST',
-            send=False  # Set to True to send immediately
-        )
-        
-        print(result)
-        print("Your Excel file remains open and unsaved!")
-    
-    # ============================================
-    # OPTION 2: Open Excel file from path
-    # ============================================
-    # Uncomment below to use a file path instead
     """
-    excel_path = r"C:\path\to\your\workbook.xlsx"
-    
-    with ExcelOutlookEmailer(excel_path=excel_path) as emailer:
-        accounts = emailer.get_available_accounts()
-        print("Available Outlook accounts:")
-        for i, account in enumerate(accounts, 1):
-            print(f"{i}. {account}")
-        
-        result = emailer.create_email(
-            screenshots_config=screenshots_config,
-            subject="Weekly Excel Report",
-            body_text="Please find the Excel screenshots below and attached.",
-            to_recipients=["recipient1@example.com"],
-            sender_account=accounts[0] if accounts else None,
-            timezone='IST',
-            send=False
-        )
-        
-        print(result)
+    Main function to start the GUI application
+    Creates the tkinter root window and initializes the GUI
     """
+    # Create the main tkinter window
+    root = tk.Tk()
+    
+    # Create the application instance
+    app = ExcelOutlookGUI(root)
+    
+    # Set up window close handler
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    
+    # Start the GUI event loop (keeps application running)
+    root.mainloop()
 
 
+# Entry point of the application
 if __name__ == "__main__":
     main()
+
+
+"""
+============================================
+INSTRUCTIONS FOR CUSTOMIZATION
+============================================
+
+1. TO HANDLE MORE OR FEWER FILES:
+   - Change 'self.num_files' in __init__ (line 39)
+   - Add/remove file configurations in 'self.file_configs' (lines 43-99)
+   - Each file needs: path, name, and screenshots list
+   
+2. TO ADD MORE SCREENSHOTS PER FILE:
+   - Add more dictionaries to the 'screenshots' list for each file
+   - Each screenshot needs: sheet_name, cell_range, embed, attach, name
+   
+3. TO CHANGE DEFAULT EMAIL SETTINGS:
+   - Edit 'self.email_config' dictionary (lines 103-111)
+   - Modify to_recipients, cc_recipients, sender_email, signature, disclaimer
+   
+4. TO ENABLE FILE BROWSING (Method A):
+   - Uncomment the browse_button code (lines 235-241)
+   - This allows users to select files via file dialog
+   
+5. TO ENABLE USING OPEN FILE (Method C):
+   - Uncomment the active_button code (lines 245-251)
+   - This allows using currently open Excel file
+   
+6. TO CHANGE SCREENSHOT SAVE LOCATION:
+   - Modify line 476-480 in _take_screenshot_thread method
+   - Currently saves to Excel file's folder when auto-delete is ON
+   - Saves to TEMP folder when auto-delete is OFF
+   
+7. TO MODIFY EMAIL HTML FORMAT:
+   - Edit the HTML template in _draft_mail_thread (lines 633-652)
+   - Add custom styling, headers, footers, etc.
+
+8. TO CHANGE TIMEZONE:
+   - Modify 'timezone' in email_config (line 109)
+   - Options: 'IST' (India), 'UK' (United Kingdom), 'GMT' (Greenwich Mean Time)
+
+9. TO ADD MORE OUTLOOK ACCOUNTS:
+   - The application automatically detects all configured Outlook accounts
+   - Just enter the desired sender email in the GUI
+
+10. TO CUSTOMIZE LOGGING:
+    - Modify log_message method (lines 309-329)
+    - Add more tags for different message types
+    - Change colors in log_text.tag_config (lines 295-298)
+
+============================================
+TROUBLESHOOTING
+============================================
+
+1. "No active workbook found":
+   - Make sure Excel is open with a file before using "Use Open File"
+   
+2. "Error taking screenshots":
+   - Verify sheet names and cell ranges are correct
+   - Ensure the Excel file is not corrupted
+   - Check if file path is accessible
+   
+3. "Error drafting email":
+   - Make sure Outlook is installed and configured
+   - Verify email addresses are valid
+   - Check if screenshots were captured successfully
+   
+4. Screenshots not deleting:
+   - Screenshots may still be locked by Outlook
+   - Wait a few seconds and try again
+   - Check Windows file permissions
+   
+5. GUI freezing:
+   - All long operations run in separate threads
+   - If freezing occurs, check the log for errors
+   - Restart the application
+
+============================================
+REQUIRED LIBRARIES
+============================================
+
+Install these Python packages before running:
+
+pip install pywin32
+pip install Pillow
+pip install pytz
+
+Windows requirements:
+- Microsoft Excel (any version with COM support)
+- Microsoft Outlook (configured with at least one email account)
+- Windows 7 or later
+
+============================================
+FILE STRUCTURE RECOMMENDATION
+============================================
+
+Organize your files like this:
+
+C:\ExcelReports\
+├── excel_outlook_gui.py  (this script)
+├── File1.xlsm
+├── File2.xlsx
+├── File3.xlsm
+└── File4.xlsx
+
+Screenshots will be saved in same folders as Excel files
+(when auto-delete is enabled)
+
+============================================
+USAGE WORKFLOW
+============================================
+
+1. CONFIGURE:
+   - Edit file paths in self.file_configs (lines 43-99)
+   - Set email recipients and sender (lines 103-111)
+   - Configure screenshot ranges for each file
+
+2. RUN:
+   - Execute: python excel_outlook_gui.py
+   - GUI window will open
+
+3. FOR EACH FILE:
+   Step 1: Click "Take Screenshot" button
+   - Application opens Excel file
+   - Captures specified ranges
+   - Saves screenshots to disk
+   - Shows success/failure in log
+   
+   Step 2: Click "Draft Mail" button
+   - Creates Outlook email draft
+   - Embeds/attaches screenshots
+   - Adds signature and disclaimer
+   - Deletes screenshots (if enabled)
+   - Shows success message
+
+4. REVIEW:
+   - Open Outlook
+   - Find draft email in Drafts folder
+   - Review content and attachments
+   - Send when ready
+
+============================================
+ADVANCED CUSTOMIZATION EXAMPLES
+============================================
+
+EXAMPLE 1: Add 5th file
+```python
+# In self.file_configs, add:
+'File 5': {
+    'path': r'C:\Users\YourName\Desktop\File5.xlsx',
+    'name': 'Quarterly Review',
+    'screenshots': [
+        {
+            'sheet_name': 'Q4',
+            'cell_range': 'A1:M50',
+            'embed': True,
+            'attach': True,
+            'name': 'Q4_Summary'
+        }
+    ]
+}
+# And change self.num_files = 5
+```
+
+EXAMPLE 2: Different signature per file
+```python
+# Add in __init__:
+self.file_signatures = {
+    'File 1': 'Regards,\nFinance Team',
+    'File 2': 'Regards,\nSales Team',
+    # ... etc
+}
+
+# Then in _draft_mail_thread, replace:
+signature = self.email_config.get('signature', '')
+# With:
+signature = self.file_signatures.get(file_key, self.email_config.get('signature', ''))
+```
+
+EXAMPLE 3: Custom subject per file
+```python
+# Add to file_configs:
+'File 1': {
+    'path': r'...',
+    'name': 'Monthly Report',
+    'custom_subject': 'Monthly Finance Report',  # Add this
+    'screenshots': [...]
+}
+
+# Then in _draft_mail_thread:
+base_subject = self.file_configs[file_key].get('custom_subject', 
+                                                self.subject_entry.get().strip())
+```
+
+EXAMPLE 4: Schedule automatic screenshots
+```python
+# Add timer functionality:
+def schedule_screenshot(self, file_key, interval_minutes):
+    '''Take screenshots automatically every X minutes'''
+    self.take_screenshot(file_key)
+    # Schedule next capture
+    self.root.after(interval_minutes * 60 * 1000, 
+                    lambda: self.schedule_screenshot(file_key, interval_minutes))
+```
+
+============================================
+SECURITY NOTES
+============================================
+
+1. EMAIL SECURITY:
+   - Emails are saved as drafts, not sent automatically
+   - Review all emails before sending
+   - Verify recipient addresses
+
+2. FILE SECURITY:
+   - Excel files are opened in read-only mode
+   - No changes are saved to original files
+   - Screenshots are temporary and auto-deleted
+
+3. CREDENTIAL SECURITY:
+   - No passwords are stored in this application
+   - Uses Windows authentication for Outlook
+   - Email accounts must be pre-configured in Outlook
+
+4. DATA PRIVACY:
+   - Screenshots may contain sensitive data
+   - Auto-delete feature prevents data leakage
+   - Use encryption for sensitive files
+
+============================================
+PERFORMANCE TIPS
+============================================
+
+1. For large Excel files:
+   - Limit screenshot ranges to necessary cells only
+   - Close other applications to free memory
+   - Process one file at a time
+
+2. For many screenshots:
+   - Use embed sparingly (only for key visuals)
+   - Attach others as files to reduce email size
+   - Consider compressing images if needed
+
+3. For multiple files:
+   - Process them sequentially, not simultaneously
+   - Wait for each operation to complete
+   - Monitor the activity log for errors
+
+============================================
+"""
