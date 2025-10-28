@@ -1,13 +1,13 @@
 """
-Excel to Outlook Desktop GUI Application - v3.5 ADVANCED VERSION
+Excel to Outlook Desktop GUI Application - v3.6 STREAMLINED VERSION
 Enhanced with intelligent sheet linking and conditional screenshot capture
 
-NEW FEATURES v3.5:
-1. Smart sheet linking - First sheet linked to multiple sheets
-2. Conditional screenshot capture based on threshold values
-3. Dynamic screenshot configuration based on cell values
-4. User-defined thresholds for each file
-5. Automatic detection of sheets to capture
+VERSION 3.6 UPDATES:
+1. Added threshold range support (between x and y)
+2. Streamlined main interface (removed feature highlights)
+3. Simplified popup window (removed threshold UI, kept only To/CC/BCC)
+4. Auto-delete files by default after drafting
+5. Customizable subject and body per file with embedded timestamp
 """
 
 import tkinter as tk
@@ -37,7 +37,7 @@ class FilePopup:
         # Create popup window
         self.popup = tk.Toplevel(parent)
         self.popup.title(f"Draft Email - {file_key}")
-        self.popup.geometry("950x900")
+        self.popup.geometry("950x700")
         self.popup.grab_set()
         
         # Initialize COM
@@ -88,84 +88,9 @@ class FilePopup:
         self.path_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         path_frame.columnconfigure(1, weight=1)
         
-        # Smart Linking Configuration (NEW)
-        linking_frame = ttk.LabelFrame(main_frame, text="🔗 Smart Sheet Linking & Thresholds", padding="10")
-        linking_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        # Check if smart linking is enabled
+        # Check if smart linking is enabled (internal use only)
         smart_config = self.file_config.get('smart_linking', {})
         self.smart_enabled = smart_config.get('enabled', False)
-        
-        if self.smart_enabled:
-            info_text = f"✓ Smart linking enabled for this file\n"
-            info_text += f"Master Sheet: {smart_config.get('master_sheet', 'N/A')}\n"
-            info_text += f"Linked Sheets: {len(smart_config.get('linked_sheets', []))}"
-            
-            ttk.Label(
-                linking_frame,
-                text=info_text,
-                foreground='green',
-                font=('Arial', 9)
-            ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=5)
-            
-            # Threshold configuration
-            ttk.Label(linking_frame, text="Threshold Type:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
-            
-            self.threshold_type = tk.StringVar(value=smart_config.get('threshold_type', 'equals_zero'))
-            threshold_frame = ttk.Frame(linking_frame)
-            threshold_frame.grid(row=1, column=1, sticky=tk.W, padx=5, pady=5)
-            
-            ttk.Radiobutton(
-                threshold_frame,
-                text="Equals Zero (=0)",
-                variable=self.threshold_type,
-                value='equals_zero'
-            ).pack(side=tk.LEFT, padx=5)
-            
-            ttk.Radiobutton(
-                threshold_frame,
-                text="Exceeds Threshold (>)",
-                variable=self.threshold_type,
-                value='exceeds'
-            ).pack(side=tk.LEFT, padx=5)
-            
-            ttk.Radiobutton(
-                threshold_frame,
-                text="Below Threshold (<)",
-                variable=self.threshold_type,
-                value='below'
-            ).pack(side=tk.LEFT, padx=5)
-            
-            ttk.Radiobutton(
-                threshold_frame,
-                text="Not Zero (≠0)",
-                variable=self.threshold_type,
-                value='not_zero'
-            ).pack(side=tk.LEFT, padx=5)
-            
-            # Threshold value
-            threshold_val_frame = ttk.Frame(linking_frame)
-            threshold_val_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, padx=5, pady=5)
-            
-            ttk.Label(threshold_val_frame, text="Threshold Value:").pack(side=tk.LEFT, padx=5)
-            self.threshold_value = ttk.Entry(threshold_val_frame, width=15)
-            self.threshold_value.insert(0, str(smart_config.get('threshold_value', 0)))
-            self.threshold_value.pack(side=tk.LEFT, padx=5)
-            
-            ttk.Label(
-                threshold_val_frame,
-                text="(Only used for exceeds/below threshold)",
-                font=('Arial', 8),
-                foreground='gray'
-            ).pack(side=tk.LEFT, padx=5)
-            
-        else:
-            ttk.Label(
-                linking_frame,
-                text="ℹ Smart linking not configured for this file",
-                foreground='gray',
-                font=('Arial', 9)
-            ).pack(pady=10)
         
         # Screenshot Section
         screenshot_frame = ttk.Frame(main_frame)
@@ -173,7 +98,7 @@ class FilePopup:
         
         self.screenshot_btn = ttk.Button(
             screenshot_frame,
-            text="📸 Capture Screenshots (Smart Mode)" if self.smart_enabled else "📸 Capture Screenshots",
+            text="📸 Capture Screenshots",
             command=self.take_screenshot
         )
         self.screenshot_btn.pack(side=tk.LEFT, padx=5)
@@ -185,80 +110,29 @@ class FilePopup:
         )
         self.screenshot_status.pack(side=tk.LEFT, padx=10)
         
-        # Conditional Screenshots Display (NEW)
-        if self.smart_enabled:
-            self.conditional_frame = ttk.LabelFrame(
-                main_frame,
-                text="📋 Sheets Detected for Capture",
-                padding="10"
-            )
-            self.conditional_frame.pack(fill=tk.X, padx=10, pady=10)
-            
-            self.conditional_text = scrolledtext.ScrolledText(
-                self.conditional_frame,
-                width=80,
-                height=6,
-                state='disabled'
-            )
-            self.conditional_text.pack(fill=tk.BOTH, expand=True)
-            self.conditional_text.tag_config('match', foreground='green', font=('Arial', 9, 'bold'))
-            self.conditional_text.tag_config('nomatch', foreground='gray', font=('Arial', 9))
-        
-        # Email Configuration Section
+        # Email Configuration Section (simplified - only To, CC, BCC)
         email_frame = ttk.LabelFrame(main_frame, text="Email Configuration", padding="10")
         email_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Subject
-        ttk.Label(email_frame, text="Subject:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
-        self.subject_entry = ttk.Entry(email_frame, width=70)
-        default_subject = self.file_config.get('default_subject', f'{self.file_config.get("name", "Report")} - Report')
-        self.subject_entry.insert(0, default_subject)
-        self.subject_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
-        # Body
-        ttk.Label(email_frame, text="Body Text:").grid(row=1, column=0, sticky=tk.NW, padx=5, pady=5)
-        self.body_text = scrolledtext.ScrolledText(email_frame, width=70, height=8)
-        default_body = self.file_config.get('default_body', 'Please find the attached screenshots and data.')
-        self.body_text.insert('1.0', default_body)
-        self.body_text.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
-        
         # To
-        ttk.Label(email_frame, text="To:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(email_frame, text="To:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.to_entry = ttk.Entry(email_frame, width=70)
         self.to_entry.insert(0, "; ".join(self.email_config.get('to_recipients', [])))
-        self.to_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        self.to_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         # CC
-        ttk.Label(email_frame, text="CC:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
+        ttk.Label(email_frame, text="CC:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         self.cc_entry = ttk.Entry(email_frame, width=70)
         self.cc_entry.insert(0, "; ".join(self.email_config.get('cc_recipients', [])))
-        self.cc_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        self.cc_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
-        # From
-        ttk.Label(email_frame, text="From:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=5)
-        self.sender_entry = ttk.Entry(email_frame, width=70)
-        self.sender_entry.insert(0, self.email_config.get('sender_email', ''))
-        self.sender_entry.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        # BCC
+        ttk.Label(email_frame, text="BCC:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.bcc_entry = ttk.Entry(email_frame, width=70)
+        self.bcc_entry.insert(0, "; ".join(self.email_config.get('bcc_recipients', [])))
+        self.bcc_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
         email_frame.columnconfigure(1, weight=1)
-        
-        # Deletion Options
-        options_frame = ttk.LabelFrame(main_frame, text="Post-Draft Options", padding="10")
-        options_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        self.delete_screenshot_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            options_frame,
-            text="Delete screenshots after drafting",
-            variable=self.delete_screenshot_var
-        ).pack(anchor=tk.W, pady=2)
-        
-        self.delete_file_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            options_frame,
-            text="⚠ Delete Excel file after drafting (PERMANENT)",
-            variable=self.delete_file_var
-        ).pack(anchor=tk.W, pady=2)
         
         # Draft Button
         draft_btn = ttk.Button(
@@ -327,12 +201,15 @@ class FilePopup:
             self.log_message(f"Error reading cell {cell_ref}: {str(e)}", 'error')
             return 0.0
     
-    def check_threshold_condition(self, value, threshold_type, threshold_value):
-        """Check if value meets the threshold condition"""
+    def check_threshold_condition(self, value, threshold_type, threshold_value, threshold_max=None):
+        """Check if value meets the threshold condition (including range support)"""
         try:
             threshold_val = float(threshold_value)
+            if threshold_max is not None:
+                threshold_max_val = float(threshold_max)
         except (ValueError, TypeError):
             threshold_val = 0.0
+            threshold_max_val = None
         
         if threshold_type == 'equals_zero':
             return value == 0.0
@@ -342,6 +219,12 @@ class FilePopup:
             return value > threshold_val
         elif threshold_type == 'below':
             return value < threshold_val
+        elif threshold_type == 'between':
+            # NEW: Range support
+            if threshold_max_val is not None:
+                return threshold_val <= value <= threshold_max_val
+            else:
+                return False
         else:
             return False
     
@@ -357,22 +240,22 @@ class FilePopup:
         
         master_sheet = smart_config.get('master_sheet', '')
         linked_sheets = smart_config.get('linked_sheets', [])
-        threshold_type = self.threshold_type.get()
-        threshold_value = self.threshold_value.get()
+        threshold_type = smart_config.get('threshold_type', 'equals_zero')
+        threshold_value = smart_config.get('threshold_value', 0)
+        threshold_max = smart_config.get('threshold_max', None)  # NEW: Range max value
         
         self.log_message(f"Analyzing linked sheets from master: {master_sheet}", 'info')
-        self.log_message(f"Threshold: {threshold_type} {threshold_value}", 'info')
+        
+        if threshold_type == 'between' and threshold_max is not None:
+            self.log_message(f"Threshold: between {threshold_value} and {threshold_max}", 'info')
+        else:
+            self.log_message(f"Threshold: {threshold_type} {threshold_value}", 'info')
         
         sheets_to_capture = []
         
-        # Update conditional display
-        if hasattr(self, 'conditional_text'):
-            self.conditional_text.config(state='normal')
-            self.conditional_text.delete('1.0', tk.END)
-        
         for sheet_config in linked_sheets:
             sheet_name = sheet_config.get('sheet_name', '')
-            value_cell = sheet_config.get('value_cell', '')  # Cell in master sheet with sum/value
+            value_cell = sheet_config.get('value_cell', '')
             capture_range = sheet_config.get('capture_range', 'A1:Z50')
             
             # Read value from master sheet
@@ -382,18 +265,11 @@ class FilePopup:
             meets_condition = self.check_threshold_condition(
                 cell_value,
                 threshold_type,
-                threshold_value
+                threshold_value,
+                threshold_max
             )
             
             status = "✓ WILL CAPTURE" if meets_condition else "○ Skip"
-            color = 'match' if meets_condition else 'nomatch'
-            
-            if hasattr(self, 'conditional_text'):
-                self.conditional_text.insert(
-                    tk.END,
-                    f"{status} | {sheet_name} | Value: {cell_value} | Cell: {value_cell}\n",
-                    color
-                )
             
             self.log_message(
                 f"  {sheet_name}: Value={cell_value}, Condition={meets_condition}",
@@ -409,9 +285,6 @@ class FilePopup:
                     'name': sheet_config.get('name', sheet_name),
                     'value': cell_value
                 })
-        
-        if hasattr(self, 'conditional_text'):
-            self.conditional_text.config(state='disabled')
         
         return sheets_to_capture
     
@@ -465,7 +338,7 @@ class FilePopup:
                     workbook,
                     master_sheet,
                     master_range,
-                    f"Master_{master_sheet}",
+                    f"{master_sheet}",
                     file_folder,
                     embed=True,
                     attach=False
@@ -617,7 +490,7 @@ class FilePopup:
             mail = outlook.CreateItem(0)
             
             # Set sender
-            sender_email = self.sender_entry.get().strip()
+            sender_email = self.email_config.get('sender_email', '').strip()
             if sender_email:
                 try:
                     account_found = False
@@ -645,42 +518,39 @@ class FilePopup:
             if cc_recipients:
                 mail.CC = cc_recipients
             
+            bcc_recipients = self.bcc_entry.get().strip()
+            if bcc_recipients:
+                mail.BCC = bcc_recipients
+            
             # Get timestamp in AM/PM format
             timestamp = self.get_timestamp_ampm()
             
-            # Build subject with timestamp
-            base_subject = self.subject_entry.get().strip()
-            mail.Subject = f"{base_subject} - {timestamp}"
+            # Get custom subject and body from file config
+            email_subject = self.file_config.get('email_subject', 'Report')
+            email_body_text = self.file_config.get('email_body', 'Please find the attached report.')
+            
+            # Replace {timestamp} placeholder in body
+            email_body_text = email_body_text.replace('{timestamp}', timestamp)
+            
+            # Set subject
+            mail.Subject = email_subject
             
             # Build email body
-            body_text = self.body_text.get('1.0', tk.END).strip()
             signature = self.email_config.get('signature', '')
             disclaimer = self.email_config.get('disclaimer', '')
             
             html_body = f"""
             <html>
             <body style="font-family: Arial, sans-serif;">
-            <p>{body_text.replace(chr(10), '<br>')}</p>
-            <p><strong>Generated:</strong> {timestamp}</p>
+            <p>{email_body_text.replace(chr(10), '<br>')}</p>
+            <br>
             """
             
-            # Add smart linking info if enabled
-            if self.smart_enabled:
-                html_body += f"""
-                <p style="color: #0066cc; font-size: 11px;">
-                <strong>Note:</strong> Screenshots captured using smart threshold analysis 
-                ({len(self.screenshot_paths)} sheets included based on conditions)
-                </p>
-                """
-            
-            html_body += "<br>"
-            
-            # Add embedded screenshots
+            # Add embedded screenshots (no sheet names in body)
             embed_count = 0
             for screenshot in self.screenshot_paths:
                 if screenshot.get('embed', False):
                     cid = f"image_{embed_count}"
-                    html_body += f'<p><strong>{screenshot["name"]}</strong></p>'
                     html_body += f'<img src="cid:{cid}" alt="{screenshot["name"]}" style="max-width: 100%;"><br><br>'
                     
                     attachment = mail.Attachments.Add(screenshot['path'])
@@ -708,34 +578,33 @@ class FilePopup:
             
             self.log_message("Email draft created successfully in Outlook", 'success')
             
-            # Handle deletions
-            if self.delete_screenshot_var.get():
-                time.sleep(1)
-                for screenshot in self.screenshot_paths:
-                    try:
-                        if os.path.exists(screenshot['path']):
-                            os.remove(screenshot['path'])
-                            self.log_message(f"Deleted screenshot: {screenshot['name']}", 'info')
-                    except Exception as e:
-                        self.log_message(f"Could not delete {screenshot['name']}: {str(e)}", 'warning')
-                
-                self.screenshot_paths = []
+            # Always delete screenshots after drafting
+            time.sleep(1)
+            for screenshot in self.screenshot_paths:
+                try:
+                    if os.path.exists(screenshot['path']):
+                        os.remove(screenshot['path'])
+                        self.log_message(f"Deleted screenshot: {screenshot['name']}", 'info')
+                except Exception as e:
+                    self.log_message(f"Could not delete {screenshot['name']}: {str(e)}", 'warning')
             
+            self.screenshot_paths = []
+            
+            # Always delete Excel file after drafting
             excel_file_path = self.path_entry.get()
             file_deleted = False
             
-            if self.delete_file_var.get():
-                time.sleep(1)
-                try:
-                    if os.path.exists(excel_file_path):
-                        os.remove(excel_file_path)
-                        self.log_message(f"Excel file deleted: {os.path.basename(excel_file_path)}", 'success')
-                        file_deleted = True
-                    else:
-                        self.log_message("Excel file not found for deletion", 'warning')
-                        
-                except Exception as e:
-                    self.log_message(f"Could not delete Excel file: {str(e)}", 'error')
+            time.sleep(1)
+            try:
+                if os.path.exists(excel_file_path):
+                    os.remove(excel_file_path)
+                    self.log_message(f"Excel file deleted: {os.path.basename(excel_file_path)}", 'success')
+                    file_deleted = True
+                else:
+                    self.log_message("Excel file not found for deletion", 'warning')
+                    
+            except Exception as e:
+                self.log_message(f"Could not delete Excel file: {str(e)}", 'error')
             
             pythoncom.CoUninitialize()
             
@@ -752,7 +621,7 @@ class FilePopup:
         """Show post-draft confirmation dialog"""
         dialog = tk.Toplevel(self.popup)
         dialog.title("Email Drafted Successfully")
-        dialog.geometry("450x250")
+        dialog.geometry("450x200")
         dialog.transient(self.popup)
         dialog.grab_set()
         
@@ -768,14 +637,6 @@ class FilePopup:
             font=('Arial', 12, 'bold'),
             foreground='green'
         ).pack(pady=20)
-        
-        if self.smart_enabled:
-            ttk.Label(
-                dialog,
-                text=f"📊 {len(self.screenshot_paths)} sheets captured using smart linking",
-                font=('Arial', 9),
-                foreground='blue'
-            ).pack(pady=5)
         
         ttk.Label(
             dialog,
@@ -827,22 +688,6 @@ class FilePopup:
         """Reset popup fields for new draft"""
         self.screenshot_paths = []
         self.screenshot_status.config(text="Ready", foreground='blue')
-        
-        # Clear conditional display
-        if hasattr(self, 'conditional_text'):
-            self.conditional_text.config(state='normal')
-            self.conditional_text.delete('1.0', tk.END)
-            self.conditional_text.config(state='disabled')
-        
-        # Reset subject and body to defaults
-        default_subject = self.file_config.get('default_subject', f'{self.file_config.get("name", "Report")} - Report')
-        self.subject_entry.delete(0, tk.END)
-        self.subject_entry.insert(0, default_subject)
-        
-        default_body = self.file_config.get('default_body', 'Please find the attached screenshots and data.')
-        self.body_text.delete('1.0', tk.END)
-        self.body_text.insert('1.0', default_body)
-        
         self.log_message("Popup refreshed - Ready for new draft", 'success')
 
 
@@ -851,30 +696,30 @@ class ExcelOutlookGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Excel to Outlook Email Utility - v3.5 Smart Linking")
-        self.root.geometry("900x750")
+        self.root.title("Excel to Outlook Email Utility - v3.6")
+        self.root.geometry("900x700")
         
         # Configuration with Smart Linking
         self.file_configs = {
             'File 1': {
                 'path': r'C:\Users\YourName\Desktop\File1.xlsm',
                 'name': 'Monthly Report with Smart Linking',
-                'default_subject': 'Monthly Business Report - Smart Analysis',
-                'default_body': 'Dear Team,\n\nPlease find attached the monthly report with automatically selected sheets based on threshold analysis.',
+                'email_subject': 'Monthly Business Report - Smart Analysis',
+                'email_body': 'Dear Team,\n\nPlease find attached the monthly report generated on {timestamp}.\n\nBest regards',
                 
                 # SMART LINKING CONFIGURATION
                 'smart_linking': {
                     'enabled': True,
-                    'master_sheet': 'Summary',  # First sheet with sum values
-                    'master_range': 'A1:H30',   # Range to capture from master
-                    'threshold_type': 'exceeds',  # equals_zero, not_zero, exceeds, below
-                    'threshold_value': 1000,      # Value for exceeds/below
+                    'master_sheet': 'Summary',
+                    'master_range': 'A1:H30',
+                    'threshold_type': 'between',  # NEW: 'between' for range
+                    'threshold_value': 1000,      # Range min
+                    'threshold_max': 5000,        # Range max (NEW)
                     
-                    # Linked sheets with their value cells in master sheet
                     'linked_sheets': [
                         {
                             'sheet_name': 'Sales_Region_A',
-                            'value_cell': 'Summary!B5',  # Cell in master with sum for this sheet
+                            'value_cell': 'Summary!B5',
                             'capture_range': 'A1:G40',
                             'embed': True,
                             'attach': False,
@@ -919,14 +764,14 @@ class ExcelOutlookGUI:
             'File 2': {
                 'path': r'C:\Users\YourName\Desktop\File2.xlsx',
                 'name': 'Inventory Alert System',
-                'default_subject': 'Inventory Alert - Zero Stock Items',
-                'default_body': 'Hi Team,\n\nAttached are warehouse sheets with zero or low inventory levels requiring immediate attention.',
+                'email_subject': 'Inventory Alert - Zero Stock Items',
+                'email_body': 'Hi Team,\n\nAttached are warehouse sheets with zero or low inventory levels as of {timestamp}.\n\nRequires immediate attention.\n\nRegards',
                 
                 'smart_linking': {
                     'enabled': True,
                     'master_sheet': 'Inventory_Master',
                     'master_range': 'A1:F25',
-                    'threshold_type': 'equals_zero',  # Capture only zero inventory
+                    'threshold_type': 'equals_zero',
                     'threshold_value': 0,
                     
                     'linked_sheets': [
@@ -969,15 +814,15 @@ class ExcelOutlookGUI:
             'File 3': {
                 'path': r'C:\Users\YourName\Desktop\File3.xlsm',
                 'name': 'Budget Variance Report',
-                'default_subject': 'Budget Variance Alert - Over/Under Threshold',
-                'default_body': 'Dear Stakeholders,\n\nPlease review the departments with budget variances exceeding acceptable thresholds.',
+                'email_subject': 'Budget Variance Alert - Over/Under Threshold',
+                'email_body': 'Dear Stakeholders,\n\nPlease review the departments with budget variances exceeding acceptable thresholds.\n\nReport generated: {timestamp}\n\nThank you',
                 
                 'smart_linking': {
                     'enabled': True,
                     'master_sheet': 'Budget_Overview',
                     'master_range': 'A1:J30',
-                    'threshold_type': 'below',  # Capture sheets below threshold
-                    'threshold_value': -5000,   # Negative values (over budget)
+                    'threshold_type': 'below',
+                    'threshold_value': -5000,
                     
                     'linked_sheets': [
                         {
@@ -1019,10 +864,9 @@ class ExcelOutlookGUI:
             'File 4': {
                 'path': r'C:\Users\YourName\Desktop\File4.xlsx',
                 'name': 'Standard Report (No Smart Linking)',
-                'default_subject': 'Standard Quarterly Report',
-                'default_body': 'Dear Team,\n\nAttached is the standard quarterly report with all predefined sections.',
+                'email_subject': 'Standard Quarterly Report',
+                'email_body': 'Dear Team,\n\nAttached is the standard quarterly report generated on {timestamp}.\n\nAll predefined sections included.\n\nBest regards',
                 
-                # Standard mode - no smart linking
                 'smart_linking': {
                     'enabled': False
                 },
@@ -1036,7 +880,7 @@ class ExcelOutlookGUI:
         self.email_config = {
             'to_recipients': ['recipient1@example.com', 'recipient2@example.com'],
             'cc_recipients': ['cc@example.com'],
-            'bcc_recipients': [],
+            'bcc_recipients': ['bcc@example.com'],
             'sender_email': 'your.secondary@email.com',
             'timezone': 'IST',
             'signature': '\n\nBest Regards,\nYour Name\nYour Title\nYour Company',
@@ -1085,47 +929,21 @@ class ExcelOutlookGUI:
         
         ttk.Label(
             header_frame,
-            text="v3.5 - Smart Sheet Linking & Conditional Capture",
+            text="v3.6 - Smart Sheet Linking & Conditional Capture",
             font=('Arial', 10, 'italic'),
-            foreground='green'
+            foreground='gray'
         ).pack(pady=5)
         
-        # Feature Highlights
-        feature_frame = ttk.Frame(self.scrollable_frame)
-        feature_frame.pack(pady=10)
-        
-        features = [
-            "🔗 Intelligent sheet linking based on cell values",
-            "📊 Conditional screenshot capture with thresholds",
-            "🎯 Automatic sheet detection and filtering",
-            "⚙️ Customizable threshold conditions per file"
-        ]
-        
-        for feature in features:
-            ttk.Label(
-                feature_frame,
-                text=feature,
-                font=('Arial', 9),
-                foreground='blue'
-            ).pack(anchor=tk.W, padx=20, pady=2)
-        
-        # Instructions
+        # Instructions (Simplified)
         inst_frame = ttk.LabelFrame(self.scrollable_frame, text="How It Works", padding="15")
         inst_frame.pack(fill=tk.X, padx=20, pady=15)
         
         instructions = """
-        SMART LINKING MODE:
-        1. Select a file configured with smart linking
-        2. System reads values from master sheet (e.g., sum column)
-        3. Compares each value against threshold condition
-        4. Automatically captures screenshots only for sheets meeting the condition
-        5. Master sheet is always captured
-        
-        THRESHOLD CONDITIONS:
-        • Equals Zero (=0): Capture sheets with zero values
-        • Not Zero (≠0): Capture sheets with any non-zero value
-        • Exceeds (>): Capture sheets with values above threshold
-        • Below (<): Capture sheets with values below threshold
+        1. Select a file from the list below
+        2. Capture screenshots from Excel sheets
+        3. Configure email recipients (To, CC, BCC)
+        4. Draft email in Outlook with embedded screenshots
+        5. Files and screenshots are automatically deleted after drafting
         """
         
         ttk.Label(
@@ -1155,18 +973,8 @@ class ExcelOutlookGUI:
             )
             btn.pack(side=tk.LEFT, padx=5)
             
-            # Smart linking indicator
+            # Show number of linked sheets (no SMART label)
             if smart_enabled:
-                smart_label = ttk.Label(
-                    file_button_frame,
-                    text="SMART",
-                    font=('Arial', 8, 'bold'),
-                    foreground='white',
-                    background='green',
-                    padding=(5, 2)
-                )
-                smart_label.pack(side=tk.LEFT, padx=5)
-                
                 num_sheets = len(config.get('smart_linking', {}).get('linked_sheets', []))
                 info_label = ttk.Label(
                     file_button_frame,
@@ -1188,8 +996,8 @@ class ExcelOutlookGUI:
         self.log_text.tag_config('error', foreground='red')
         self.log_text.tag_config('warning', foreground='orange')
         
-        self.log_message("Application initialized - v3.5 with Smart Sheet Linking", 'success')
-        self.log_message("Select a file above to begin. Smart linking files will auto-detect sheets based on thresholds.", 'info')
+        self.log_message("Application initialized - v3.6", 'success')
+        self.log_message("Select a file above to begin", 'info')
     
     def log_message(self, message, tag='info'):
         """Add timestamped message to main log"""
@@ -1249,136 +1057,85 @@ if __name__ == "__main__":
 
 """
 ============================================
-VERSION 3.5 - SMART LINKING COMPLETE GUIDE
+VERSION 3.6 - STREAMLINED UPDATE GUIDE
 ============================================
 
-🔗 SMART LINKING FEATURE:
+🔄 CHANGES FROM v3.5:
 
-This version introduces intelligent sheet linking where:
-1. A master sheet contains summary values (sums, totals, etc.)
-2. Each value in the master sheet is linked to a specific sheet
-3. System automatically determines which sheets to capture based on threshold conditions
-4. Only sheets meeting the condition are included in the email
+1. THRESHOLD RANGE SUPPORT (NEW):
+   - Added 'between' threshold type
+   - Use 'threshold_max' for upper range limit
+   - Example: threshold_type='between', threshold_value=1000, threshold_max=5000
+   - Captures sheets with values between 1000 and 5000
+
+2. MAIN INTERFACE CLEANUP:
+   - Removed feature highlights (green/blue text)
+   - Removed "SMART" label buttons
+   - Simplified "How It Works" section
+   - Cleaner, more professional appearance
+
+3. POPUP WINDOW SIMPLIFICATION:
+   - Removed "Smart Sheet Linking & Thresholds" box
+   - Email Configuration now only shows: To, CC, BCC
+   - Removed Subject and Body fields (now predefined per file)
+   - Removed "Post-Draft Options" box
+   - Auto-delete enabled for both screenshots and Excel files
+
+4. EMAIL CUSTOMIZATION:
+   - Each file has custom 'email_subject' and 'email_body'
+   - Use {timestamp} placeholder in body text
+   - Timestamp automatically inserted when email is drafted
+   - No separate timestamp line in email
+
+5. SCREENSHOT NAMING:
+   - Master sheet screenshots no longer prefixed with "Master_"
+   - Just uses sheet name directly
+   - Cleaner appearance in email
 
 ============================================
-CONFIGURATION EXAMPLE:
+CONFIGURATION EXAMPLE WITH RANGE:
 ============================================
 
-'smart_linking': {
-    'enabled': True,
-    'master_sheet': 'Summary',      # Sheet with sum values
-    'master_range': 'A1:H30',       # Range to capture from master
-    'threshold_type': 'exceeds',    # Condition type
-    'threshold_value': 1000,        # Threshold value
+'File 1': {
+    'email_subject': 'Monthly Report',
+    'email_body': 'Dear Team,\n\nReport generated on {timestamp}.\n\nRegards',
     
-    'linked_sheets': [
-        {
-            'sheet_name': 'Sales_Region_A',
-            'value_cell': 'Summary!B5',  # Cell in master sheet with value
-            'capture_range': 'A1:G40',   # Range to capture from this sheet
-            'embed': True,
-            'attach': False,
-            'name': 'Region_A_Details'
-        },
-        # ... more linked sheets
-    ]
+    'smart_linking': {
+        'enabled': True,
+        'master_sheet': 'Summary',
+        'master_range': 'A1:H30',
+        'threshold_type': 'between',     # Range type
+        'threshold_value': 1000,         # Minimum value
+        'threshold_max': 5000,           # Maximum value
+        
+        'linked_sheets': [...]
+    }
 }
 
 ============================================
-THRESHOLD TYPES:
+THRESHOLD TYPES (COMPLETE LIST):
 ============================================
 
 1. 'equals_zero' (=0)
-   - Captures sheets where value is exactly 0
-   - Use case: Zero inventory, zero sales, empty items
+   - threshold_value: 0
+   - threshold_max: not used
 
 2. 'not_zero' (≠0)
-   - Captures sheets where value is anything except 0
-   - Use case: Active items, non-empty categories
+   - threshold_value: 0
+   - threshold_max: not used
 
 3. 'exceeds' (>)
-   - Captures sheets where value > threshold_value
-   - Use case: High sales, excess inventory, budget overruns
+   - threshold_value: comparison value
+   - threshold_max: not used
 
 4. 'below' (<)
-   - Captures sheets where value < threshold_value
-   - Use case: Low stock, under budget, declining sales
+   - threshold_value: comparison value
+   - threshold_max: not used
 
-============================================
-REAL-WORLD USE CASES:
-============================================
-
-USE CASE 1: Regional Sales Report
-- Master sheet shows total sales per region
-- Only capture detailed sheets for regions exceeding $10,000 sales
-- Threshold: 'exceeds', Value: 10000
-
-USE CASE 2: Inventory Alerts
-- Master sheet shows stock levels per warehouse
-- Capture only warehouses with zero stock
-- Threshold: 'equals_zero', Value: 0
-
-USE CASE 3: Budget Variance Report
-- Master sheet shows variance (actual - budget)
-- Capture departments over budget (negative variance < -5000)
-- Threshold: 'below', Value: -5000
-
-USE CASE 4: Exception Reporting
-- Master sheet shows error counts
-- Capture only systems with errors (not zero)
-- Threshold: 'not_zero', Value: 0
-
-============================================
-HOW TO SET UP YOUR FILE:
-============================================
-
-1. PREPARE YOUR EXCEL FILE:
-   - Create a master/summary sheet
-   - Add a column with sum/total values
-   - Each value should represent a linked sheet
-   - Example: Cell B5 has sum of Sheet "Sales_A"
-
-2. IDENTIFY VALUE CELLS:
-   - Note the cell reference for each sum
-   - Format: 'SheetName!CellAddress'
-   - Example: 'Summary!B5', 'Summary!B6', etc.
-
-3. CONFIGURE IN CODE:
-   - Set master_sheet name
-   - List all linked sheets
-   - Specify value_cell for each linked sheet
-   - Set appropriate threshold type and value
-
-4. TEST:
-   - Run the application
-   - Select the file
-   - Capture screenshots
-   - Verify correct sheets are captured
-
-============================================
-WORKFLOW:
-============================================
-
-1. User selects file with smart linking
-2. User clicks "Capture Screenshots"
-3. System opens Excel file
-4. System captures master sheet (always included)
-5. System reads value from each value_cell
-6. System checks if value meets threshold condition
-7. System captures screenshots only for matching sheets
-8. User sees list of captured/skipped sheets
-9. User drafts email with dynamically selected screenshots
-
-============================================
-BENEFITS:
-============================================
-
-✅ Automatic sheet selection
-✅ Reduces email size (only relevant sheets)
-✅ Highlights exceptions/alerts
-✅ Saves time (no manual selection)
-✅ Consistent logic across reports
-✅ Easy to adjust thresholds
+5. 'between' (NEW - range)
+   - threshold_value: minimum value
+   - threshold_max: maximum value
+   - Captures if: threshold_value <= cell_value <= threshold_max
 
 ============================================
 REQUIREMENTS:
