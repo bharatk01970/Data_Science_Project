@@ -1150,3 +1150,199 @@ pip install pywin32 pillow pytz
 
 ============================================
 """
+
+
+
+
+
+
+
+
+
+
+'linked_sheets': [
+    {
+        'value_cell': 'Summary!B5',  # Single value cell
+        'sheets': [  # NEW: Multiple sheets array
+            {
+                'sheet_name': 'Sales_Region_A_Details',
+                'capture_range': 'A1:G40',
+                'embed': True,
+                'attach': False,
+                'name': 'Region_A_Details'
+            },
+            {
+                'sheet_name': 'Sales_Region_A_Summary',
+                'capture_range': 'A1:E20',
+                'embed': True,
+                'attach': False,
+                'name': 'Region_A_Summary'
+            }
+        ]
+    },
+    {
+        'value_cell': 'Summary!B6',
+        'sheets': [
+            {
+                'sheet_name': 'Sales_Region_B_Details',
+                'capture_range': 'A1:G40',
+                'embed': True,
+                'attach': False,
+                'name': 'Region_B_Details'
+            }
+        ]
+    }
+]
+
+
+
+
+
+
+
+####
+
+
+
+def analyze_linked_sheets(self, workbook):
+    """Analyze master sheet and determine which linked sheets meet threshold conditions"""
+    smart_config = self.file_config.get('smart_linking', {})
+    
+    if not smart_config.get('enabled', False):
+        return []
+    
+    linked_sheets = smart_config.get('linked_sheets', [])
+    threshold_config = smart_config.get('threshold', {})
+    
+    self.log_message("Analyzing linked sheets with threshold conditions", 'info')
+    
+    sheets_to_capture = []
+    
+    # NEW: Iterate through value_cell groups
+    for linked_group in linked_sheets:
+        value_cell = linked_group.get('value_cell', '')
+        sheets_list = linked_group.get('sheets', [])
+        
+        # Check for backward compatibility (old single sheet structure)
+        if not sheets_list and linked_group.get('sheet_name'):
+            # Old structure: single sheet directly in linked_group
+            sheets_list = [linked_group]
+            value_cell = linked_group.get('value_cell', '')
+        
+        # Read value from master sheet
+        cell_value = self.extract_cell_value(workbook, value_cell)
+        
+        # Check if meets condition
+        meets_condition = self.check_threshold_condition(cell_value, threshold_config)
+        
+        self.log_message(
+            f"  Value Cell {value_cell}: Value={cell_value}, Condition={meets_condition}",
+            'success' if meets_condition else 'info'
+        )
+        
+        # NEW: If condition is met, add ALL sheets in this group
+        if meets_condition:
+            for sheet_config in sheets_list:
+                sheet_name = sheet_config.get('sheet_name', '')
+                capture_range = sheet_config.get('capture_range', 'A1:Z50')
+                
+                self.log_message(
+                    f"    → Will capture: {sheet_name}",
+                    'success'
+                )
+                
+                sheets_to_capture.append({
+                    'sheet_name': sheet_name,
+                    'cell_range': capture_range,
+                    'embed': sheet_config.get('embed', True),
+                    'attach': sheet_config.get('attach', False),
+                    'name': sheet_config.get('name', sheet_name),
+                    'value': cell_value,
+                    'value_cell': value_cell  # NEW: Track which cell triggered this
+                })
+    
+    return sheets_to_capture
+
+
+
+
+
+
+
+
+
+#####
+
+
+'File 1': {
+    'path': r'C:\Users\YourName\Desktop\File1.xlsm',
+    'name': 'Monthly Report',
+    'email_subject': 'Monthly Business Report - {timestamp}',
+    'email_body': 'Dear Team,\n\nPlease find attached the monthly business report as of {timestamp}. The report includes automatically selected regional data based on performance thresholds.\n\nBest regards',
+    
+    'smart_linking': {
+        'enabled': True,
+        'master_sheet': 'Summary',
+        'master_range': 'A1:H30',
+        
+        'threshold': {
+            'type': 'range',
+            'min_value': 1000,
+            'max_value': 5000
+        },
+        
+        # NEW STRUCTURE: Multiple sheets per value cell
+        'linked_sheets': [
+            {
+                'value_cell': 'Summary!B5',
+                'sheets': [
+                    {
+                        'sheet_name': 'Sales_Region_A_Details',
+                        'capture_range': 'A1:G40',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Region_A_Details'
+                    },
+                    {
+                        'sheet_name': 'Sales_Region_A_Charts',
+                        'capture_range': 'A1:F25',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Region_A_Charts'
+                    }
+                ]
+            },
+            {
+                'value_cell': 'Summary!B6',
+                'sheets': [
+                    {
+                        'sheet_name': 'Sales_Region_B_Details',
+                        'capture_range': 'A1:G40',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Region_B_Details'
+                    },
+                    {
+                        'sheet_name': 'Sales_Region_B_Charts',
+                        'capture_range': 'A1:F25',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Region_B_Charts'
+                    }
+                ]
+            },
+            {
+                'value_cell': 'Summary!B7',
+                'sheets': [
+                    {
+                        'sheet_name': 'Sales_Region_C_Details',
+                        'capture_range': 'A1:G40',
+                        'embed': True,
+                        'attach': False,
+                        'name': 'Region_C'
+                    }
+                ]
+            }
+        ]
+    }
+},
