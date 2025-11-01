@@ -1,57 +1,609 @@
-def extract_cell_value(self, workbook, cell_ref):
-    """
-    Extract numeric value from a cell reference
-    Handles references like "Sheet1!A1" or just "A1"
-    """
-    # Initialize cell_addr to avoid UnboundLocalError
-    cell_addr = None
-    sheet = None
-    
-    try:
-        # Strip any whitespace from the cell reference
-        cell_ref = cell_ref.strip()
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Enhanced Access Sheet Generator with Three-Step Mapping Logic
+Version: 10_22b_2025 - Enhanced Mapping
+"""
+
+# Importing required libraries
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+import pandas as pd
+import json
+import ast
+import os
+import copy
+from typing import Dict, List, Any, Optional
+import itertools
+
+
+class CSVProcesser:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Access_Sheet_Generator - Enhanced Mapping")
+        self.root.geometry("600x700")
+
+        # Input & mapping file paths
+        self.input_file_path = ""
+        self.mapping_files = {}
+
+        # DataFrame containing input data
+        self.df = None
+
+        # To store selected fields in main file
+        self.selected_fields = []
+
+        # Initialize fields
+        self.selected_fields = []
+        self.dictionary_fields = {}
+        self.selected_keys = {}
+
+        self.processed_data = None
+        self.mapping_data = {}
+
+        self.stage1_data = None
+        self.stage1_complete = False
+        self.field_checkboxes = {}
+        self.early_mapping_data = {}
+        self.combination_source_columns = {}
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+
+        # File loading section
+        ttk.Label(main_frame, text="Load Input File", font=("TkDefaultFont", 10, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+
+        ttk.Button(main_frame, text="Select Input File", command=self.load_input_file).grid(
+            row=1, column=0, sticky=tk.W, pady=(0, 10))
+
+        self.input_file_label = ttk.Label(main_frame, text="No file Selected")
+        self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+
+        # Field selection section
+        ttk.Label(main_frame, text="Select Fields for Processing:",
+                  font=('TkDefaultFont', 10, 'bold')).grid(
+            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+
+        field_frame = ttk.Frame(main_frame)
+        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        field_frame.columnconfigure(0, weight=1)
+
+        # Canvas for checkbox with scrollbar
+        field_canvas = tk.Canvas(field_frame, height=200, width=700)
+        field_scrollbar = ttk.Scrollbar(field_frame, orient="vertical", command=field_canvas.yview)
+        self.field_checkbox_frame = ttk.Frame(field_canvas)
+
+        self.field_checkbox_frame.bind('<Configure>',
+                                      lambda e: field_canvas.configure(scrollregion=field_canvas.bbox('all')))
+
+        field_canvas.create_window((0, 0), window=self.field_checkbox_frame, anchor="nw")
+        field_canvas.configure(yscrollcommand=field_scrollbar.set)
+
+        field_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E))
+        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+        def on_field_mousewheel(event):
+            field_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        field_canvas.bind_all("<MouseWheel>", on_field_mousewheel)
+
+        # Stage 1 processing
+        ttk.Label(main_frame, text="Stage 1 Processing:",
+                  font=('TkDefaultFont', 10, 'bold')).grid(
+            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+
+        self.stage1_button = ttk.Button(
+            main_frame,
+            text="Process Stage 1 (Column Selection, Dictionary Expansion & Column Combination)",
+            command=self.process_stage1, style='Accent.TButton', state='disabled')
+        self.stage1_button.grid(row=7, column=0, columnspan=2, pady=10)
+
+        self.stage1_status_label = ttk.Label(main_frame, text="")
+        self.stage1_status_label.grid(row=7, column=3, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+
+        # Mapping files section
+        ttk.Label(main_frame, text="Load Mapping Files (Optional)",
+                  font=("TkDefaultFont", 10, "bold")).grid(
+            row=8, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+
+        mapping_frame = ttk.Frame(main_frame)
+        mapping_frame.grid(row=9, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        self.add_mapping_button = ttk.Button(mapping_frame, text='Add Mapping File',
+                                            command=self.add_mapping_file, state='disabled')
+        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
+
+        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
+        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
+        mapping_frame.columnconfigure(0, weight=1)
+
+        # Stage 2 processing
+        ttk.Label(main_frame, text="Stage 2 Processing:",
+                  font=('TkDefaultFont', 10, 'bold')).grid(
+            row=10, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+
+        self.stage2_button = ttk.Button(
+            main_frame, text="Process Stage 2 (Final Output with Mapping)",
+            command=self.process_stage2, style='Accent.TButton', state='disabled')
+        self.stage2_button.grid(row=11, column=0, columnspan=2, pady=10)
+
+        # Export button
+        self.export_button = ttk.Button(main_frame, text='Export Data',
+                                       command=self.export_data, state='disabled')
+        self.export_button.grid(row=12, column=0, columnspan=2, pady=5)
+
+        # Status bar
+        self.status_var = tk.StringVar(value="Ready to load the file...")
+        status_bar = ttk.Label(main_frame, textvariable=self.status_var,
+                              relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.grid(row=13, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+
+    # [Rest of the methods remain the same until apply_reference_mapping]
+    # ... (Include all other methods from the original code)
+
+    def show_reference_mapping_popup(self, stage1_data, combined_column_name, combination_columns):
+        """Enhanced popup for three-step mapping configuration"""
+        if not stage1_data:
+            return None
         
-        if '!' in cell_ref:
-            # Split into sheet name and cell address
-            parts = cell_ref.split('!')
-            if len(parts) != 2:
-                self.log_message(f"Invalid cell reference format: {cell_ref}", 'error')
-                return 0.0
+        popup = tk.Toplevel(self.root)
+        popup.title("Advanced Mapping Configuration")
+        popup.geometry("700x650")
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        ttk.Label(popup, text="Advanced Mapping Configuration", 
+                  font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+        
+        # Create notebook for three mapping types
+        notebook = ttk.Notebook(popup)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # ===== TAB 1: Default Mapping for Selected Columns =====
+        tab1 = ttk.Frame(notebook)
+        notebook.add(tab1, text="Step 1: Default Mapping")
+        
+        ttk.Label(tab1, text="Set default mapped values for specific source columns", 
+                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+        ttk.Label(tab1, text="All values from selected column will map to the same default value", 
+                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
+        
+        # Listbox to show default mappings
+        default_list_frame = ttk.Frame(tab1)
+        default_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        default_listbox = tk.Listbox(default_list_frame, height=10)
+        default_scroll = ttk.Scrollbar(default_list_frame, orient="vertical", command=default_listbox.yview)
+        default_listbox.configure(yscrollcommand=default_scroll.set)
+        default_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        default_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        default_mappings = {}  # {column_name: default_value}
+        
+        def add_default_mapping():
+            # Select column
+            col_popup = tk.Toplevel(popup)
+            col_popup.title("Select Column")
+            col_popup.geometry("300x400")
+            col_popup.transient(popup)
+            col_popup.grab_set()
             
-            sheet_name, cell_addr = parts
-            sheet_name = sheet_name.strip()
-            cell_addr = cell_addr.strip()
+            ttk.Label(col_popup, text="Select source column:", 
+                      font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
             
-            # Try to get the sheet
-            try:
-                sheet = workbook.Sheets(sheet_name)
-            except Exception as e:
-                self.log_message(f"Sheet '{sheet_name}' not found in workbook", 'error')
-                return 0.0
+            col_listbox = tk.Listbox(col_popup, height=15)
+            col_scroll = ttk.Scrollbar(col_popup, orient="vertical", command=col_listbox.yview)
+            col_listbox.configure(yscrollcommand=col_scroll.set)
+            col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=5)
+            col_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+            
+            for col in combination_columns:
+                col_listbox.insert(tk.END, col)
+            
+            selected_col = [None]
+            
+            def confirm_col():
+                selection = col_listbox.curselection()
+                if selection:
+                    selected_col[0] = col_listbox.get(selection[0])
+                    col_popup.destroy()
+                else:
+                    messagebox.showwarning("Warning", "Please select a column")
+            
+            ttk.Button(col_popup, text="Confirm", command=confirm_col).pack(pady=10)
+            col_popup.wait_window()
+            
+            if not selected_col[0]:
+                return
+            
+            # Ask for default value
+            default_val = simpledialog.askstring(
+                "Default Value",
+                f"Enter default mapped value for column '{selected_col[0]}':",
+                parent=popup
+            )
+            
+            if default_val and default_val.strip():
+                default_mappings[selected_col[0]] = default_val.strip()
+                default_listbox.insert(tk.END, f"{selected_col[0]} → {default_val.strip()}")
+        
+        def remove_default():
+            selection = default_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                item = default_listbox.get(idx)
+                col_name = item.split(' → ')[0]
+                if col_name in default_mappings:
+                    del default_mappings[col_name]
+                default_listbox.delete(idx)
+        
+        btn_frame1 = ttk.Frame(tab1)
+        btn_frame1.pack(pady=5)
+        ttk.Button(btn_frame1, text="Add Default Mapping", command=add_default_mapping).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame1, text="Remove Selected", command=remove_default).pack(side=tk.LEFT, padx=5)
+        
+        # ===== TAB 2: Reference-Based Repetition Mapping =====
+        tab2 = ttk.Frame(notebook)
+        notebook.add(tab2, text="Step 2: Reference Mapping")
+        
+        ttk.Label(tab2, text="Upload mapping file for reference-based repetition", 
+                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+        ttk.Label(tab2, text="Maps reference values to repeated column values", 
+                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
+        
+        ttk.Label(tab2, text="Example: B1→Y1, B2→Y2\nRepeated A values for B1 get Y1, for B2 get Y2", 
+                  font=('TkDefaultFont', 8), foreground='blue').pack(pady=5, padx=10, anchor=tk.W)
+        
+        file_frame = ttk.Frame(tab2)
+        file_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(file_frame, text="Mapping File:").pack(side=tk.LEFT, padx=5)
+        ref_file_label = ttk.Label(file_frame, text="No file selected", foreground='gray')
+        ref_file_label.pack(side=tk.LEFT, padx=5)
+        
+        ref_mapping_data = {'file': None, 'df': None}
+        
+        def select_ref_mapping():
+            file_path = filedialog.askopenfilename(
+                title="Select Reference Mapping File",
+                filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            
+            if file_path:
+                try:
+                    if file_path.endswith('.csv'):
+                        mapping_df = pd.read_csv(file_path)
+                    else:
+                        mapping_df = pd.read_csv(file_path, delimiter='\t')
+                    
+                    if len(mapping_df.columns) < 2:
+                        messagebox.showerror("Error", "Mapping file must have at least 2 columns")
+                        return
+                    
+                    ref_mapping_data['file'] = file_path
+                    ref_mapping_data['df'] = mapping_df
+                    ref_file_label.config(text=os.path.basename(file_path), foreground='black')
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
+        
+        ttk.Button(file_frame, text="Browse...", command=select_ref_mapping).pack(side=tk.LEFT, padx=5)
+        
+        # ===== TAB 3: Direct Column Value Mapping =====
+        tab3 = ttk.Frame(notebook)
+        notebook.add(tab3, text="Step 3: Direct Mapping")
+        
+        ttk.Label(tab3, text="Upload mapping files for specific column values", 
+                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
+        ttk.Label(tab3, text="Direct value-to-value mapping (e.g., d1→Z1, d2→Z2)", 
+                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
+        
+        # Listbox for direct mappings
+        direct_list_frame = ttk.Frame(tab3)
+        direct_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        direct_listbox = tk.Listbox(direct_list_frame, height=10)
+        direct_scroll = ttk.Scrollbar(direct_list_frame, orient="vertical", command=direct_listbox.yview)
+        direct_listbox.configure(yscrollcommand=direct_scroll.set)
+        direct_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        direct_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        direct_mappings = {}  # {column_name: mapping_df}
+        
+        def add_direct_mapping():
+            # Select column
+            col_popup = tk.Toplevel(popup)
+            col_popup.title("Select Column")
+            col_popup.geometry("300x400")
+            col_popup.transient(popup)
+            col_popup.grab_set()
+            
+            ttk.Label(col_popup, text="Select source column for direct mapping:", 
+                      font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+            
+            col_listbox = tk.Listbox(col_popup, height=15)
+            col_scroll = ttk.Scrollbar(col_popup, orient="vertical", command=col_listbox.yview)
+            col_listbox.configure(yscrollcommand=col_scroll.set)
+            col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=5)
+            col_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+            
+            for col in combination_columns:
+                col_listbox.insert(tk.END, col)
+            
+            selected_col = [None]
+            
+            def confirm_col():
+                selection = col_listbox.curselection()
+                if selection:
+                    selected_col[0] = col_listbox.get(selection[0])
+                    col_popup.destroy()
+                else:
+                    messagebox.showwarning("Warning", "Please select a column")
+            
+            ttk.Button(col_popup, text="Confirm", command=confirm_col).pack(pady=10)
+            col_popup.wait_window()
+            
+            if not selected_col[0]:
+                return
+            
+            # Upload mapping file
+            file_path = filedialog.askopenfilename(
+                title=f"Select Direct Mapping File for '{selected_col[0]}'",
+                filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            
+            if file_path:
+                try:
+                    if file_path.endswith('.csv'):
+                        mapping_df = pd.read_csv(file_path)
+                    else:
+                        mapping_df = pd.read_csv(file_path, delimiter='\t')
+                    
+                    if len(mapping_df.columns) < 2:
+                        messagebox.showerror("Error", "Mapping file must have at least 2 columns")
+                        return
+                    
+                    direct_mappings[selected_col[0]] = mapping_df
+                    direct_listbox.insert(tk.END, f"{selected_col[0]}: {os.path.basename(file_path)}")
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
+        
+        def remove_direct():
+            selection = direct_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                item = direct_listbox.get(idx)
+                col_name = item.split(':')[0].strip()
+                if col_name in direct_mappings:
+                    del direct_mappings[col_name]
+                direct_listbox.delete(idx)
+        
+        btn_frame3 = ttk.Frame(tab3)
+        btn_frame3.pack(pady=5)
+        ttk.Button(btn_frame3, text="Add Direct Mapping", command=add_direct_mapping).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame3, text="Remove Selected", command=remove_direct).pack(side=tk.LEFT, padx=5)
+        
+        # New column name entry
+        name_frame = ttk.Frame(popup)
+        name_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(name_frame, text="New Mapped Column Name:").pack(side=tk.LEFT, padx=5)
+        new_col_entry = ttk.Entry(name_frame, width=30)
+        new_col_entry.pack(side=tk.LEFT, padx=5)
+        new_col_entry.insert(0, "Mapped_Value")
+        
+        result = {
+            'apply': False,
+            'new_column': '',
+            'default_mappings': {},
+            'ref_mapping_df': None,
+            'direct_mappings': {}
+        }
+        
+        def confirm():
+            new_col_name = new_col_entry.get().strip()
+            if not new_col_name:
+                messagebox.showwarning("Warning", "Please enter a name for the new column")
+                return
+            
+            # Check if at least one mapping type is configured
+            has_config = (
+                len(default_mappings) > 0 or
+                ref_mapping_data['df'] is not None or
+                len(direct_mappings) > 0
+            )
+            
+            if not has_config:
+                response = messagebox.askyesno("No Mappings", 
+                    "No mappings configured. Skip this step?")
+                if response:
+                    popup.destroy()
+                return
+            
+            result['apply'] = True
+            result['new_column'] = new_col_name
+            result['default_mappings'] = default_mappings.copy()
+            result['ref_mapping_df'] = ref_mapping_data['df']
+            result['direct_mappings'] = direct_mappings.copy()
+            popup.destroy()
+        
+        def skip():
+            popup.destroy()
+        
+        button_frame = ttk.Frame(popup)
+        button_frame.pack(pady=10)
+        
+        ttk.Button(button_frame, text="Apply Configuration", 
+                   command=confirm, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Skip (No Mapping)", 
+                   command=skip).pack(side=tk.LEFT, padx=5)
+        
+        popup.wait_window()
+        return result
+
+    def apply_reference_mapping(self, stage1_data, combined_column_name, combination_source_map, 
+                                new_column_name, default_mappings, ref_mapping_df, 
+                                direct_mappings, reference_values, repeat_values):
+        """
+        Enhanced three-step mapping logic:
+        
+        Step 1: Default Mapping - Apply default values for specific source columns
+        Step 2: Reference Mapping - Apply reference-based repetition mapping
+        Step 3: Direct Mapping - Apply direct value-to-value mappings from external files
+        
+        Priority: Direct Mapping > Reference Mapping > Default Mapping
+        """
+        print("\n" + "="*60)
+        print("ENHANCED REFERENCE MAPPING - Three-Step Logic")
+        print("="*60)
+        
+        rows = [copy.deepcopy(r) for r in stage1_data]
+        
+        # Build mapping dictionaries
+        # Step 1: Default mappings (column → default_value)
+        print(f"\nStep 1: Default Mappings")
+        if default_mappings:
+            for col, val in default_mappings.items():
+                print(f"  - Column '{col}' → Default: '{val}'")
         else:
-            # Use active sheet
-            sheet = workbook.ActiveSheet
-            cell_addr = cell_ref.strip()
+            print("  - None configured")
+        
+        # Step 2: Reference mapping (reference_value → mapped_value)
+        ref_mapping_dict = {}
+        if ref_mapping_df is not None and len(ref_mapping_df.columns) >= 2:
+            key_col = ref_mapping_df.columns[0]
+            value_col = ref_mapping_df.columns[1]
+            ref_mapping_dict = {
+                str(k).strip(): str(v).strip() 
+                for k, v in zip(ref_mapping_df[key_col].astype(str), 
+                              ref_mapping_df[value_col].astype(str))
+            }
+            print(f"\nStep 2: Reference Mapping")
+            print(f"  - {len(ref_mapping_dict)} reference mappings loaded")
+        else:
+            print(f"\nStep 2: Reference Mapping")
+            print("  - None configured")
+        
+        # Step 3: Direct mappings (value → mapped_value for specific columns)
+        direct_mapping_dicts = {}
+        if direct_mappings:
+            print(f"\nStep 3: Direct Mappings")
+            for col_name, mapping_df in direct_mappings.items():
+                if len(mapping_df.columns) >= 2:
+                    key_col = mapping_df.columns[0]
+                    value_col = mapping_df.columns[1]
+                    direct_mapping_dicts[col_name] = {
+                        str(k).strip(): str(v).strip()
+                        for k, v in zip(mapping_df[key_col].astype(str), 
+                                      mapping_df[value_col].astype(str))
+                    }
+                    print(f"  - Column '{col_name}': {len(direct_mapping_dicts[col_name])} mappings")
+        else:
+            print(f"\nStep 3: Direct Mappings")
+            print("  - None configured")
+        
+        # Convert reference and repeat values to sets
+        ref_set = set(str(x).strip() for x in (reference_values or []))
+        rep_set = set(str(x).strip() for x in (repeat_values or []))
+        
+        # Create reverse lookup: value → source_column
+        value_to_source = {}
+        if combination_source_map:
+            for col_name, values in combination_source_map.items():
+                for val in values:
+                    value_to_source[str(val).strip()] = col_name
+        
+        print(f"\n" + "-"*60)
+        print("Processing Rows...")
+        print("-"*60)
+        
+        # Buffer for repeated values
+        buffer_indices = []
+        result_rows = []
+        
+        # Track statistics
+        stats = {
+            'default_applied': 0,
+            'reference_applied': 0,
+            'direct_applied': 0,
+            'no_mapping': 0
+        }
+        
+        for idx, row in enumerate(rows):
+            combined_val = str(row.get(combined_column_name, '')).strip()
+            source_column = value_to_source.get(combined_val, None)
+            
+            mapped_value = ''
+            mapping_applied = None
+            
+            # PRIORITY 1: Check Direct Mapping
+            if source_column and source_column in direct_mapping_dicts:
+                if combined_val in direct_mapping_dicts[source_column]:
+                    mapped_value = direct_mapping_dicts[source_column][combined_val]
+                    mapping_applied = 'direct'
+                    stats['direct_applied'] += 1
+            
+            # PRIORITY 2: Check if repeated value
+            if not mapping_applied and combined_val in rep_set:
+                row[new_column_name] = ''
+                result_rows.append(row)
+                buffer_indices.append(len(result_rows) - 1)
+                continue
+            
+            # PRIORITY 3: Check if reference value
+            if not mapping_applied and combined_val in ref_set:
+                if ref_mapping_dict and combined_val in ref_mapping_dict:
+                    mapped_value_for_buffer = ref_mapping_dict[combined_val]
+                    if buffer_indices:
+                        for bi in buffer_indices:
+                            result_rows[bi][new_column_name] = mapped_value_for_buffer
+                        stats['reference_applied'] += len(buffer_indices)
+                buffer_indices = []
+                row[new_column_name] = ''
+                result_rows.append(row)
+                continue
+            
+            # PRIORITY 4: Check Default Mapping
+            if not mapping_applied and source_column and source_column in default_mappings:
+                mapped_value = default_mappings[source_column]
+                mapping_applied = 'default'
+                stats['default_applied'] += 1
+            
+            if not mapping_applied:
+                stats['no_mapping'] += 1
+            
+            row[new_column_name] = mapped_value
+            result_rows.append(row)
+        
+        if buffer_indices:
+            print(f"\n⚠ Warning: {len(buffer_indices)} buffered rows not followed by reference")
+        
+        print(f"\n" + "="*60)
+        print("Mapping Statistics:")
+        print("="*60)
+        print(f"  Direct Mappings Applied (Step 3): {stats['direct_applied']}")
+        print(f"  Reference Mappings Applied (Step 2): {stats['reference_applied']}")
+        print(f"  Default Mappings Applied (Step 1): {stats['default_applied']}")
+        print(f"  No Mapping (Blank): {stats['no_mapping']}")
+        print(f"  Total Rows Processed: {len(result_rows)}")
+        print("="*60 + "\n")
+        
+        return result_rows
 
-        # Validate cell_addr is not empty
-        if not cell_addr:
-            self.log_message(f"Empty cell address in reference: {cell_ref}", 'error')
-            return 0.0
 
-        # Get the value from the cell
-        value = sheet.Range(cell_addr).Value
+def main():
+    root = tk.Tk()
+    app = CSVProcesser(root)
+    root.mainloop()
 
-        # Try to convert to float
-        if value is None:
-            self.log_message(f"Cell {cell_ref} is empty, using 0.0", 'info')
-            return 0.0
 
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            self.log_message(f"Non-numeric value in {cell_ref}: {value}", 'warning')
-            return 0.0
-
-    except Exception as e:
-        self.log_message(f"Error reading cell {cell_ref}: {str(e)}", 'error')
-        return 0.0
+if __name__ == "__main__":
+    main()
