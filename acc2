@@ -607,3 +607,233 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+#####
+
+
+
+def process_stage1(self):
+    if self.df is None:
+        messagebox.showwarning("Warning", "Please load an input file first")
+        return
+    
+    # Get selected fields from checkboxes
+    self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
+    
+    if not self.selected_fields:
+        messagebox.showwarning("Warning", "Please select at least one field to process")
+        return
+
+    try:
+        #Dictionary field detection -- ONLY for selected fields
+        self.dictionary_fields=self.detect_dictionary_fields(self.selected_fields)
+
+        #initialize dictionary to store user's key selections
+        self.selected_keys={}
+
+        #if dictionary fields are found in selected fields, show popup for key selection
+        if self.dictionary_fields:
+            for field, available_keys in self.dictionary_fields.items():
+                if available_keys:
+                    selected=self.show_key_selection_popup(field,available_keys)
+                    if selected:
+                        self.selected_keys[field]=selected
+                    else:
+                        #if user cancels, ask if the user want to skip the field
+                        response=messagebox.askyesno('Skip Field?',f"No keys selected for field '{field}'. \n\nDo you want to keep this field without dictionary expansion?")
+                        if not response:
+                            #remove from selected fields if user doesn't want to keep it
+                            self.selected_fields.remove(field)
+        
+        # NEW: Show early mapping popup after key selection
+        self.early_mapping_data = {}
+        if self.selected_keys:
+            self.early_mapping_data = self.show_early_mapping_popup(self.selected_keys)
+        
+        # Process dataframe for Stage 1
+        temp_stage1_data = self.process_stage1_dataframe()
+
+        # Apply early mappings
+        temp_stage1_data = self.apply_early_mappings(temp_stage1_data)
+
+        # Get columns from temporary Stage 1 data for combination popup
+        temp_stage1_columns = set()
+        for row in temp_stage1_data:
+            temp_stage1_columns.update(row.keys())
+
+        
+        # Show column combination popup
+        combination_result = self.show_column_combination_popup(temp_stage1_columns)
+        
+        # Variables to track combined column info
+        combined_col_name = None
+        ref_values_list = []
+        repeat_values_list = []
+        combination_cols = []
+        
+        # Apply column combination with optional reference-based repetition
+        if combination_result.get('combine'):
+            combination_cols = combination_result['columns']
+            
+            # Build source mapping for conditional impact feature
+            self.combination_source_columns = self.build_combination_source_map(
+                temp_stage1_data,
+                combination_cols
+            )
+            
+            self.stage1_data = self.apply_column_combination(
+                temp_stage1_data,
+                combination_cols,
+                combination_result['new_name'],
+                combination_result.get('reference_column', ''),
+                combination_result.get('repeat_columns', [])
+            )
+            
+            combined_col_name = combination_result['new_name']
+            
+            status_msg = f"Applied Column combination: {combined_col_name}"
+            
+            # Build detailed info message
+            info_parts = [f"Combined column: {combined_col_name}"]
+            info_parts.append(f"Columns combined: {', '.join(combination_cols)}")
+            
+            # Store combination info for reference mapping
+            ref_col = combination_result.get('reference_column', '')
+            repeat_cols = combination_result.get('repeat_columns', [])
+            
+            if ref_col:
+                status_msg += f" | Reference: {ref_col}"
+                info_parts.append(f"Reference column: {ref_col}")
+                
+                if repeat_cols:
+                    repeat_cols_str = ', '.join(repeat_cols)
+                    status_msg += f" | Repeating: {repeat_cols_str}"
+                    info_parts.append(f"Columns repeated: {repeat_cols_str}")
+                else:
+                    info_parts.append("No columns set to repeat")
+            
+            info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
+            
+            messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
+            self.status_var.set(status_msg)
+            
+            # ========================================
+            # NEW: Apply three-step reference mapping
+            # ========================================
+            if combination_cols:  # If columns were combined
+                # Extract reference and repeat values from the original data
+                ref_values_set = set()
+                repeat_values_set = set()
+                
+                for row in temp_stage1_data:
+                    for col in combination_cols:
+                        if col in row and row[col]:
+                            values = self.split_multi_values(str(row[col]))
+                            if col == ref_col:
+                                ref_values_set.update([v for v in values if v])
+                            elif col in repeat_cols:
+                                repeat_values_set.update([v for v in values if v])
+                
+                ref_values_list = list(ref_values_set)
+                repeat_values_list = list(repeat_values_set)
+                
+                # Show enhanced mapping popup with 3 tabs
+                mapping_result = self.show_reference_mapping_popup(
+                    self.stage1_data,
+                    combined_col_name,
+                    combination_cols  # NEW: Pass combination columns
+                )
+                
+                if mapping_result and mapping_result.get('apply'):
+                    # Apply three-step mapping
+                    self.stage1_data = self.apply_reference_mapping(
+                        self.stage1_data,
+                        combined_col_name,
+                        self.combination_source_columns,        # NEW: Source column mapping
+                        mapping_result['new_column'],
+                        mapping_result['default_mappings'],     # NEW: Step 1 mappings
+                        mapping_result['ref_mapping_df'],       # Step 2 mapping
+                        mapping_result['direct_mappings'],      # NEW: Step 3 mappings
+                        ref_values_list,
+                        repeat_values_list
+                    )
+                    
+                    # Build status message showing which mapping types were applied
+                    status_parts = []
+                    if mapping_result['default_mappings']:
+                        status_parts.append(f"{len(mapping_result['default_mappings'])} default")
+                    if mapping_result['ref_mapping_df'] is not None:
+                        status_parts.append("reference")
+                    if mapping_result['direct_mappings']:
+                        status_parts.append(f"{len(mapping_result['direct_mappings'])} direct")
+                    
+                    if status_parts:
+                        status_msg += f" | Mapped: {', '.join(status_parts)}"
+                        messagebox.showinfo("Mapping Applied",
+                            f"New column '{mapping_result['new_column']}' created\n"
+                            f"Mapping types applied: {', '.join(status_parts)}")
+        else:
+            self.stage1_data = temp_stage1_data
+        
+        # *** NEW FUNCTIONALITY: Conditional Column Impact ***
+        # This runs AFTER combined column and reference mapping are complete
+        if combined_col_name:
+            conditional_result = self.show_conditional_impact_popup(
+                self.stage1_data,
+                combined_col_name
+            )
+            
+            if conditional_result and conditional_result.get('apply'):
+                self.stage1_data = self.apply_conditional_impact(
+                    self.stage1_data,
+                    combined_col_name,
+                    conditional_result['target_columns'],
+                    conditional_result['trigger_values'],
+                    conditional_result['impact_type'],
+                    conditional_result.get('custom_value', '')
+                )
+                
+                impact_desc = {
+                    'blank_non_matching': 'Blanked non-matching rows',
+                    'replace_matching': f"Replaced matching rows with '{conditional_result.get('custom_value', '')}'",
+                    'blank_matching': 'Blanked matching rows'
+                }
+                
+                messagebox.showinfo("Conditional Impact Applied",
+                    f"Action: {impact_desc.get(conditional_result['impact_type'], 'Applied')}\n"
+                    f"Target columns: {', '.join(conditional_result['target_columns'])}\n"
+                    f"Trigger values: {', '.join(conditional_result['trigger_values'])}")
+
+        #get selected columns from Stage1
+        if self.stage1_data:
+            stage1_columns=set()
+            for row in self.stage1_data:
+                stage1_columns.update(row.keys())
+
+            #update the selected_fields to match stage 1 o/p
+            self.selected_fields=list(stage1_columns)
+
+            # Show popup with selected columns
+            self.show_selected_columns_popup(stage1_columns)
+
+        #stage 1 completion status
+        self.stage1_complete=True
+        self.stage1_status_label.config(text=f'✓ Complete ({len(self.stage1_data)} rows)')
+        
+        #enable mapping file addition & Stage 2 Processing
+        self.add_mapping_button.config(state='normal')
+        self.stage2_button.config(state='normal')
+
+        self.status_var.set(f"Stage 1 Completed. {len(self.stage1_data)} rows generated from selected fields. Proceed to add mapping files, if any, or proceed to Stage 2.")
+        
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
+        self.status_var.set("Stage 1 processing failed")
