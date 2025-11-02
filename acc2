@@ -1,839 +1,158 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-Enhanced Access Sheet Generator with Three-Step Mapping Logic
-Version: 10_22b_2025 - Enhanced Mapping
-"""
+Detailed Standard Operating Procedure (SOP)
 
-# Importing required libraries
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
-import pandas as pd
-import json
-import ast
-import os
-import copy
-from typing import Dict, List, Any, Optional
-import itertools
+This Standard Operating Procedure (SOP) provides detailed step-by-step guidance for using the **Access_Sheet_Generator** tool. 
+It explains each process stage, specifies which actions are mandatory or optional, and outlines the expected behavior of the tool. 
+The goal is to help users, including non-technical personnel, understand and execute every part of the process smoothly.
 
+Step 1: Launch the Tool
 
-class CSVProcesser:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Access_Sheet_Generator - Enhanced Mapping")
-        self.root.geometry("600x700")
+1. Ensure Python 3.x is installed on your system.
+2. Place the `Access_Sheet_Generator.py` file in any accessible folder.
+3. Double-click the file or run the command below in the terminal or command prompt:
 
-        # Input & mapping file paths
-        self.input_file_path = ""
-        self.mapping_files = {}
+   ```bash
+   python Access_Sheet_Generator.py
+   ```
 
-        # DataFrame containing input data
-        self.df = None
+4. A GUI window titled **“Access_Sheet_Generator”** will open.
+   - The window size is approximately 600x700 pixels.
+   - It consists of labeled sections for file input, field selection, mapping, and exporting.
 
-        # To store selected fields in main file
-        self.selected_fields = []
+✅ **Mandatory Step**
+You must successfully launch the tool before performing any other actions.
 
-        # Initialize fields
-        self.selected_fields = []
-        self.dictionary_fields = {}
-        self.selected_keys = {}
+Step 2: Load Input File
 
-        self.processed_data = None
-        self.mapping_data = {}
+This is the **first operational step** of the tool and is **mandatory**.
 
-        self.stage1_data = None
-        self.stage1_complete = False
-        self.field_checkboxes = {}
-        self.early_mapping_data = {}
-        self.combination_source_columns = {}
+1. Click the **“Select Input File”** button in the “Load Input File” section.
+2. Browse your computer and select a `.csv` or `.txt` file that contains tabular data.
+3. Once selected, the file path appears beside the button.
+4. The tool automatically attempts to detect the correct text encoding by trying multiple formats (UTF-8, UTF-16, Latin-1, etc.).
 
-        self.setup_ui()
+🟢 **If successful:**
+   - The status bar displays the total rows and columns detected.
+   - The next section (“Select Fields for Processing”) becomes active.
 
-    def setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+🔴 **If unsuccessful:**
+   - The status bar shows “Error loading file”.
+   - Verify the file format and encoding, and try again.
 
-        # File loading section
-        ttk.Label(main_frame, text="Load Input File", font=("TkDefaultFont", 10, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 5))
+Step 3: Select Fields for Processing
 
-        ttk.Button(main_frame, text="Select Input File", command=self.load_input_file).grid(
-            row=1, column=0, sticky=tk.W, pady=(0, 10))
+After a file loads, a scrollable list of field names (columns) appears. Each column has a checkbox next to it.
 
-        self.input_file_label = ttk.Label(main_frame, text="No file Selected")
-        self.input_file_label.grid(row=1, column=1, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+1. Review all column names and sample data shown in parentheses.
+2. Select the specific fields (columns) you want to process by checking their boxes.
+3. Use the **“Select All”** or **“Deselect All”** buttons to quickly toggle selections.
+4. You can view examples like:
+   - `Employee_ID (e.g., E12345)`
+   - `Department (e.g., HR, Sales)`
 
-        # Field selection section
-        ttk.Label(main_frame, text="Select Fields for Processing:",
-                  font=('TkDefaultFont', 10, 'bold')).grid(
-            row=4, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+✅ **Mandatory Step**
+At least one field must be selected before moving to the next stage.
 
-        field_frame = ttk.Frame(main_frame)
-        field_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        field_frame.columnconfigure(0, weight=1)
+Step 4: Stage 1 Processing
 
-        # Canvas for checkbox with scrollbar
-        field_canvas = tk.Canvas(field_frame, height=200, width=700)
-        field_scrollbar = ttk.Scrollbar(field_frame, orient="vertical", command=field_canvas.yview)
-        self.field_checkbox_frame = ttk.Frame(field_canvas)
+This stage prepares the dataset for transformation and mapping.
 
-        self.field_checkbox_frame.bind('<Configure>',
-                                      lambda e: field_canvas.configure(scrollregion=field_canvas.bbox('all')))
+Click **“Process Stage 1 (Column Selection, Dictionary Expansion & Column Combination)”**.
 
-        field_canvas.create_window((0, 0), window=self.field_checkbox_frame, anchor="nw")
-        field_canvas.configure(yscrollcommand=field_scrollbar.set)
+During this step, the following sub-processes occur:
 
-        field_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E))
-        field_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+1. **Dictionary Field Detection (Automatic):**
+   - The tool inspects selected columns to detect dictionary-like or multi-valued fields.
+   - Example: `{"Key1":"A", "Key2":"B"}` or `A;B;C` are automatically parsed.
 
-        def on_field_mousewheel(event):
-            field_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+2. **Dictionary Key Selection (User Prompt – Optional):**
+   - A popup appears for columns containing dictionaries.
+   - You may select specific keys to extract.
+   - If you skip key selection, the tool will ask whether to exclude or keep that field unexpanded.
 
-        field_canvas.bind_all("<MouseWheel>", on_field_mousewheel)
+3. **Early Mapping Upload (Optional):**
+   - If you’ve selected dictionary keys, you may upload **mapping files** (CSV or TXT) that map key values to names or categories.
+   - Example: Code `A1` → Name `Sales Department`.
 
-        # Stage 1 processing
-        ttk.Label(main_frame, text="Stage 1 Processing:",
-                  font=('TkDefaultFont', 10, 'bold')).grid(
-            row=6, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+4. **Column Combination Configuration (Interactive – Optional):**
+   - A popup appears to let you combine multiple columns into a single one.
+   - You may also choose:
+     - A **reference column** (used for repetition).
+     - Columns to **repeat** based on the reference.
+     - A **new name** for the combined column.
+   - Example: Combining `A`, `B`, `C` → creates column `Combined_ABC` with structured repetitions.
 
-        self.stage1_button = ttk.Button(
-            main_frame,
-            text="Process Stage 1 (Column Selection, Dictionary Expansion & Column Combination)",
-            command=self.process_stage1, style='Accent.TButton', state='disabled')
-        self.stage1_button.grid(row=7, column=0, columnspan=2, pady=10)
+After processing, a popup displays “Stage 1 Processing Complete” with a list of output columns.
 
-        self.stage1_status_label = ttk.Label(main_frame, text="")
-        self.stage1_status_label.grid(row=7, column=3, sticky=tk.W, padx=(10, 0), pady=(0, 10))
+🟢 **Optional but Recommended:**
+Combining columns or mapping early helps improve Stage 2 accuracy.
 
-        # Mapping files section
-        ttk.Label(main_frame, text="Load Mapping Files (Optional)",
-                  font=("TkDefaultFont", 10, "bold")).grid(
-            row=8, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+Step 5: Stage 2 Processing
 
-        mapping_frame = ttk.Frame(main_frame)
-        mapping_frame.grid(row=9, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+This is the **data mapping and enhancement stage**.
 
-        self.add_mapping_button = ttk.Button(mapping_frame, text='Add Mapping File',
-                                            command=self.add_mapping_file, state='disabled')
-        self.add_mapping_button.grid(row=0, column=0, sticky=tk.W)
+Click **“Process Stage 2 (Final Output with Mapping)”** to proceed.
 
-        self.mapping_listbox = tk.Listbox(mapping_frame, height=3)
-        self.mapping_listbox.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(5, 0))
-        mapping_frame.columnconfigure(0, weight=1)
+You will be prompted to configure **advanced mapping** in three flexible ways:
 
-        # Stage 2 processing
-        ttk.Label(main_frame, text="Stage 2 Processing:",
-                  font=('TkDefaultFont', 10, 'bold')).grid(
-            row=10, column=0, columnspan=2, sticky=tk.W, pady=(10, 5))
+1. **Default Mapping (Optional):**
+   - Assigns a fixed mapped value to all entries of a specific source column.
+   - Example: All rows under `Department_Code` map to “Corporate Division”.
 
-        self.stage2_button = ttk.Button(
-            main_frame, text="Process Stage 2 (Final Output with Mapping)",
-            command=self.process_stage2, style='Accent.TButton', state='disabled')
-        self.stage2_button.grid(row=11, column=0, columnspan=2, pady=10)
+2. **Reference-Based Mapping (Optional):**
+   - Upload a file that contains pairs like `Code → Description`.
+   - Used mainly when reference columns were defined in Stage 1.
 
-        # Export button
-        self.export_button = ttk.Button(main_frame, text='Export Data',
-                                       command=self.export_data, state='disabled')
-        self.export_button.grid(row=12, column=0, columnspan=2, pady=5)
+3. **Direct Mapping (Optional):**
+   - Allows you to map individual column values using external files.
+   - Example file structure:
+     ```
+     Code, Name
+     A1, Sales
+     A2, HR
+     A3, IT
+     ```
 
-        # Status bar
-        self.status_var = tk.StringVar(value="Ready to load the file...")
-        status_bar = ttk.Label(main_frame, textvariable=self.status_var,
-                              relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=13, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+🟢 **All mapping steps are optional**, but **at least one** must be configured for meaningful transformation.
+If no mapping is applied, the tool proceeds with unmodified values.
 
-    # [Rest of the methods remain the same until apply_reference_mapping]
-    # ... (Include all other methods from the original code)
+Step 6: Conditional Impact Configuration (Optional)
 
-    def show_reference_mapping_popup(self, stage1_data, combined_column_name, combination_columns):
-        """Enhanced popup for three-step mapping configuration"""
-        if not stage1_data:
-            return None
-        
-        popup = tk.Toplevel(self.root)
-        popup.title("Advanced Mapping Configuration")
-        popup.geometry("700x650")
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        ttk.Label(popup, text="Advanced Mapping Configuration", 
-                  font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
-        
-        # Create notebook for three mapping types
-        notebook = ttk.Notebook(popup)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # ===== TAB 1: Default Mapping for Selected Columns =====
-        tab1 = ttk.Frame(notebook)
-        notebook.add(tab1, text="Step 1: Default Mapping")
-        
-        ttk.Label(tab1, text="Set default mapped values for specific source columns", 
-                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-        ttk.Label(tab1, text="All values from selected column will map to the same default value", 
-                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
-        
-        # Listbox to show default mappings
-        default_list_frame = ttk.Frame(tab1)
-        default_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        default_listbox = tk.Listbox(default_list_frame, height=10)
-        default_scroll = ttk.Scrollbar(default_list_frame, orient="vertical", command=default_listbox.yview)
-        default_listbox.configure(yscrollcommand=default_scroll.set)
-        default_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        default_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        default_mappings = {}  # {column_name: default_value}
-        
-        def add_default_mapping():
-            # Select column
-            col_popup = tk.Toplevel(popup)
-            col_popup.title("Select Column")
-            col_popup.geometry("300x400")
-            col_popup.transient(popup)
-            col_popup.grab_set()
-            
-            ttk.Label(col_popup, text="Select source column:", 
-                      font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
-            
-            col_listbox = tk.Listbox(col_popup, height=15)
-            col_scroll = ttk.Scrollbar(col_popup, orient="vertical", command=col_listbox.yview)
-            col_listbox.configure(yscrollcommand=col_scroll.set)
-            col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=5)
-            col_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
-            
-            for col in combination_columns:
-                col_listbox.insert(tk.END, col)
-            
-            selected_col = [None]
-            
-            def confirm_col():
-                selection = col_listbox.curselection()
-                if selection:
-                    selected_col[0] = col_listbox.get(selection[0])
-                    col_popup.destroy()
-                else:
-                    messagebox.showwarning("Warning", "Please select a column")
-            
-            ttk.Button(col_popup, text="Confirm", command=confirm_col).pack(pady=10)
-            col_popup.wait_window()
-            
-            if not selected_col[0]:
-                return
-            
-            # Ask for default value
-            default_val = simpledialog.askstring(
-                "Default Value",
-                f"Enter default mapped value for column '{selected_col[0]}':",
-                parent=popup
-            )
-            
-            if default_val and default_val.strip():
-                default_mappings[selected_col[0]] = default_val.strip()
-                default_listbox.insert(tk.END, f"{selected_col[0]} → {default_val.strip()}")
-        
-        def remove_default():
-            selection = default_listbox.curselection()
-            if selection:
-                idx = selection[0]
-                item = default_listbox.get(idx)
-                col_name = item.split(' → ')[0]
-                if col_name in default_mappings:
-                    del default_mappings[col_name]
-                default_listbox.delete(idx)
-        
-        btn_frame1 = ttk.Frame(tab1)
-        btn_frame1.pack(pady=5)
-        ttk.Button(btn_frame1, text="Add Default Mapping", command=add_default_mapping).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame1, text="Remove Selected", command=remove_default).pack(side=tk.LEFT, padx=5)
-        
-        # ===== TAB 2: Reference-Based Repetition Mapping =====
-        tab2 = ttk.Frame(notebook)
-        notebook.add(tab2, text="Step 2: Reference Mapping")
-        
-        ttk.Label(tab2, text="Upload mapping file for reference-based repetition", 
-                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-        ttk.Label(tab2, text="Maps reference values to repeated column values", 
-                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
-        
-        ttk.Label(tab2, text="Example: B1→Y1, B2→Y2\nRepeated A values for B1 get Y1, for B2 get Y2", 
-                  font=('TkDefaultFont', 8), foreground='blue').pack(pady=5, padx=10, anchor=tk.W)
-        
-        file_frame = ttk.Frame(tab2)
-        file_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(file_frame, text="Mapping File:").pack(side=tk.LEFT, padx=5)
-        ref_file_label = ttk.Label(file_frame, text="No file selected", foreground='gray')
-        ref_file_label.pack(side=tk.LEFT, padx=5)
-        
-        ref_mapping_data = {'file': None, 'df': None}
-        
-        def select_ref_mapping():
-            file_path = filedialog.askopenfilename(
-                title="Select Reference Mapping File",
-                filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-            )
-            
-            if file_path:
-                try:
-                    if file_path.endswith('.csv'):
-                        mapping_df = pd.read_csv(file_path)
-                    else:
-                        mapping_df = pd.read_csv(file_path, delimiter='\t')
-                    
-                    if len(mapping_df.columns) < 2:
-                        messagebox.showerror("Error", "Mapping file must have at least 2 columns")
-                        return
-                    
-                    ref_mapping_data['file'] = file_path
-                    ref_mapping_data['df'] = mapping_df
-                    ref_file_label.config(text=os.path.basename(file_path), foreground='black')
-                    
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
-        
-        ttk.Button(file_frame, text="Browse...", command=select_ref_mapping).pack(side=tk.LEFT, padx=5)
-        
-        # ===== TAB 3: Direct Column Value Mapping =====
-        tab3 = ttk.Frame(notebook)
-        notebook.add(tab3, text="Step 3: Direct Mapping")
-        
-        ttk.Label(tab3, text="Upload mapping files for specific column values", 
-                  font=('TkDefaultFont', 10, 'bold')).pack(pady=10, padx=10, anchor=tk.W)
-        ttk.Label(tab3, text="Direct value-to-value mapping (e.g., d1→Z1, d2→Z2)", 
-                  font=('TkDefaultFont', 8), foreground='gray').pack(pady=2, padx=10, anchor=tk.W)
-        
-        # Listbox for direct mappings
-        direct_list_frame = ttk.Frame(tab3)
-        direct_list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        direct_listbox = tk.Listbox(direct_list_frame, height=10)
-        direct_scroll = ttk.Scrollbar(direct_list_frame, orient="vertical", command=direct_listbox.yview)
-        direct_listbox.configure(yscrollcommand=direct_scroll.set)
-        direct_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        direct_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        direct_mappings = {}  # {column_name: mapping_df}
-        
-        def add_direct_mapping():
-            # Select column
-            col_popup = tk.Toplevel(popup)
-            col_popup.title("Select Column")
-            col_popup.geometry("300x400")
-            col_popup.transient(popup)
-            col_popup.grab_set()
-            
-            ttk.Label(col_popup, text="Select source column for direct mapping:", 
-                      font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
-            
-            col_listbox = tk.Listbox(col_popup, height=15)
-            col_scroll = ttk.Scrollbar(col_popup, orient="vertical", command=col_listbox.yview)
-            col_listbox.configure(yscrollcommand=col_scroll.set)
-            col_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=5)
-            col_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
-            
-            for col in combination_columns:
-                col_listbox.insert(tk.END, col)
-            
-            selected_col = [None]
-            
-            def confirm_col():
-                selection = col_listbox.curselection()
-                if selection:
-                    selected_col[0] = col_listbox.get(selection[0])
-                    col_popup.destroy()
-                else:
-                    messagebox.showwarning("Warning", "Please select a column")
-            
-            ttk.Button(col_popup, text="Confirm", command=confirm_col).pack(pady=10)
-            col_popup.wait_window()
-            
-            if not selected_col[0]:
-                return
-            
-            # Upload mapping file
-            file_path = filedialog.askopenfilename(
-                title=f"Select Direct Mapping File for '{selected_col[0]}'",
-                filetypes=[("CSV files", "*.csv"), ("Text files", "*.txt"), ("All files", "*.*")]
-            )
-            
-            if file_path:
-                try:
-                    if file_path.endswith('.csv'):
-                        mapping_df = pd.read_csv(file_path)
-                    else:
-                        mapping_df = pd.read_csv(file_path, delimiter='\t')
-                    
-                    if len(mapping_df.columns) < 2:
-                        messagebox.showerror("Error", "Mapping file must have at least 2 columns")
-                        return
-                    
-                    direct_mappings[selected_col[0]] = mapping_df
-                    direct_listbox.insert(tk.END, f"{selected_col[0]}: {os.path.basename(file_path)}")
-                    
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to load mapping file: {str(e)}")
-        
-        def remove_direct():
-            selection = direct_listbox.curselection()
-            if selection:
-                idx = selection[0]
-                item = direct_listbox.get(idx)
-                col_name = item.split(':')[0].strip()
-                if col_name in direct_mappings:
-                    del direct_mappings[col_name]
-                direct_listbox.delete(idx)
-        
-        btn_frame3 = ttk.Frame(tab3)
-        btn_frame3.pack(pady=5)
-        ttk.Button(btn_frame3, text="Add Direct Mapping", command=add_direct_mapping).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame3, text="Remove Selected", command=remove_direct).pack(side=tk.LEFT, padx=5)
-        
-        # New column name entry
-        name_frame = ttk.Frame(popup)
-        name_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        ttk.Label(name_frame, text="New Mapped Column Name:").pack(side=tk.LEFT, padx=5)
-        new_col_entry = ttk.Entry(name_frame, width=30)
-        new_col_entry.pack(side=tk.LEFT, padx=5)
-        new_col_entry.insert(0, "Mapped_Value")
-        
-        result = {
-            'apply': False,
-            'new_column': '',
-            'default_mappings': {},
-            'ref_mapping_df': None,
-            'direct_mappings': {}
-        }
-        
-        def confirm():
-            new_col_name = new_col_entry.get().strip()
-            if not new_col_name:
-                messagebox.showwarning("Warning", "Please enter a name for the new column")
-                return
-            
-            # Check if at least one mapping type is configured
-            has_config = (
-                len(default_mappings) > 0 or
-                ref_mapping_data['df'] is not None or
-                len(direct_mappings) > 0
-            )
-            
-            if not has_config:
-                response = messagebox.askyesno("No Mappings", 
-                    "No mappings configured. Skip this step?")
-                if response:
-                    popup.destroy()
-                return
-            
-            result['apply'] = True
-            result['new_column'] = new_col_name
-            result['default_mappings'] = default_mappings.copy()
-            result['ref_mapping_df'] = ref_mapping_data['df']
-            result['direct_mappings'] = direct_mappings.copy()
-            popup.destroy()
-        
-        def skip():
-            popup.destroy()
-        
-        button_frame = ttk.Frame(popup)
-        button_frame.pack(pady=10)
-        
-        ttk.Button(button_frame, text="Apply Configuration", 
-                   command=confirm, style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Skip (No Mapping)", 
-                   command=skip).pack(side=tk.LEFT, padx=5)
-        
-        popup.wait_window()
-        return result
+After mapping, the tool provides an **optional conditional rule system**.
 
-    def apply_reference_mapping(self, stage1_data, combined_column_name, combination_source_map, 
-                                new_column_name, default_mappings, ref_mapping_df, 
-                                direct_mappings, reference_values, repeat_values):
-        """
-        Enhanced three-step mapping logic:
-        
-        Step 1: Default Mapping - Apply default values for specific source columns
-        Step 2: Reference Mapping - Apply reference-based repetition mapping
-        Step 3: Direct Mapping - Apply direct value-to-value mappings from external files
-        
-        Priority: Direct Mapping > Reference Mapping > Default Mapping
-        """
-        print("\n" + "="*60)
-        print("ENHANCED REFERENCE MAPPING - Three-Step Logic")
-        print("="*60)
-        
-        rows = [copy.deepcopy(r) for r in stage1_data]
-        
-        # Build mapping dictionaries
-        # Step 1: Default mappings (column → default_value)
-        print(f"\nStep 1: Default Mappings")
-        if default_mappings:
-            for col, val in default_mappings.items():
-                print(f"  - Column '{col}' → Default: '{val}'")
-        else:
-            print("  - None configured")
-        
-        # Step 2: Reference mapping (reference_value → mapped_value)
-        ref_mapping_dict = {}
-        if ref_mapping_df is not None and len(ref_mapping_df.columns) >= 2:
-            key_col = ref_mapping_df.columns[0]
-            value_col = ref_mapping_df.columns[1]
-            ref_mapping_dict = {
-                str(k).strip(): str(v).strip() 
-                for k, v in zip(ref_mapping_df[key_col].astype(str), 
-                              ref_mapping_df[value_col].astype(str))
-            }
-            print(f"\nStep 2: Reference Mapping")
-            print(f"  - {len(ref_mapping_dict)} reference mappings loaded")
-        else:
-            print(f"\nStep 2: Reference Mapping")
-            print("  - None configured")
-        
-        # Step 3: Direct mappings (value → mapped_value for specific columns)
-        direct_mapping_dicts = {}
-        if direct_mappings:
-            print(f"\nStep 3: Direct Mappings")
-            for col_name, mapping_df in direct_mappings.items():
-                if len(mapping_df.columns) >= 2:
-                    key_col = mapping_df.columns[0]
-                    value_col = mapping_df.columns[1]
-                    direct_mapping_dicts[col_name] = {
-                        str(k).strip(): str(v).strip()
-                        for k, v in zip(mapping_df[key_col].astype(str), 
-                                      mapping_df[value_col].astype(str))
-                    }
-                    print(f"  - Column '{col_name}': {len(direct_mapping_dicts[col_name])} mappings")
-        else:
-            print(f"\nStep 3: Direct Mappings")
-            print("  - None configured")
-        
-        # Convert reference and repeat values to sets
-        ref_set = set(str(x).strip() for x in (reference_values or []))
-        rep_set = set(str(x).strip() for x in (repeat_values or []))
-        
-        # Create reverse lookup: value → source_column
-        value_to_source = {}
-        if combination_source_map:
-            for col_name, values in combination_source_map.items():
-                for val in values:
-                    value_to_source[str(val).strip()] = col_name
-        
-        print(f"\n" + "-"*60)
-        print("Processing Rows...")
-        print("-"*60)
-        
-        # Buffer for repeated values
-        buffer_indices = []
-        result_rows = []
-        
-        # Track statistics
-        stats = {
-            'default_applied': 0,
-            'reference_applied': 0,
-            'direct_applied': 0,
-            'no_mapping': 0
-        }
-        
-        for idx, row in enumerate(rows):
-            combined_val = str(row.get(combined_column_name, '')).strip()
-            source_column = value_to_source.get(combined_val, None)
-            
-            mapped_value = ''
-            mapping_applied = None
-            
-            # PRIORITY 1: Check Direct Mapping
-            if source_column and source_column in direct_mapping_dicts:
-                if combined_val in direct_mapping_dicts[source_column]:
-                    mapped_value = direct_mapping_dicts[source_column][combined_val]
-                    mapping_applied = 'direct'
-                    stats['direct_applied'] += 1
-            
-            # PRIORITY 2: Check if repeated value
-            if not mapping_applied and combined_val in rep_set:
-                row[new_column_name] = ''
-                result_rows.append(row)
-                buffer_indices.append(len(result_rows) - 1)
-                continue
-            
-            # PRIORITY 3: Check if reference value
-            if not mapping_applied and combined_val in ref_set:
-                if ref_mapping_dict and combined_val in ref_mapping_dict:
-                    mapped_value_for_buffer = ref_mapping_dict[combined_val]
-                    if buffer_indices:
-                        for bi in buffer_indices:
-                            result_rows[bi][new_column_name] = mapped_value_for_buffer
-                        stats['reference_applied'] += len(buffer_indices)
-                buffer_indices = []
-                row[new_column_name] = ''
-                result_rows.append(row)
-                continue
-            
-            # PRIORITY 4: Check Default Mapping
-            if not mapping_applied and source_column and source_column in default_mappings:
-                mapped_value = default_mappings[source_column]
-                mapping_applied = 'default'
-                stats['default_applied'] += 1
-            
-            if not mapping_applied:
-                stats['no_mapping'] += 1
-            
-            row[new_column_name] = mapped_value
-            result_rows.append(row)
-        
-        if buffer_indices:
-            print(f"\n⚠ Warning: {len(buffer_indices)} buffered rows not followed by reference")
-        
-        print(f"\n" + "="*60)
-        print("Mapping Statistics:")
-        print("="*60)
-        print(f"  Direct Mappings Applied (Step 3): {stats['direct_applied']}")
-        print(f"  Reference Mappings Applied (Step 2): {stats['reference_applied']}")
-        print(f"  Default Mappings Applied (Step 1): {stats['default_applied']}")
-        print(f"  No Mapping (Blank): {stats['no_mapping']}")
-        print(f"  Total Rows Processed: {len(result_rows)}")
-        print("="*60 + "\n")
-        
-        return result_rows
+This feature allows you to **alter other columns** based on specific values in the combined column.
 
+Steps:
+1. Select **target columns** to modify.
+2. Choose **trigger values** or column headers from the combined column.
+3. Select one of three action modes:
+   - **Blank Non-Matching Rows:** Clears values where combined column ≠ trigger.
+   - **Replace Matching Rows:** Fills target columns with a custom text (e.g., “N/A”) where the condition matches.
+   - **Blank Matching Rows:** Clears values where combined column = trigger.
 
-def main():
-    root = tk.Tk()
-    app = CSVProcesser(root)
-    root.mainloop()
+💡 Example:
+If `Combined_Column = A1 or A2`, then blank out column `Comments` for all non-matching rows.
 
+🟢 **Optional Step**, useful for advanced filtering or formatting.
 
-if __name__ == "__main__":
-    main()
+Step 7: Export Processed Data
 
+Once Stage 2 completes successfully, click **“Export Data”** to save the final processed output.
 
+1. Choose the destination folder and file name.
+2. The processed file will be saved as `.csv`.
+3. The output contains all transformations from both stages, including mapping and conditional impacts.
 
+✅ **Mandatory Step** to preserve final results.
 
+🟢 **Tip:**
+Keep your export filename descriptive, e.g., `Access_Sheet_Output_Processed.csv`.
 
+Additional Notes
 
+- **Error Handling:** The tool automatically detects encoding errors and prompts corrective actions.
+- **Performance Tip:** For very large CSV files, close unnecessary applications to avoid UI lag.
+- **Security:** All processing is done locally — no external API calls or internet access.
+- **Customization:** Users with Python knowledge can extend mapping logic by editing methods like `apply_reference_mapping()` or `apply_conditional_impact()`.
 
+This SOP ensures users follow a clear, repeatable workflow, minimizing data errors and maximizing efficiency.
 
-
-#####
-
-
-
-def process_stage1(self):
-    if self.df is None:
-        messagebox.showwarning("Warning", "Please load an input file first")
-        return
-    
-    # Get selected fields from checkboxes
-    self.selected_fields = [col for col, var in self.field_checkboxes.items() if var.get()]
-    
-    if not self.selected_fields:
-        messagebox.showwarning("Warning", "Please select at least one field to process")
-        return
-
-    try:
-        #Dictionary field detection -- ONLY for selected fields
-        self.dictionary_fields=self.detect_dictionary_fields(self.selected_fields)
-
-        #initialize dictionary to store user's key selections
-        self.selected_keys={}
-
-        #if dictionary fields are found in selected fields, show popup for key selection
-        if self.dictionary_fields:
-            for field, available_keys in self.dictionary_fields.items():
-                if available_keys:
-                    selected=self.show_key_selection_popup(field,available_keys)
-                    if selected:
-                        self.selected_keys[field]=selected
-                    else:
-                        #if user cancels, ask if the user want to skip the field
-                        response=messagebox.askyesno('Skip Field?',f"No keys selected for field '{field}'. \n\nDo you want to keep this field without dictionary expansion?")
-                        if not response:
-                            #remove from selected fields if user doesn't want to keep it
-                            self.selected_fields.remove(field)
-        
-        # NEW: Show early mapping popup after key selection
-        self.early_mapping_data = {}
-        if self.selected_keys:
-            self.early_mapping_data = self.show_early_mapping_popup(self.selected_keys)
-        
-        # Process dataframe for Stage 1
-        temp_stage1_data = self.process_stage1_dataframe()
-
-        # Apply early mappings
-        temp_stage1_data = self.apply_early_mappings(temp_stage1_data)
-
-        # Get columns from temporary Stage 1 data for combination popup
-        temp_stage1_columns = set()
-        for row in temp_stage1_data:
-            temp_stage1_columns.update(row.keys())
-
-        
-        # Show column combination popup
-        combination_result = self.show_column_combination_popup(temp_stage1_columns)
-        
-        # Variables to track combined column info
-        combined_col_name = None
-        ref_values_list = []
-        repeat_values_list = []
-        combination_cols = []
-        
-        # Apply column combination with optional reference-based repetition
-        if combination_result.get('combine'):
-            combination_cols = combination_result['columns']
-            
-            # Build source mapping for conditional impact feature
-            self.combination_source_columns = self.build_combination_source_map(
-                temp_stage1_data,
-                combination_cols
-            )
-            
-            self.stage1_data = self.apply_column_combination(
-                temp_stage1_data,
-                combination_cols,
-                combination_result['new_name'],
-                combination_result.get('reference_column', ''),
-                combination_result.get('repeat_columns', [])
-            )
-            
-            combined_col_name = combination_result['new_name']
-            
-            status_msg = f"Applied Column combination: {combined_col_name}"
-            
-            # Build detailed info message
-            info_parts = [f"Combined column: {combined_col_name}"]
-            info_parts.append(f"Columns combined: {', '.join(combination_cols)}")
-            
-            # Store combination info for reference mapping
-            ref_col = combination_result.get('reference_column', '')
-            repeat_cols = combination_result.get('repeat_columns', [])
-            
-            if ref_col:
-                status_msg += f" | Reference: {ref_col}"
-                info_parts.append(f"Reference column: {ref_col}")
-                
-                if repeat_cols:
-                    repeat_cols_str = ', '.join(repeat_cols)
-                    status_msg += f" | Repeating: {repeat_cols_str}"
-                    info_parts.append(f"Columns repeated: {repeat_cols_str}")
-                else:
-                    info_parts.append("No columns set to repeat")
-            
-            info_parts.append(f"Total rows generated: {len(self.stage1_data)}")
-            
-            messagebox.showinfo("Column Combination Complete", '\n'.join(info_parts))
-            self.status_var.set(status_msg)
-            
-            # ========================================
-            # NEW: Apply three-step reference mapping
-            # ========================================
-            if combination_cols:  # If columns were combined
-                # Extract reference and repeat values from the original data
-                ref_values_set = set()
-                repeat_values_set = set()
-                
-                for row in temp_stage1_data:
-                    for col in combination_cols:
-                        if col in row and row[col]:
-                            values = self.split_multi_values(str(row[col]))
-                            if col == ref_col:
-                                ref_values_set.update([v for v in values if v])
-                            elif col in repeat_cols:
-                                repeat_values_set.update([v for v in values if v])
-                
-                ref_values_list = list(ref_values_set)
-                repeat_values_list = list(repeat_values_set)
-                
-                # Show enhanced mapping popup with 3 tabs
-                mapping_result = self.show_reference_mapping_popup(
-                    self.stage1_data,
-                    combined_col_name,
-                    combination_cols  # NEW: Pass combination columns
-                )
-                
-                if mapping_result and mapping_result.get('apply'):
-                    # Apply three-step mapping
-                    self.stage1_data = self.apply_reference_mapping(
-                        self.stage1_data,
-                        combined_col_name,
-                        self.combination_source_columns,        # NEW: Source column mapping
-                        mapping_result['new_column'],
-                        mapping_result['default_mappings'],     # NEW: Step 1 mappings
-                        mapping_result['ref_mapping_df'],       # Step 2 mapping
-                        mapping_result['direct_mappings'],      # NEW: Step 3 mappings
-                        ref_values_list,
-                        repeat_values_list
-                    )
-                    
-                    # Build status message showing which mapping types were applied
-                    status_parts = []
-                    if mapping_result['default_mappings']:
-                        status_parts.append(f"{len(mapping_result['default_mappings'])} default")
-                    if mapping_result['ref_mapping_df'] is not None:
-                        status_parts.append("reference")
-                    if mapping_result['direct_mappings']:
-                        status_parts.append(f"{len(mapping_result['direct_mappings'])} direct")
-                    
-                    if status_parts:
-                        status_msg += f" | Mapped: {', '.join(status_parts)}"
-                        messagebox.showinfo("Mapping Applied",
-                            f"New column '{mapping_result['new_column']}' created\n"
-                            f"Mapping types applied: {', '.join(status_parts)}")
-        else:
-            self.stage1_data = temp_stage1_data
-        
-        # *** NEW FUNCTIONALITY: Conditional Column Impact ***
-        # This runs AFTER combined column and reference mapping are complete
-        if combined_col_name:
-            conditional_result = self.show_conditional_impact_popup(
-                self.stage1_data,
-                combined_col_name
-            )
-            
-            if conditional_result and conditional_result.get('apply'):
-                self.stage1_data = self.apply_conditional_impact(
-                    self.stage1_data,
-                    combined_col_name,
-                    conditional_result['target_columns'],
-                    conditional_result['trigger_values'],
-                    conditional_result['impact_type'],
-                    conditional_result.get('custom_value', '')
-                )
-                
-                impact_desc = {
-                    'blank_non_matching': 'Blanked non-matching rows',
-                    'replace_matching': f"Replaced matching rows with '{conditional_result.get('custom_value', '')}'",
-                    'blank_matching': 'Blanked matching rows'
-                }
-                
-                messagebox.showinfo("Conditional Impact Applied",
-                    f"Action: {impact_desc.get(conditional_result['impact_type'], 'Applied')}\n"
-                    f"Target columns: {', '.join(conditional_result['target_columns'])}\n"
-                    f"Trigger values: {', '.join(conditional_result['trigger_values'])}")
-
-        #get selected columns from Stage1
-        if self.stage1_data:
-            stage1_columns=set()
-            for row in self.stage1_data:
-                stage1_columns.update(row.keys())
-
-            #update the selected_fields to match stage 1 o/p
-            self.selected_fields=list(stage1_columns)
-
-            # Show popup with selected columns
-            self.show_selected_columns_popup(stage1_columns)
-
-        #stage 1 completion status
-        self.stage1_complete=True
-        self.stage1_status_label.config(text=f'✓ Complete ({len(self.stage1_data)} rows)')
-        
-        #enable mapping file addition & Stage 2 Processing
-        self.add_mapping_button.config(state='normal')
-        self.stage2_button.config(state='normal')
-
-        self.status_var.set(f"Stage 1 Completed. {len(self.stage1_data)} rows generated from selected fields. Proceed to add mapping files, if any, or proceed to Stage 2.")
-        
-    except Exception as e:
-        messagebox.showerror("Error", f"Failed to process Stage 1: {str(e)}")
-        self.status_var.set("Stage 1 processing failed")
