@@ -1,99 +1,32 @@
-if self.smart_enabled:
-                # SMART MODE: Analyze and capture conditionally
-                smart_config = self.file_config.get('smart_linking', {})
-                master_sheet = smart_config.get('master_sheet', '')
-                master_range = smart_config.get('master_range', 'A1:Z50')
+def capturesinglescreenshot(self, workbook, sheetname, cellrange, name, folder, embed=True, attach=False):
+    try:
+        self.logmessage(f"Capturing {name} from {sheetname}!{cellrange}", "info")
+        sheet = workbook.Sheets(sheetname)
+        rangeobj = sheet.Range(cellrange)
+        rangeobj.CopyPicture(Format=2)  # Copy as picture to clipboard
 
-                # First, always capture master sheet
-                self.log_message(f"Capturing master sheet: {master_sheet}", 'info')
-                self.screenshot_status.config(text=f"Capturing master: {master_sheet}...", foreground='orange')
+        # NEW robust sleep/wait for clipboard readiness
+        img = None
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            time.sleep(1.25)  # Slightly longer wait
+            img = ImageGrab.grabclipboard()
+            if img is not None:
+                break
 
-                self._capture_single_screenshot(
-                    workbook,
-                    master_sheet,
-                    master_range,
-                    f"{master_sheet}",
-                    file_folder,
-                    embed=True,
-                    attach=False
-                )
-                
-                time.sleep(1.5)  # Wait after master capture
+        if img is None:
+            self.logmessage(f"Failed to capture {name}", "error")
+            return
 
-                # Analyze linked sheets
-                self.screenshot_status.config(text="Analyzing linked sheets...", foreground='orange')
-                self.log_message("=" * 60, 'info')
-                self.log_message("STARTING LINKED SHEET ANALYSIS", 'info')
-                self.log_message("=" * 60, 'info')
-                
-                conditional_sheets = self.analyze_linked_sheets(workbook)
-
-                self.log_message(
-                    f"Analysis complete: {len(conditional_sheets)} sheets meet threshold",
-                    'success' if conditional_sheets else 'warning'
-                )
-                
-                # DEBUG: Log what sheets will be captured
-                if conditional_sheets:
-                    self.log_message("Sheets queued for capture:", 'info')
-                    for idx, sheet_cfg in enumerate(conditional_sheets, 1):
-                        self.log_message(
-                            f"  {idx}. {sheet_cfg['sheet_name']} -> {sheet_cfg['name']}.png",
-                            'info'
-                        )
-                else:
-                    self.log_message("No linked sheets meet the threshold criteria", 'warning')
-
-                # Capture conditional sheets ONE BY ONE with verification
-                for idx, sheet_config in enumerate(conditional_sheets, 1):
-                    self.log_message("=" * 60, 'info')
-                    self.log_message(f"CAPTURING SHEET {idx}/{len(conditional_sheets)}", 'info')
-                    self.log_message("=" * 60, 'info')
-                    
-                    sheet_name = sheet_config['sheet_name']
-                    
-                    self.screenshot_status.config(
-                        text=f"Capturing {idx}/{len(conditional_sheets)}: {sheet_name}...",
-                        foreground='orange'
-                    )
-                    
-                    # Log details before capture
-                    self.log_message(f"Sheet Name: {sheet_name}", 'info')
-                    self.log_message(f"Range: {sheet_config['cell_range']}", 'info')
-                    self.log_message(f"Save As: {sheet_config['name']}.png", 'info')
-                    
-                    # Verify sheet exists BEFORE attempting capture
-                    try:
-                        test_sheet = workbook.Sheets(sheet_name)
-                        self.log_message(f"✓ Sheet '{sheet_name}' exists in workbook", 'success')
-                    except Exception as e:
-                        self.log_message(f"✗ Sheet '{sheet_name}' NOT FOUND: {str(e)}", 'error')
-                        continue  # Skip this sheet
-                    
-                    # Count screenshots before
-                    count_before = len(self.screenshot_paths)
-                    
-                    # Attempt capture
-                    self._capture_single_screenshot(
-                        workbook,
-                        sheet_name,
-                        sheet_config['cell_range'],
-                        sheet_config['name'],
-                        file_folder,
-                        embed=sheet_config.get('embed', True),
-                        attach=sheet_config.get('attach', False)
-                    )
-                    
-                    # Verify capture was successful
-                    count_after = len(self.screenshot_paths)
-                    if count_after > count_before:
-                        self.log_message(f"✓ Screenshot #{count_after} added successfully", 'success')
-                    else:
-                        self.log_message(f"✗ Screenshot was NOT added to list!", 'error')
-                    
-                    # CRITICAL: Longer delay between sheets
-                    time.sleep(2.0)
-                    
-                self.log_message("=" * 60, 'info')
-                self.log_message("ALL CAPTURES COMPLETE", 'success')
-                self.log_message("=" * 60, 'info')
+        savepath = os.path.join(folder, f"{name}.png")
+        img.save(savepath, "PNG")
+        screenshotinfo = {
+            "path": savepath,
+            "name": name,
+            "embed": embed,
+            "attach": attach,
+        }
+        self.screenshotpaths.append(screenshotinfo)
+        self.logmessage(f"Saved {name}", "success")
+    except Exception as e:
+        self.logmessage(f"Error capturing {name}: {str(e)}", "error")
