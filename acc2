@@ -3,25 +3,26 @@ def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, fol
     try:
         self.log_message(f"  Capturing {name} from {sheet_name}!{cell_range}", 'info')
 
-        # Ensure correct sheet is activated before copying
+        # Activate correct sheet before copying
         sheet = workbook.Sheets(sheet_name)
         sheet.Activate()
-        workbook.Application.Wait(workbook.Application.Now() + 0.5/86400)  # ~0.5 sec delay
+        time.sleep(0.8)  # give Excel UI time to refresh
 
         # Copy as picture
         range_obj = sheet.Range(cell_range)
         range_obj.CopyPicture(Format=2)
+        time.sleep(0.5)
 
-        # Wait until image is ready in clipboard
+        # Wait until image is in clipboard
         img = None
         for _ in range(15):
             img = ImageGrab.grabclipboard()
-            if img:
+            if img is not None:
                 break
             time.sleep(0.2)
 
         if img is None:
-            self.log_message(f"  ❌ Clipboard empty for {sheet_name}! Retry failed", 'error')
+            self.log_message(f"  ❌ Clipboard empty for {sheet_name}", 'error')
             return
 
         save_path = os.path.join(folder, f"{name}.png")
@@ -35,7 +36,9 @@ def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, fol
         })
 
         self.log_message(f"  ✓ Saved screenshot for {sheet_name}", 'success')
-        time.sleep(0.3)  # allow clipboard reset
+
+        # Short delay before next sheet to prevent overwrite
+        time.sleep(0.4)
 
     except Exception as e:
         self.log_message(f"  ⚠ Error capturing {sheet_name}: {str(e)}", 'error')
