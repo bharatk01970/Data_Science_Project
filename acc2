@@ -1,158 +1,57 @@
-Detailed Standard Operating Procedure (SOP)
+def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
+    """Helper method to capture a single screenshot - MOST RELIABLE VERSION"""
+    try:
+        self.log_message(f"  Capturing {name} from {sheet_name}!{cell_range}", 'info')
 
-This Standard Operating Procedure (SOP) provides detailed step-by-step guidance for using the **Access_Sheet_Generator** tool. 
-It explains each process stage, specifies which actions are mandatory or optional, and outlines the expected behavior of the tool. 
-The goal is to help users, including non-technical personnel, understand and execute every part of the process smoothly.
+        # Get the sheet and range
+        sheet = workbook.Sheets(sheet_name)
+        range_obj = sheet.Range(cell_range)
+        
+        # Generate unique filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+        unique_filename = f"{name}_{timestamp}.png"
+        save_path = os.path.join(folder, unique_filename)
+        
+        # Copy range as picture with increased wait
+        range_obj.CopyPicture(Appearance=1, Format=2)
+        
+        # CRITICAL: Wait 2-3 seconds for clipboard
+        time.sleep(2.5)
+        
+        # Multiple attempts to grab from clipboard
+        img = None
+        for attempt in range(5):  # Try 5 times
+            img = ImageGrab.grabclipboard()
+            if img is not None:
+                self.log_message(f"    Clipboard grabbed successfully on attempt {attempt + 1}", 'info')
+                break
+            time.sleep(0.5)
+        
+        if img is None:
+            self.log_message(f"  ✗ Failed to capture {name} after 5 attempts", 'error')
+            return
+        
+        # Save image
+        img.save(save_path, 'PNG')
+        
+        # Verify save
+        if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+            screenshot_info = {
+                'path': save_path,
+                'name': name,
+                'embed': embed,
+                'attach': attach
+            }
+            self.screenshot_paths.append(screenshot_info)
+            
+            file_size = os.path.getsize(save_path)
+            self.log_message(f"  ✓ Saved {name} ({file_size:,} bytes) as {unique_filename}", 'success')
+        else:
+            self.log_message(f"  ✗ Failed to save {name}", 'error')
 
-Step 1: Launch the Tool
-
-1. Ensure Python 3.x is installed on your system.
-2. Place the `Access_Sheet_Generator.py` file in any accessible folder.
-3. Double-click the file or run the command below in the terminal or command prompt:
-
-   ```bash
-   python Access_Sheet_Generator.py
-   ```
-
-4. A GUI window titled **“Access_Sheet_Generator”** will open.
-   - The window size is approximately 600x700 pixels.
-   - It consists of labeled sections for file input, field selection, mapping, and exporting.
-
-✅ **Mandatory Step**
-You must successfully launch the tool before performing any other actions.
-
-Step 2: Load Input File
-
-This is the **first operational step** of the tool and is **mandatory**.
-
-1. Click the **“Select Input File”** button in the “Load Input File” section.
-2. Browse your computer and select a `.csv` or `.txt` file that contains tabular data.
-3. Once selected, the file path appears beside the button.
-4. The tool automatically attempts to detect the correct text encoding by trying multiple formats (UTF-8, UTF-16, Latin-1, etc.).
-
-🟢 **If successful:**
-   - The status bar displays the total rows and columns detected.
-   - The next section (“Select Fields for Processing”) becomes active.
-
-🔴 **If unsuccessful:**
-   - The status bar shows “Error loading file”.
-   - Verify the file format and encoding, and try again.
-
-Step 3: Select Fields for Processing
-
-After a file loads, a scrollable list of field names (columns) appears. Each column has a checkbox next to it.
-
-1. Review all column names and sample data shown in parentheses.
-2. Select the specific fields (columns) you want to process by checking their boxes.
-3. Use the **“Select All”** or **“Deselect All”** buttons to quickly toggle selections.
-4. You can view examples like:
-   - `Employee_ID (e.g., E12345)`
-   - `Department (e.g., HR, Sales)`
-
-✅ **Mandatory Step**
-At least one field must be selected before moving to the next stage.
-
-Step 4: Stage 1 Processing
-
-This stage prepares the dataset for transformation and mapping.
-
-Click **“Process Stage 1 (Column Selection, Dictionary Expansion & Column Combination)”**.
-
-During this step, the following sub-processes occur:
-
-1. **Dictionary Field Detection (Automatic):**
-   - The tool inspects selected columns to detect dictionary-like or multi-valued fields.
-   - Example: `{"Key1":"A", "Key2":"B"}` or `A;B;C` are automatically parsed.
-
-2. **Dictionary Key Selection (User Prompt – Optional):**
-   - A popup appears for columns containing dictionaries.
-   - You may select specific keys to extract.
-   - If you skip key selection, the tool will ask whether to exclude or keep that field unexpanded.
-
-3. **Early Mapping Upload (Optional):**
-   - If you’ve selected dictionary keys, you may upload **mapping files** (CSV or TXT) that map key values to names or categories.
-   - Example: Code `A1` → Name `Sales Department`.
-
-4. **Column Combination Configuration (Interactive – Optional):**
-   - A popup appears to let you combine multiple columns into a single one.
-   - You may also choose:
-     - A **reference column** (used for repetition).
-     - Columns to **repeat** based on the reference.
-     - A **new name** for the combined column.
-   - Example: Combining `A`, `B`, `C` → creates column `Combined_ABC` with structured repetitions.
-
-After processing, a popup displays “Stage 1 Processing Complete” with a list of output columns.
-
-🟢 **Optional but Recommended:**
-Combining columns or mapping early helps improve Stage 2 accuracy.
-
-Step 5: Stage 2 Processing
-
-This is the **data mapping and enhancement stage**.
-
-Click **“Process Stage 2 (Final Output with Mapping)”** to proceed.
-
-You will be prompted to configure **advanced mapping** in three flexible ways:
-
-1. **Default Mapping (Optional):**
-   - Assigns a fixed mapped value to all entries of a specific source column.
-   - Example: All rows under `Department_Code` map to “Corporate Division”.
-
-2. **Reference-Based Mapping (Optional):**
-   - Upload a file that contains pairs like `Code → Description`.
-   - Used mainly when reference columns were defined in Stage 1.
-
-3. **Direct Mapping (Optional):**
-   - Allows you to map individual column values using external files.
-   - Example file structure:
-     ```
-     Code, Name
-     A1, Sales
-     A2, HR
-     A3, IT
-     ```
-
-🟢 **All mapping steps are optional**, but **at least one** must be configured for meaningful transformation.
-If no mapping is applied, the tool proceeds with unmodified values.
-
-Step 6: Conditional Impact Configuration (Optional)
-
-After mapping, the tool provides an **optional conditional rule system**.
-
-This feature allows you to **alter other columns** based on specific values in the combined column.
-
-Steps:
-1. Select **target columns** to modify.
-2. Choose **trigger values** or column headers from the combined column.
-3. Select one of three action modes:
-   - **Blank Non-Matching Rows:** Clears values where combined column ≠ trigger.
-   - **Replace Matching Rows:** Fills target columns with a custom text (e.g., “N/A”) where the condition matches.
-   - **Blank Matching Rows:** Clears values where combined column = trigger.
-
-💡 Example:
-If `Combined_Column = A1 or A2`, then blank out column `Comments` for all non-matching rows.
-
-🟢 **Optional Step**, useful for advanced filtering or formatting.
-
-Step 7: Export Processed Data
-
-Once Stage 2 completes successfully, click **“Export Data”** to save the final processed output.
-
-1. Choose the destination folder and file name.
-2. The processed file will be saved as `.csv`.
-3. The output contains all transformations from both stages, including mapping and conditional impacts.
-
-✅ **Mandatory Step** to preserve final results.
-
-🟢 **Tip:**
-Keep your export filename descriptive, e.g., `Access_Sheet_Output_Processed.csv`.
-
-Additional Notes
-
-- **Error Handling:** The tool automatically detects encoding errors and prompts corrective actions.
-- **Performance Tip:** For very large CSV files, close unnecessary applications to avoid UI lag.
-- **Security:** All processing is done locally — no external API calls or internet access.
-- **Customization:** Users with Python knowledge can extend mapping logic by editing methods like `apply_reference_mapping()` or `apply_conditional_impact()`.
-
-This SOP ensures users follow a clear, repeatable workflow, minimizing data errors and maximizing efficiency.
-
+    except Exception as e:
+        self.log_message(f"  ✗ Error capturing {name}: {str(e)}", 'error')
+    
+    finally:
+        # IMPORTANT: Add delay between different sheet captures
+        time.sleep(1.0)
