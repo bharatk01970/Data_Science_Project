@@ -1,37 +1,41 @@
 def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
-    """Helper method to capture a single screenshot with reliable clipboard handling"""
+    """Helper method to capture a single screenshot (ensures correct sheet activation)"""
     try:
         self.log_message(f"  Capturing {name} from {sheet_name}!{cell_range}", 'info')
+
+        # Ensure correct sheet is activated before copying
         sheet = workbook.Sheets(sheet_name)
+        sheet.Activate()
+        workbook.Application.Wait(workbook.Application.Now() + 0.5/86400)  # ~0.5 sec delay
+
+        # Copy as picture
         range_obj = sheet.Range(cell_range)
         range_obj.CopyPicture(Format=2)
-        workbook.Windows(1).Activate()
-        time.sleep(0.7)
 
-        # Wait until image appears in clipboard (retry up to ~2 seconds)
+        # Wait until image is ready in clipboard
         img = None
-        for _ in range(10):
+        for _ in range(15):
             img = ImageGrab.grabclipboard()
             if img:
                 break
             time.sleep(0.2)
 
         if img is None:
-            self.log_message(f"  Failed to capture {name} (clipboard empty)", 'error')
+            self.log_message(f"  ❌ Clipboard empty for {sheet_name}! Retry failed", 'error')
             return
 
         save_path = os.path.join(folder, f"{name}.png")
         img.save(save_path, 'PNG')
 
-        screenshot_info = {
+        self.screenshot_paths.append({
             'path': save_path,
             'name': name,
             'embed': embed,
             'attach': attach
-        }
-        self.screenshot_paths.append(screenshot_info)
-        self.log_message(f"  ✓ Saved {name}", 'success')
-        time.sleep(0.3)  # brief delay to avoid clipboard overwrite
+        })
+
+        self.log_message(f"  ✓ Saved screenshot for {sheet_name}", 'success')
+        time.sleep(0.3)  # allow clipboard reset
 
     except Exception as e:
-        self.log_message(f"  Error capturing {name}: {str(e)}", 'error')
+        self.log_message(f"  ⚠ Error capturing {sheet_name}: {str(e)}", 'error')
