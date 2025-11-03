@@ -1,83 +1,99 @@
-def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
-    """Helper method to capture a single screenshot using Excel export (more reliable)"""
-    try:
-        self.log_message(f"  Capturing {name} from {sheet_name}!{cell_range}", 'info')
+if self.smart_enabled:
+                # SMART MODE: Analyze and capture conditionally
+                smart_config = self.file_config.get('smart_linking', {})
+                master_sheet = smart_config.get('master_sheet', '')
+                master_range = smart_config.get('master_range', 'A1:Z50')
 
-        # Get the sheet and range
-        sheet = workbook.Sheets(sheet_name)
-        range_obj = sheet.Range(cell_range)
-        
-        # Generate unique temporary filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        temp_filename = f"temp_{name}_{timestamp}.png"
-        temp_path = os.path.join(folder, temp_filename)
-        
-        # Final filename
-        final_filename = f"{name}_{timestamp}.png"
-        final_path = os.path.join(folder, final_filename)
-        
-        try:
-            # Method 1: Try CopyPicture + Export (hybrid approach)
-            range_obj.CopyPicture(Appearance=1, Format=2)
-            time.sleep(1.5)
-            
-            # Create a new chart to paste the picture
-            chart_obj = sheet.ChartObjects().Add(0, 0, range_obj.Width, range_obj.Height)
-            chart_obj.Chart.Paste()
-            
-            # Export the chart as image
-            chart_obj.Chart.Export(temp_path, "PNG")
-            
-            # Delete the chart
-            chart_obj.Delete()
-            
-            # Rename to final name
-            if os.path.exists(temp_path):
-                os.rename(temp_path, final_path)
-            
-        except Exception as export_error:
-            self.log_message(f"    Export method failed, trying clipboard method: {str(export_error)}", 'warning')
-            
-            # Fallback to clipboard method
-            range_obj.CopyPicture(Format=2)
-            time.sleep(2.0)
-            
-            img = ImageGrab.grabclipboard()
-            if img is None:
-                self.log_message(f"  Failed to capture {name}", 'error')
-                return
-            
-            img.save(final_path, 'PNG')
-        
-        # Verify file was saved
-        if os.path.exists(final_path):
-            file_size = os.path.getsize(final_path)
-            if file_size > 0:
-                screenshot_info = {
-                    'path': final_path,
-                    'name': name,
-                    'embed': embed,
-                    'attach': attach
-                }
-                self.screenshot_paths.append(screenshot_info)
-                self.log_message(f"  ✓ Saved {name} ({file_size} bytes)", 'success')
-            else:
-                self.log_message(f"  ✗ File saved but empty: {name}", 'error')
-                if os.path.exists(final_path):
-                    os.remove(final_path)
-        else:
-            self.log_message(f"  ✗ File not saved: {name}", 'error')
+                # First, always capture master sheet
+                self.log_message(f"Capturing master sheet: {master_sheet}", 'info')
+                self.screenshot_status.config(text=f"Capturing master: {master_sheet}...", foreground='orange')
 
-    except Exception as e:
-        self.log_message(f"  Error capturing {name}: {str(e)}", 'error')
-    
-    finally:
-        # Clean up any temporary files
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except:
-            pass
-        
-        # Delay between captures
-        time.sleep(0.5)
+                self._capture_single_screenshot(
+                    workbook,
+                    master_sheet,
+                    master_range,
+                    f"{master_sheet}",
+                    file_folder,
+                    embed=True,
+                    attach=False
+                )
+                
+                time.sleep(1.5)  # Wait after master capture
+
+                # Analyze linked sheets
+                self.screenshot_status.config(text="Analyzing linked sheets...", foreground='orange')
+                self.log_message("=" * 60, 'info')
+                self.log_message("STARTING LINKED SHEET ANALYSIS", 'info')
+                self.log_message("=" * 60, 'info')
+                
+                conditional_sheets = self.analyze_linked_sheets(workbook)
+
+                self.log_message(
+                    f"Analysis complete: {len(conditional_sheets)} sheets meet threshold",
+                    'success' if conditional_sheets else 'warning'
+                )
+                
+                # DEBUG: Log what sheets will be captured
+                if conditional_sheets:
+                    self.log_message("Sheets queued for capture:", 'info')
+                    for idx, sheet_cfg in enumerate(conditional_sheets, 1):
+                        self.log_message(
+                            f"  {idx}. {sheet_cfg['sheet_name']} -> {sheet_cfg['name']}.png",
+                            'info'
+                        )
+                else:
+                    self.log_message("No linked sheets meet the threshold criteria", 'warning')
+
+                # Capture conditional sheets ONE BY ONE with verification
+                for idx, sheet_config in enumerate(conditional_sheets, 1):
+                    self.log_message("=" * 60, 'info')
+                    self.log_message(f"CAPTURING SHEET {idx}/{len(conditional_sheets)}", 'info')
+                    self.log_message("=" * 60, 'info')
+                    
+                    sheet_name = sheet_config['sheet_name']
+                    
+                    self.screenshot_status.config(
+                        text=f"Capturing {idx}/{len(conditional_sheets)}: {sheet_name}...",
+                        foreground='orange'
+                    )
+                    
+                    # Log details before capture
+                    self.log_message(f"Sheet Name: {sheet_name}", 'info')
+                    self.log_message(f"Range: {sheet_config['cell_range']}", 'info')
+                    self.log_message(f"Save As: {sheet_config['name']}.png", 'info')
+                    
+                    # Verify sheet exists BEFORE attempting capture
+                    try:
+                        test_sheet = workbook.Sheets(sheet_name)
+                        self.log_message(f"✓ Sheet '{sheet_name}' exists in workbook", 'success')
+                    except Exception as e:
+                        self.log_message(f"✗ Sheet '{sheet_name}' NOT FOUND: {str(e)}", 'error')
+                        continue  # Skip this sheet
+                    
+                    # Count screenshots before
+                    count_before = len(self.screenshot_paths)
+                    
+                    # Attempt capture
+                    self._capture_single_screenshot(
+                        workbook,
+                        sheet_name,
+                        sheet_config['cell_range'],
+                        sheet_config['name'],
+                        file_folder,
+                        embed=sheet_config.get('embed', True),
+                        attach=sheet_config.get('attach', False)
+                    )
+                    
+                    # Verify capture was successful
+                    count_after = len(self.screenshot_paths)
+                    if count_after > count_before:
+                        self.log_message(f"✓ Screenshot #{count_after} added successfully", 'success')
+                    else:
+                        self.log_message(f"✗ Screenshot was NOT added to list!", 'error')
+                    
+                    # CRITICAL: Longer delay between sheets
+                    time.sleep(2.0)
+                    
+                self.log_message("=" * 60, 'info')
+                self.log_message("ALL CAPTURES COMPLETE", 'success')
+                self.log_message("=" * 60, 'info')
