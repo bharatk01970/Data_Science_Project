@@ -1,57 +1,37 @@
 def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
-    """Helper method to capture a single screenshot - MOST RELIABLE VERSION"""
+    """Helper method to capture a single screenshot with reliable clipboard handling"""
     try:
         self.log_message(f"  Capturing {name} from {sheet_name}!{cell_range}", 'info')
-
-        # Get the sheet and range
         sheet = workbook.Sheets(sheet_name)
         range_obj = sheet.Range(cell_range)
-        
-        # Generate unique filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        unique_filename = f"{name}_{timestamp}.png"
-        save_path = os.path.join(folder, unique_filename)
-        
-        # Copy range as picture with increased wait
-        range_obj.CopyPicture(Appearance=1, Format=2)
-        
-        # CRITICAL: Wait 2-3 seconds for clipboard
-        time.sleep(2.5)
-        
-        # Multiple attempts to grab from clipboard
+        range_obj.CopyPicture(Format=2)
+        workbook.Windows(1).Activate()
+        time.sleep(0.7)
+
+        # Wait until image appears in clipboard (retry up to ~2 seconds)
         img = None
-        for attempt in range(5):  # Try 5 times
+        for _ in range(10):
             img = ImageGrab.grabclipboard()
-            if img is not None:
-                self.log_message(f"    Clipboard grabbed successfully on attempt {attempt + 1}", 'info')
+            if img:
                 break
-            time.sleep(0.5)
-        
+            time.sleep(0.2)
+
         if img is None:
-            self.log_message(f"  ✗ Failed to capture {name} after 5 attempts", 'error')
+            self.log_message(f"  Failed to capture {name} (clipboard empty)", 'error')
             return
-        
-        # Save image
+
+        save_path = os.path.join(folder, f"{name}.png")
         img.save(save_path, 'PNG')
-        
-        # Verify save
-        if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
-            screenshot_info = {
-                'path': save_path,
-                'name': name,
-                'embed': embed,
-                'attach': attach
-            }
-            self.screenshot_paths.append(screenshot_info)
-            
-            file_size = os.path.getsize(save_path)
-            self.log_message(f"  ✓ Saved {name} ({file_size:,} bytes) as {unique_filename}", 'success')
-        else:
-            self.log_message(f"  ✗ Failed to save {name}", 'error')
+
+        screenshot_info = {
+            'path': save_path,
+            'name': name,
+            'embed': embed,
+            'attach': attach
+        }
+        self.screenshot_paths.append(screenshot_info)
+        self.log_message(f"  ✓ Saved {name}", 'success')
+        time.sleep(0.3)  # brief delay to avoid clipboard overwrite
 
     except Exception as e:
-        self.log_message(f"  ✗ Error capturing {name}: {str(e)}", 'error')
-    
-    finally:
-        # IMPORTANT: Add delay between different sheet captures
-        time.sleep(1.0)
+        self.log_message(f"  Error capturing {name}: {str(e)}", 'error')
