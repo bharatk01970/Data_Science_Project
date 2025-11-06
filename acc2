@@ -1060,3 +1060,344 @@ KEY CHANGES MADE
 
 ============================================
 """
+
+
+
+
+
+'name': 'Saracen Data Integrity (Periodic)'
+                                },
+                                {
+                                    'sheet_name': 'GRC Vs DDC',
+                                    'capture_range': 'B14:T45',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Saracen vs TM1 (GRC vs DDC)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O29',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'GCC',
+                                    'capture_range': 'B13:J19',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'GMI Review Vs GCC (GCC)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O37',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'CC_Rule',
+                                    'capture_range': 'B10:Q84',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Constant Currency (CC_Rule)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O41',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'SI_Data_Integrity',
+                                    'capture_range': 'A14:D22',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Significant Items (SI_Data_Integrity)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O45',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'AVBS_Data_Integrity',
+                                    'capture_range': 'A13:K29',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'AVBS Data (AVBS_Data_Integrity)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O49',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'SI_TOP',
+                                    'capture_range': 'A15:F21',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Significant Items - Top Level (SI_TOP)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O57',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'Review VS GRC',
+                                    'capture_range': 'B13:J19',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Journal Data ((GMI Review Vs GRC))'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+            
+        self.email_config = {
+            'sender_email': 'Bhai@hsbc.com',
+            'to_recipients': ['a@mail.com'],
+            'cc_recipients': ['b@mail.com'],
+            'bcc_recipients': [],
+            'timezone': 'GMT',
+            'signature': 'Regards,\nBhai',
+            'disclaimer': 'Auto generated email, This e-mail is confidential. If you are not the intended recipient, please notify the sender by reply all to this e-mail and delete it from your system.'
+        }
+
+        pythoncom.CoInitialize()
+        self.create_scrollable_gui()
+        
+        # NEW: Bind auto-close event for main window
+        self.root.bind("<<AutoCloseMainWindow>>", self.auto_close_main_window)
+        
+        # NEW: Auto-execute first file if auto_execute flag is True
+        if self.auto_execute:
+            self.root.after(1000, self.auto_execute_first_file)
+
+    def auto_close_main_window(self, event=None):
+        """Close main window automatically after workflow completion"""
+        self.log_message("AUTO MODE: All tasks completed. Closing application...", 'success')
+        self.logger.info("AUTO MODE: All tasks completed. Closing application automatically")
+        self.root.after(2000, self.on_closing)  # Close after 2 seconds
+
+    def auto_execute_first_file(self):
+        """Automatically open and process the first file"""
+        if not self.file_configs:
+            self.log_message("No files configured for auto-execution", 'error')
+            return
+        
+        # Get first file key
+        first_file_key = list(self.file_configs.keys())[0]
+        self.log_message(f"AUTO MODE: Processing {first_file_key}", 'warning')
+        
+        # Open file popup in auto mode
+        file_config = self.file_configs.get(first_file_key, {})
+        ReconFile(self.root, first_file_key, file_config, self.email_config, self.log_message, auto_mode=True)
+
+    def create_scrollable_gui(self):
+        container = ttk.Frame(self.root)
+        container.pack(fill=tk.BOTH, expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        header_frame = ttk.Frame(self.scrollable_frame)
+        header_frame.pack(pady=20)
+        
+        ttk.Label(
+            header_frame,
+            text='Recon Mail Draft Utility',
+            font=('Arial', 18, 'bold')
+        ).pack()
+        
+        # NEW: Show auto-execute status
+        if self.auto_execute:
+            ttk.Label(
+                header_frame,
+                text="AUTO-EXECUTE MODE ENABLED",
+                font=('Arial', 11, 'bold'),
+                foreground='orange'
+            ).pack(pady=5)
+        
+        inst_frame = ttk.LabelFrame(self.scrollable_frame, text="Workflow", padding="15")
+        inst_frame.pack(fill=tk.X, padx=20, pady=15)
+        
+        instructions = """
+        1. Select the Recon Template from below
+        2. Capture screenshots from Excel sheets
+        3. Configure email recipients
+        4. Draft email in Outlook with embedded screenshots
+        5. Files and screenshots are automatically deleted after drafting
+        """
+        
+        ttk.Label(
+            inst_frame,
+            text=instructions,
+            justify=tk.LEFT,
+            font=('Arial', 9)
+        ).pack()
+        
+        files_frame = ttk.LabelFrame(self.scrollable_frame, text="Select Recon Template Draft", padding="15")
+        files_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        for file_key, config in self.file_configs.items():
+            file_button_frame = ttk.Frame(files_frame)
+            file_button_frame.pack(fill=tk.X, pady=8)
+            
+            smart_enabled = config.get('smart_linking', {}).get('enabled', False)
+            icon = "🔗" if smart_enabled else "📄"
+            
+            btn = ttk.Button(
+                file_button_frame,
+                text=f"{icon} {file_key}: {config['name']}",
+                command=lambda fk=file_key: self.open_file_popup(fk),
+                width=55
+            )
+            btn.pack(side=tk.LEFT, padx=5)
+            
+            if smart_enabled:
+                num_sheets = len(config.get('smart_linking', {}).get('linked_sheets', []))
+                info_label = ttk.Label(
+                    file_button_frame,
+                    text=f"({num_sheets} linked sheets)",
+                    font=('Arial', 8),
+                    foreground='gray'
+                )
+                info_label.pack(side=tk.LEFT, padx=5)
+        
+        log_frame = ttk.LabelFrame(self.scrollable_frame, text="Activity Log", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, width=40, height=12, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text.tag_config('info', foreground='blue')
+        self.log_text.tag_config('success', foreground='green')
+        self.log_text.tag_config('error', foreground='red')
+        self.log_text.tag_config('warning', foreground='orange')
+        
+        self.log_message("Application initialized", 'success')
+        
+        if self.auto_execute:
+            self.log_message("AUTO-EXECUTE MODE: Will process first file automatically", 'warning')
+        else:
+            self.log_message("Select a file above to begin", 'info')
+
+    def log_message(self, message, tag='info'):
+        self.log_text.config(state='normal')
+        timestamp = datetime.now().strftime('%I:%M:%S %p')
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+        self.root.update_idletasks()
+    
+    def open_file_popup(self, file_key):
+        self.log_message(f"Opening draft window for {file_key}", 'info')
+        
+        file_config = self.file_configs.get(file_key, {})
+        
+        if not file_config:
+            self.log_message(f"Configuration not found for {file_key}", 'error')
+            messagebox.showerror("Error", f"No configuration found for {file_key}")
+            return
+        
+        smart_enabled = file_config.get('smart_linking', {}).get('enabled', False)
+        
+        # NEW: Pass auto_mode=False for manual opening
+        ReconFile(self.root, file_key, file_config, self.email_config, self.log_message, auto_mode=False)
+    
+    def on_closing(self):
+        try:
+            pythoncom.CoUninitialize()
+        except:
+            pass
+        
+        self.root.destroy()
+
+
+def main():
+    """Main function to start the GUI application"""
+    root = tk.Tk()
+    
+    # ============================================================
+    # ENABLE AUTO-EXECUTE MODE
+    # ============================================================
+    # Change auto_execute=False to auto_execute=True to enable
+    # automatic execution on launch
+    # ============================================================
+    
+    app = ExcelOutlookGUI(root, auto_execute=True)  # <-- SET TO True FOR AUTO MODE
+    
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+
+
+"""
+============================================
+AUTO-EXECUTE MODE INSTRUCTIONS
+============================================
+
+To enable automatic execution on launch:
+1. Change line in main() function:
+   app = ExcelOutlookGUI(root, auto_execute=True)
+
+2. The workflow will automatically:
+   - Open the first configured file (Recon 1)
+   - Capture all screenshots
+   - Draft email in Outlook
+   - Close the popup window
+   - Close the main application window (after 2 seconds)
+
+To disable and use manual mode:
+   app = ExcelOutlookGUI(root, auto_execute=False)
+
+Auto-Close Timing:
+- Popup closes immediately after email draft
+- Main window waits 2 seconds before closing
+- Adjust delay in auto_close_main_window():
+  self.root.after(2000, self.on_closing)  # Change 2000 (2 sec) as needed
+
+============================================
+KEY CHANGES MADE
+============================================
+
+1. ReconFile class:
+   - Added auto_mode parameter
+   - Added auto_execute_workflow() method
+   - Added _auto_screenshot_and_draft() combined thread
+   - Added auto_close() method
+   - Skips confirmation dialog in auto mode
+
+2. ExcelOutlookGUI class:
+   - Added auto_execute parameter
+   - Added auto_execute_first_file() method
+   - Shows "AUTO-EXECUTE MODE" indicator
+   - Automatically triggers first file after 1 second
+
+3. Main workflow:
+   - All three steps execute automatically
+   - Each step waits for previous to complete
+   - No user interaction required
+   - Window closes automatically after completion
+
+============================================
+"""
