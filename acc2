@@ -2,135 +2,217 @@
 # -*- coding: utf-8 -*-
 """
 Auto-Execute Mail Draft Utility
-Automatically processes files and drafts emails on launch
+Automatically processes Excel files and drafts emails with screenshots on launch.
+Supports manual and automatic execution modes with smart conditional screenshot capture.
 """
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import win32com.client
-from PIL import ImageGrab
-import pythoncom
-from datetime import datetime
-import pytz
-import os
-import time
-import threading
-import logging
-from logging.handlers import RotatingFileHandler
+# Standard library imports
+import tkinter as tk  # GUI framework
+from tkinter import ttk, filedialog, messagebox, scrolledtext  # GUI components
+import os  # File system operations
+import time  # Time delays and timing operations
+import threading  # Multi-threading for background tasks
+import logging  # Logging framework
+from logging.handlers import RotatingFileHandler  # Log file rotation
+from datetime import datetime  # Date and time handling
+import pytz  # Timezone conversions
+
+# Third-party imports
+import win32com.client  # COM interface for Excel and Outlook automation
+from PIL import ImageGrab  # Clipboard image capture
+import pythoncom  # COM initialization for threading
 
 
 class ReconFile:
+    """
+    Handles individual reconciliation file processing.
+    
+    This class creates a popup window for each file, manages screenshot capture
+    from Excel workbooks, analyzes conditional logic for smart linking, and
+    drafts emails in Outlook with embedded/attached screenshots.
+    
+    Key Features:
+    - Manual or automatic workflow execution
+    - Smart conditional screenshot capture based on cell values
+    - Excel sheet range screenshot with clipboard copying
+    - Outlook email drafting with embedded images
+    - Automatic cleanup of temporary files
+    - Activity logging to GUI and file
+    """
+    
     def __init__(self, parent, file_key, file_config, email_config, log_callback, logger, auto_mode=False):
-        self.parent = parent
-        self.file_key = file_key
-        self.file_config = file_config
-        self.email_config = email_config
-        self.log_callback = log_callback
-        self.logger = logger  # NEW: Logger instance
-        self.screenshot_paths = []
-        self.conditional_screenshots = []
-        self.auto_mode = auto_mode  # NEW: Flag for automatic execution
+        """
+        Initialize the ReconFile popup window.
+        
+        Args:
+            parent: Parent tkinter window (main application window)
+            file_key: Unique identifier for the file (e.g., "Recon 1")
+            file_config: Dictionary containing file-specific configuration
+            email_config: Dictionary containing email settings (recipients, signature, etc.)
+            log_callback: Function to call for logging to main window
+            logger: Logger instance for file-based logging
+            auto_mode: Boolean flag to enable automatic workflow execution
+        """
+        # Store initialization parameters
+        self.parent = parent  # Reference to main window
+        self.file_key = file_key  # File identifier for logging
+        self.file_config = file_config  # Configuration dict for this file
+        self.email_config = email_config  # Email settings dict
+        self.log_callback = log_callback  # Function to log to main window
+        self.logger = logger  # Logger instance for file logging
+        self.screenshot_paths = []  # List to store captured screenshot file paths
+        self.conditional_screenshots = []  # List for conditionally captured sheets
+        self.auto_mode = auto_mode  # Flag indicating automatic vs manual mode
 
         # Create popup window
-        self.popup = tk.Toplevel(parent)
-        self.popup.title(f"Draft Email - {file_key}")
-        self.popup.geometry("550x560")
-        self.popup.grab_set()
+        self.popup = tk.Toplevel(parent)  # Create new window on top of parent
+        self.popup.title(f"Draft Email - {file_key}")  # Set window title
+        self.popup.geometry("550x560")  # Set window dimensions
+        self.popup.grab_set()  # Make window modal (blocks parent interaction)
         
+        # Initialize COM for this thread (required for Excel/Outlook automation)
         pythoncom.CoInitialize()
+        
+        # Build the GUI components
         self.create_popup_gui()
         
-        # NEW: Auto-execute if in auto mode
+        # Auto-execute workflow if in automatic mode
         if self.auto_mode:
+            # Schedule auto-execution after 500ms to allow GUI to render
             self.popup.after(500, self.auto_execute_workflow)
 
     def auto_execute_workflow(self):
-        """Automatically execute: Screenshot → Draft → Close"""
+        """
+        Automatically execute the complete workflow without user interaction.
+        
+        This method orchestrates the automatic execution sequence:
+        1. Capture screenshots from Excel
+        2. Draft email in Outlook
+        3. Close popup and main windows
+        
+        Used when auto_mode=True for hands-free operation.
+        """
         self.log_message("AUTO MODE: Starting automated workflow", 'info')
         
-        # Step 1: Capture screenshots
+        # Step 1: Initiate screenshot capture in background thread
         self.log_message("AUTO MODE: Step 1/2 - Capturing screenshots...", 'info')
         thread = threading.Thread(target=self._auto_screenshot_and_draft)
-        thread.daemon = True
+        thread.daemon = True  # Thread dies when main thread exits
         thread.start()
 
     def _auto_screenshot_and_draft(self):
-        """Combined thread for screenshot capture and email drafting"""
+        """
+        Combined background thread for automatic screenshot capture and email drafting.
+        
+        This method runs in a separate thread to prevent GUI blocking.
+        Executes the full workflow and handles automatic window closure.
+        """
         try:
-            # Step 1: Take screenshots
+            # Step 1: Execute screenshot capture logic
             self._take_screenshot_thread()
             
-            # Wait a moment to ensure screenshots are saved
+            # Wait for screenshot files to be written to disk
             time.sleep(2)
             
-            # Step 2: Draft email
+            # Step 2: Draft email if screenshots were captured successfully
             if self.screenshot_paths:
                 self.log_message("AUTO MODE: Step 2/2 - Drafting email...", 'info')
                 self._draft_email_thread()
                 
-                # Step 3: Close popup and main window after completion
+                # Step 3: Schedule automatic window closure
                 time.sleep(2)
                 self.popup.after(100, self.auto_close)
             else:
+                # No screenshots captured - abort workflow
                 self.log_message("AUTO MODE: No screenshots captured, aborting", 'error')
                 
         except Exception as e:
+            # Log any errors that occur during auto-execution
             self.log_message(f"AUTO MODE ERROR: {str(e)}", 'error')
 
     def auto_close(self):
-        """Close popup automatically after drafting, then close main window"""
+        """
+        Automatically close the popup window and then the main application window.
+        
+        This method is called after successful auto-execution to clean up
+        and close all windows without user interaction.
+        """
         self.log_message("AUTO MODE: Workflow completed, closing popup window", 'success')
         
-        # NEW: Get reference to main window's close method before destroying popup
+        # Check if in auto mode and parent window exists
         if self.auto_mode and hasattr(self.parent, 'winfo_exists'):
             main_window = self.parent
             
-            # Close popup first
+            # Close popup window first
             self.popup.destroy()
             
-            # Then schedule main window closure
+            # Schedule main window closure after 2 second delay
             if main_window.winfo_exists():
                 main_window.after(2000, self.close_main_window, main_window)
         else:
+            # Manual mode - just close popup
             self.popup.destroy()
     
     def close_main_window(self, main_window):
-        """Helper method to close the main window"""
+        """
+        Helper method to close the main application window.
+        
+        Args:
+            main_window: Reference to the main tkinter window to close
+        """
         try:
+            # Verify window still exists before attempting to close
             if main_window.winfo_exists():
-                # Find the ExcelOutlookGUI instance and call its on_closing method
-                for widget in main_window.winfo_children():
-                    if hasattr(widget, 'master'):
-                        break
-                
-                # Direct approach: destroy the main window
+                # Log closure action
                 self.logger.info("AUTO MODE: Closing main application window")
+                # Destroy the main window
                 main_window.destroy()
         except Exception as e:
+            # Print error to console if window closure fails
             print(f"Error closing main window: {e}")
 
     def create_popup_gui(self):
-        canvas = tk.Canvas(self.popup, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.popup, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        """
+        Create and configure all GUI components for the popup window.
+        
+        This method builds a scrollable interface containing:
+        - File path display and configuration
+        - Screenshot capture controls
+        - Email configuration fields (From, To, CC)
+        - Draft email button
+        - Activity log display
+        
+        The GUI is fully scrollable to accommodate varying content lengths.
+        """
+        # Create scrollable canvas for popup content
+        canvas = tk.Canvas(self.popup, highlightthickness=0)  # Canvas for scrolling
+        scrollbar = ttk.Scrollbar(self.popup, orient="vertical", command=canvas.yview)  # Vertical scrollbar
+        scrollable_frame = ttk.Frame(canvas)  # Frame inside canvas for content
 
+        # Configure canvas scrolling region when frame size changes
         scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
 
+        # Create window inside canvas to hold the frame
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.configure(yscrollcommand=scrollbar.set)  # Link canvas to scrollbar
 
+        # Pack canvas and scrollbar
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # Bind mouse wheel scrolling
         def _on_mousewheel(event):
+            """Handle mouse wheel scrolling"""
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
+        # Use scrollable_frame as main container
         main_frame = scrollable_frame
 
+        # Title label showing file key and name
         title_label = ttk.Label(
             main_frame,
             text=f"{self.file_key}: {self.file_config.get('name', 'File')}",
@@ -138,26 +220,29 @@ class ReconFile:
         )
         title_label.pack(pady=10)
 
-        # File Path Section
+        # File Path Section - displays Excel file path
         path_frame = ttk.LabelFrame(main_frame, text="Recon Template Information", padding='10')
         path_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ttk.Label(path_frame, text="File Path:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         
+        # Entry field for file path (pre-filled from config)
         self.path_entry = ttk.Entry(path_frame, width=70)
         self.path_entry.insert(0, self.file_config.get('path', ''))
         self.path_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
+        # Make entry column expandable
         path_frame.columnconfigure(1, weight=1)
 
-        # Check smart linking
+        # Check if smart linking is enabled for this file
         smart_config = self.file_config.get('smart_linking', {})
         self.smart_enabled = smart_config.get('enabled', False)
 
-        # Screenshot Section
+        # Screenshot Section - controls for capturing screenshots
         screenshot_frame = ttk.Frame(main_frame)
         screenshot_frame.pack(pady=10)
         
+        # Button to manually trigger screenshot capture
         self.screenshot_btn = ttk.Button(
             screenshot_frame,
             text="Capture Screenshots",
@@ -165,6 +250,7 @@ class ReconFile:
         )
         self.screenshot_btn.pack(side=tk.LEFT, padx=5)
         
+        # Status label showing screenshot capture state
         self.screenshot_status = ttk.Label(
             screenshot_frame,
             text="Ready" if not self.auto_mode else "AUTO MODE",
@@ -172,31 +258,32 @@ class ReconFile:
         )
         self.screenshot_status.pack(side=tk.LEFT, padx=5)
 
-        # Email Configuration Section
+        # Email Configuration Section - fields for email settings
         email_frame = ttk.LabelFrame(main_frame, text="Email Configuration", padding="10")
         email_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # From
+        # From field - sender email address
         ttk.Label(email_frame, text="From:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.sender_entry = ttk.Entry(email_frame, width=70)
         self.sender_entry.insert(0, self.email_config.get('sender_email', ''))
         self.sender_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
-        # To
+        # To field - primary recipients (semicolon-separated)
         ttk.Label(email_frame, text="To:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
         self.to_entry = ttk.Entry(email_frame, width=70)
         self.to_entry.insert(0, "; ".join(self.email_config.get('to_recipients', [])))
         self.to_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
-        # CC
+        # CC field - carbon copy recipients (semicolon-separated)
         ttk.Label(email_frame, text="CC:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
         self.cc_entry = ttk.Entry(email_frame, width=70)
         self.cc_entry.insert(0, "; ".join(self.email_config.get('cc_recipients', [])))
         self.cc_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
         
+        # Make email entry columns expandable
         email_frame.columnconfigure(1, weight=1)
 
-        # Draft Button
+        # Draft Button - triggers email creation in Outlook
         draft_btn = ttk.Button(
             main_frame,
             text='Draft Email in Outlook',
@@ -205,37 +292,51 @@ class ReconFile:
         )
         draft_btn.pack(pady=15)
 
-        # Activity Log Section
+        # Activity Log Section - scrollable text area for status messages
         log_frame = ttk.LabelFrame(main_frame, text='Activity Log', padding='5')
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
+        # ScrolledText widget for log messages
         self.log_text = scrolledtext.ScrolledText(log_frame, width=40, height=8, state='disabled')
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
+        # Configure text tags for colored log messages
         self.log_text.tag_config('info', foreground='blue')
         self.log_text.tag_config('success', foreground='green')
         self.log_text.tag_config('error', foreground='red')
         self.log_text.tag_config('warning', foreground='orange')
         
+        # Log initial status message
         if self.auto_mode:
             self.log_message("AUTO MODE ENABLED - Workflow will execute automatically", 'warning')
         else:
             self.log_message("Popup opened - Ready to capture screenshots", 'info')
         
+        # Log smart linking status if enabled
         if self.smart_enabled:
             self.log_message("Will capture based on variance thresholds", 'info')
 
     def log_message(self, message, tag='info'):
+        """
+        Log a message to both the popup GUI log and the file-based logger.
+        
+        Args:
+            message: The message text to log
+            tag: The message type ('info', 'success', 'warning', 'error')
+                 Determines text color and log level
+        """
+        # Update GUI log (enable, insert, disable to prevent user editing)
         self.log_text.config(state='normal')
-        timestamp = datetime.now().strftime('%I:%M:%S %p')
+        timestamp = datetime.now().strftime('%I:%M:%S %p')  # Format: 02:30:45 PM
         full_message = f"[{timestamp}] {message}"
-        self.log_text.insert(tk.END, f"{full_message}\n", tag)
-        self.log_text.see(tk.END)
-        self.log_text.config(state='disabled')
-        self.popup.update_idletasks()
+        self.log_text.insert(tk.END, f"{full_message}\n", tag)  # Append with color tag
+        self.log_text.see(tk.END)  # Auto-scroll to latest message
+        self.log_text.config(state='disabled')  # Make read-only again
+        self.popup.update_idletasks()  # Force GUI update
 
-        # NEW: Write to log file using logger
+        # Write to file logger with appropriate log level
         if self.logger:
+            # Map GUI tag to logging level
             log_level = {
                 'info': logging.INFO,
                 'success': logging.INFO,
@@ -243,110 +344,186 @@ class ReconFile:
                 'error': logging.ERROR
             }.get(tag, logging.INFO)
             
+            # Log to file with file key prefix
             self.logger.log(log_level, f"{self.file_key}: {message}")
 
+        # Also log to main window if callback provided
         if self.log_callback:
             self.log_callback(f"{self.file_key}: {message}", tag)
 
     def extract_cell_value(self, workbook, cell_ref):
+        """
+        Extract numeric value from an Excel cell reference.
+        
+        This method handles both simple cell references (e.g., "A1") and
+        qualified references with sheet names (e.g., "Sheet1!A1").
+        
+        Args:
+            workbook: Excel workbook COM object
+            cell_ref: Cell reference string (e.g., "A1" or "Sheet1!A1")
+            
+        Returns:
+            float: The numeric value from the cell (0.0 if empty/error)
+        """
         cell_addr = None
         sheet = None
         
         try:
+            # Remove leading/trailing whitespace
             cell_ref = cell_ref.strip()
             
+            # Check if reference includes sheet name (contains '!')
             if '!' in cell_ref:
                 parts = cell_ref.split('!')
                 if len(parts) != 2:
+                    # Invalid format - must be exactly "Sheet!Cell"
                     self.log_message(f"Invalid cell reference format: {cell_ref}", 'error')
                     return 0.0
                 
+                # Parse sheet name and cell address
                 sheet_name, cell_addr = parts
                 sheet_name = sheet_name.strip()
                 cell_addr = cell_addr.strip()
                 
                 try:
+                    # Get the specified sheet from workbook
                     sheet = workbook.Sheets(sheet_name)
                 except Exception as e:
+                    # Sheet not found in workbook
                     self.log_message(f"Sheet '{sheet_name}' not found in workbook", 'error')
                     return 0.0
             else:
+                # No sheet specified - use active sheet
                 sheet = workbook.ActiveSheet
                 cell_addr = cell_ref.strip()
     
+            # Verify cell address is not empty
             if not cell_addr:
                 self.log_message(f"Empty cell address in reference: {cell_ref}", 'error')
                 return 0.0
     
+            # Get the cell value
             value = sheet.Range(cell_addr).Value
     
+            # Handle empty cells
             if value is None:
                 self.log_message(f"Cell {cell_ref} is empty, using 0.0", 'info')
                 return 0.0
     
+            # Convert to float (handles numeric strings)
             try:
                 return float(value)
             except (ValueError, TypeError):
+                # Cell contains non-numeric data
                 self.log_message(f"Non-numeric value in {cell_ref}: {value}", 'warning')
                 return 0.0
     
         except Exception as e:
+            # Catch-all for any other errors
             self.log_message(f"Error reading cell {cell_ref}: {str(e)}", 'error')
             return 0.0
 
     def check_threshold_condition(self, value, threshold_type, threshold_value, threshold_max=None):
+        """
+        Evaluate whether a value meets a specified threshold condition.
+        
+        This method supports multiple comparison types for conditional logic.
+        Used to determine if linked sheets should be captured based on cell values.
+        
+        Args:
+            value: The numeric value to test
+            threshold_type: Type of comparison ('equals_zero', 'not_zero', 'exceeds', 
+                           'below', 'between', 'less_minus_x_greater_x')
+            threshold_value: The threshold value to compare against
+            threshold_max: Maximum value for 'between' comparisons (optional)
+            
+        Returns:
+            bool: True if condition is met, False otherwise
+        """
         try:
+            # Convert threshold values to float
             threshold_val = float(threshold_value)
             if threshold_max is not None:
                 threshold_max_val = float(threshold_max)
         except (ValueError, TypeError):
+            # Invalid threshold values - default to 0
             threshold_val = 0.0
             threshold_max_val = None
         
+        # Evaluate condition based on type
         if threshold_type == 'equals_zero':
+            # Value must be exactly zero
             return value == 0.0
         elif threshold_type == 'not_zero':
+            # Value must be non-zero
             return value != 0.0
         elif threshold_type == 'exceeds':
+            # Value must be greater than threshold
             return value > threshold_val
         elif threshold_type == 'below':
+            # Value must be less than threshold
             return value < threshold_val
         elif threshold_type == 'between':
+            # Value must be within range [threshold_val, threshold_max_val]
             if threshold_max_val is not None:
                 return threshold_val <= value <= threshold_max_val
             else:
                 return False
         elif threshold_type == 'less_minus_x_greater_x':
+            # Value must be outside range (-threshold_val, threshold_val)
+            # Triggers if value < -threshold or value > threshold
             return (-threshold_val > value) or (threshold_val < value)
         else:
+            # Unknown threshold type
             return False
 
     def analyze_linked_sheets(self, workbook):
+        """
+        Analyze Excel workbook and determine which linked sheets to capture.
+        
+        This method implements "smart linking" - conditional screenshot capture
+        based on cell values meeting threshold conditions. Each linked sheet
+        has an associated "value cell" that is checked against thresholds.
+        
+        Args:
+            workbook: Excel workbook COM object to analyze
+            
+        Returns:
+            list: List of sheet configuration dicts for sheets that meet conditions
+                  Each dict contains: sheet_name, cell_range, embed, attach, name, value
+        """
+        # Get smart linking configuration
         smart_config = self.file_config.get('smart_linking', {})
         
+        # Return empty list if smart linking is disabled
         if not smart_config.get('enabled', False):
             return []
 
-        master_sheet = smart_config.get('master_sheet', '')
-        linked_sheets = smart_config.get('linked_sheets', [])
-        threshold_type = smart_config.get('threshold_type', 'equals_zero')
-        threshold_value = smart_config.get('threshold_value', 0)
-        threshold_max = smart_config.get('threshold_max', None)
+        # Extract configuration parameters
+        master_sheet = smart_config.get('master_sheet', '')  # Master sheet name
+        linked_sheets = smart_config.get('linked_sheets', [])  # List of linked sheet groups
+        threshold_type = smart_config.get('threshold_type', 'equals_zero')  # Comparison type
+        threshold_value = smart_config.get('threshold_value', 0)  # Threshold value
+        threshold_max = smart_config.get('threshold_max', None)  # Max value for 'between'
         
         self.log_message("Analyzing linked sheets with threshold conditions", 'info')
         
-        sheets_to_capture = []
+        sheets_to_capture = []  # List to store sheets that meet conditions
         
+        # Iterate through each linked sheet group
         for linked_group in linked_sheets:
-            value_cell = linked_group.get('value_cell', '')
-            sheets_list = linked_group.get('sheets', [])
+            value_cell = linked_group.get('value_cell', '')  # Cell to check condition
+            sheets_list = linked_group.get('sheets', [])  # List of sheets in this group
             
+            # Handle legacy format where sheet config is in the group itself
             if not sheets_list and linked_group.get('sheet_name'):
                 sheets_list = [linked_group]
                 value_cell = linked_group.get('value_cell', '')
             
+            # Extract the value from the specified cell
             cell_value = self.extract_cell_value(workbook, value_cell)
             
+            # Check if value meets the threshold condition
             meets_condition = self.check_threshold_condition(
                cell_value,
                threshold_type,
@@ -354,11 +531,13 @@ class ReconFile:
                threshold_max
             )
             
+            # Log the condition check result
             self.log_message(
                 f"  Value Cell {value_cell}: Value={cell_value}, Condition={meets_condition}",
                 'success' if meets_condition else 'info'
             )
             
+            # If condition is met, add all sheets in this group to capture list
             if meets_condition:
                 for sheet_config in sheets_list:
                     sheet_name = sheet_config.get('sheet_name', '')
@@ -369,56 +548,86 @@ class ReconFile:
                         'success'
                     )
                     
+                    # Add sheet configuration to capture list
                     sheets_to_capture.append({
-                        'sheet_name': sheet_name,
-                        'cell_range': capture_range,
-                        'embed': sheet_config.get('embed', True),
-                        'attach': sheet_config.get('attach', False),
-                        'name': sheet_config.get('name', sheet_name),
-                        'value': cell_value,
-                        'value_cell': value_cell
+                        'sheet_name': sheet_name,  # Name of sheet to capture
+                        'cell_range': capture_range,  # Range to screenshot
+                        'embed': sheet_config.get('embed', True),  # Embed in email body
+                        'attach': sheet_config.get('attach', False),  # Attach as file
+                        'name': sheet_config.get('name', sheet_name),  # Display name
+                        'value': cell_value,  # The value that triggered capture
+                        'value_cell': value_cell  # Cell reference that was checked
                     })
         
         return sheets_to_capture
 
     def take_screenshot(self):
+        """
+        Initiate screenshot capture in a background thread.
+        
+        This method starts the screenshot capture process without blocking the GUI.
+        The actual capture logic runs in _take_screenshot_thread().
+        """
+        # Create and start background thread
         thread = threading.Thread(target=self._take_screenshot_thread)
-        thread.daemon = True
+        thread.daemon = True  # Thread terminates when main thread exits
         thread.start()
 
     def _take_screenshot_thread(self):
+        """
+        Execute the screenshot capture workflow in a background thread.
+        
+        This method:
+        1. Opens the Excel workbook
+        2. Analyzes smart linking conditions (if enabled)
+        3. Captures screenshots from specified sheet ranges
+        4. Saves screenshots as PNG files
+        5. Cleans up Excel resources
+        
+        Runs in separate thread to prevent GUI freezing during Excel operations.
+        """
         try:
+            # Update status to show processing
             self.screenshot_status.config(text='Analyzing...', foreground='orange')
             self.log_message('Initiating Screenshot Capture Process', 'info')
 
+            # Get file path from GUI entry field
             file_path = self.path_entry.get()
 
+            # Validate file path exists
             if not file_path or not os.path.exists(file_path):
                 self.log_message(f'Invalid file path: {file_path}', 'error')
                 self.screenshot_status.config(text='Error: File not found', foreground='red')
                 return
 
+            # Initialize COM for this thread (required for Excel automation)
             pythoncom.CoInitialize()
 
+            # Create Excel application instance (hidden, no alerts)
             excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
-            excel.Visible = False
-            excel.DisplayAlerts = False
+            excel.Visible = False  # Don't show Excel window
+            excel.DisplayAlerts = False  # Suppress Excel alerts/prompts
 
+            # Open the workbook in read-only mode without updating links
             workbook = excel.Workbooks.Open(
                 Filename=os.path.abspath(file_path),
-                UpdateLinks=0,
-                ReadOnly=True,
-                IgnoreReadOnlyRecommended=True
+                UpdateLinks=0,  # Don't update external links
+                ReadOnly=True,  # Open in read-only mode
+                IgnoreReadOnlyRecommended=True  # Don't show read-only prompt
             )
             
+            # Get folder containing the Excel file (for saving screenshots)
             file_folder = os.path.dirname(os.path.abspath(file_path))
-            self.screenshot_paths = []
+            self.screenshot_paths = []  # Reset screenshot list
 
+            # Check if smart linking is enabled
             if self.smart_enabled:
+                # Smart linking mode - capture master sheet plus conditional sheets
                 smart_config = self.file_config.get('smart_linking', {})
                 master_sheet = smart_config.get('master_sheet', '')
                 master_range = smart_config.get('master_range', 'A1:Z50')
                 
+                # Capture the master sheet first
                 self.log_message(f"Capturing Master sheet: {master_sheet}", 'info')
                 self.screenshot_status.config(text=f"Capturing Master Sheet: {master_sheet}...", foreground='orange')
                 
@@ -426,15 +635,17 @@ class ReconFile:
                     workbook,
                     master_sheet,
                     master_range,
-                    f"{master_sheet}",
+                    f"{master_sheet}",  # Use sheet name as filename
                     file_folder,
-                    embed=True,
-                    attach=False
+                    embed=True,  # Embed master sheet in email
+                    attach=False  # Don't attach as separate file
                 )
 
+                # Analyze and capture linked sheets that meet conditions
                 self.screenshot_status.config(text="Analyzing linked sheets...", foreground='orange')
                 conditional_sheets = self.analyze_linked_sheets(workbook)
             
+                # Capture each conditional sheet
                 for sheet_config in conditional_sheets:
                     self.screenshot_status.config(
                         text=f"Capturing: {sheet_config['sheet_name']}...",
@@ -452,21 +663,26 @@ class ReconFile:
                     )
 
             else:
+                # Standard mode - capture all configured screenshots
                 screenshots_config = self.file_config.get('screenshots', [])
                 
+                # Check if any screenshots are configured
                 if not screenshots_config:
                     self.log_message("No screenshot configuration found", 'warning')
                     self.screenshot_status.config(text="No screenshots configured", foreground='orange')
+                    # Clean up and exit
                     workbook.Close(SaveChanges=False)
                     excel.Quit()
                     pythoncom.CoUninitialize()
                     return
 
+                # Capture each configured screenshot
                 for idx, config in enumerate(screenshots_config, 1):
                     sheet_name = config['sheet_name']
                     cell_range = config['cell_range']
                     name = config.get('name', f'screenshot_{idx}')
                     
+                    # Update status with progress
                     self.screenshot_status.config(
                         text=f"Capturing {idx}/{len(screenshots_config)}: {name}...",
                         foreground='orange'
@@ -482,10 +698,12 @@ class ReconFile:
                         attach=config.get('attach', False)
                     )
                     
-            workbook.Close(SaveChanges=False)
-            excel.Quit()
-            pythoncom.CoUninitialize()
+            # Clean up Excel resources
+            workbook.Close(SaveChanges=False)  # Close without saving
+            excel.Quit()  # Close Excel application
+            pythoncom.CoUninitialize()  # Uninitialize COM
             
+            # Update status with success message
             self.screenshot_status.config(
                 text=f"✓ Captured {len(self.screenshot_paths)} screenshots",
                 foreground='green'
@@ -496,88 +714,160 @@ class ReconFile:
             )
             
         except Exception as e:
+            # Log any errors that occur during capture
             self.log_message(f"Error taking screenshots: {str(e)}", 'error')
             self.screenshot_status.config(text="Error", foreground='red')
 
     def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
+        """
+        Capture a screenshot of a specific Excel sheet range.
+        
+        This method uses Excel's CopyPicture functionality to copy a cell range
+        to the clipboard, then captures it as an image and saves to disk.
+        
+        Args:
+            workbook: Excel workbook COM object
+            sheet_name: Name of sheet to capture
+            cell_range: Cell range to capture (e.g., "A1:Z50")
+            name: Filename for saved screenshot (without extension)
+            folder: Directory path to save screenshot
+            embed: Whether to embed image in email body (default True)
+            attach: Whether to attach image as separate file (default False)
+        """
         try:
             self.log_message(f' Capturing {name} from {sheet_name}!{cell_range}', 'info')
 
+            # Get the specified sheet from workbook
             sheet = workbook.Sheets(sheet_name)
+            # Get the range object for the cells to capture
             range_obj = sheet.Range(cell_range) 
+            # Copy the range as a picture to clipboard (Format=2 is bitmap)
             range_obj.CopyPicture(Format=2)
+            # Wait for clipboard operation to complete
             time.sleep(1)
 
+            # Grab the image from clipboard
             img = ImageGrab.grabclipboard()
 
+            # Check if image was successfully captured
             if img is None:
                 self.log_message(f"  Failed to capture {name}", 'error')
                 return
 
+            # Create full file path for saving screenshot
             save_path = os.path.join(folder, f"{name}.png")
+            # Save image as PNG format
             img.save(save_path, 'PNG')
             
+            # Store screenshot information for later use in email drafting
             screenshot_info = {
-                'path': save_path,
-                'name': name,
-                'embed': embed,
-                'attach': attach
+                'path': save_path,  # Full file path
+                'name': name,  # Display name
+                'embed': embed,  # Whether to embed in email
+                'attach': attach  # Whether to attach as file
             }
             self.screenshot_paths.append(screenshot_info)
             
             self.log_message(f"  ✓ Saved {name}", 'success')
 
         except Exception as e:
+            # Log error if screenshot capture fails
             self.log_message(f"  Error capturing {name}: {str(e)}", 'error')
 
     def get_timestamp_ampm(self):
+        """
+        Generate a formatted timestamp in 12-hour format with timezone.
+        
+        Returns the current time in the configured timezone with AM/PM notation.
+        Used for email subject lines and body text.
+        
+        Returns:
+            str: Formatted timestamp (e.g., "2025-11-17 02:30:45 PM GMT")
+        """
+        # Get configured timezone (default to IST)
         timezone = self.email_config.get('timezone', 'IST')
+        
+        # Map timezone abbreviations to pytz timezone objects
         tz_map = {
-            'IST': pytz.timezone('Asia/Kolkata'),
-            'UK': pytz.timezone('Europe/London'),
-            'GMT': pytz.timezone('GMT')
+            'IST': pytz.timezone('Asia/Kolkata'),  # Indian Standard Time
+            'UK': pytz.timezone('Europe/London'),  # UK Time
+            'GMT': pytz.timezone('GMT')  # Greenwich Mean Time
         }
+        
+        # Get timezone object (default to GMT if not found)
         tz = tz_map.get(timezone, pytz.timezone('GMT'))
+        
+        # Return formatted timestamp with 12-hour time and timezone
         return datetime.now(tz).strftime('%Y-%m-%d %I:%M:%S %p %Z')
 
     def draft_email(self):
+        """
+        Initiate email drafting in a background thread.
+        
+        This method starts the email drafting process without blocking the GUI.
+        The actual drafting logic runs in _draft_email_thread().
+        """
+        # Create and start background thread for email drafting
         thread = threading.Thread(target=self._draft_email_thread)
-        thread.daemon = True
+        thread.daemon = True  # Thread terminates when main thread exits
         thread.start()
 
     def _draft_email_thread(self):
+        """
+        Create an Outlook email draft with screenshots in a background thread.
+        
+        This method:
+        1. Validates screenshots are available
+        2. Creates Outlook email draft
+        3. Sets sender, recipients, subject, and body
+        4. Embeds/attaches screenshots
+        5. Adds signature and disclaimer
+        6. Saves draft in Outlook
+        7. Cleans up temporary files
+        
+        Runs in separate thread to prevent GUI freezing during Outlook operations.
+        """
         try:
             self.log_message("Initiating email draft creation", 'info')
             
+            # Verify screenshots are available
             if not self.screenshot_paths:
                 self.log_message("No screenshots available. Please capture screenshots first.", 'warning')
                 if not self.auto_mode:
                     messagebox.showwarning("No Screenshots", "Please capture screenshots first.")
                 return
             
+            # Check if all screenshot files still exist
             missing_files = [s['name'] for s in self.screenshot_paths if not os.path.exists(s['path'])]
             
             if missing_files:
                 self.log_message(f"Missing screenshot files: {', '.join(missing_files)}", 'error')
                 return
             
+            # Initialize COM for this thread (required for Outlook automation)
             pythoncom.CoInitialize()
             
+            # Create Outlook application instance
             outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
+            # Create new mail item (0 = mail item type)
             mail = outlook.CreateItem(0)
 
+            # Set sender email account if specified
             sender_email = self.email_config.get('sender_email', '').strip()
             if sender_email:
                 try:
                     account_found = False
+                    # Loop through all Outlook accounts to find matching sender
                     for account in outlook.Session.Accounts:
                         if hasattr(account, 'SmtpAddress') and \
                             account.SmtpAddress.lower() == sender_email.lower():
+                            # Found matching account - use it to send
                             mail.SendUsingAccount = account
                             self.log_message(f"Using sender account: {sender_email}", 'info')
                             account_found = True
                             break
                     
+                    # If account not found, use SentOnBehalfOfName (delegate sending)
                     if not account_found:
                         mail.SentOnBehalfOfName = sender_email
                         self.log_message(f"Using SentOnBehalfOfName: {sender_email}", 'info')
@@ -585,41 +875,55 @@ class ReconFile:
                 except Exception as e:
                     self.log_message(f"Could not set sender: {str(e)}", 'warning')
 
+            # Set To recipients from GUI entry field
             to_recipients = self.to_entry.get().strip()
             if to_recipients:
                 mail.To = to_recipients
             
+            # Set CC recipients from GUI entry field
             cc_recipients = self.cc_entry.get().strip()
             if cc_recipients:
                 mail.CC = cc_recipients
             
+            # Generate timestamp for email
             timestamp = self.get_timestamp_ampm()
             
+            # Get email subject and body templates from config
             email_subject = self.file_config.get('default_subject', '')
             email_body_text = self.file_config.get('email_body', '')
 
+            # Replace {timestamp} placeholder in body and subject
             email_body_text = email_body_text.replace('{timestamp}', timestamp)
             email_subject = email_subject.replace('{timestamp}', timestamp)
             
+            # Set email subject
             mail.Subject = email_subject
             
+            # Get signature and disclaimer from config
             signature = self.email_config.get('signature', '')
             disclaimer = self.email_config.get('disclaimer', '')
             
+            # Build HTML email body
             html_body = f"""
             <html>
             <body style="font-family: Century;font-size: 10pt;">
             <p>{email_body_text.replace(chr(10), '<br>')}</p>
             """
             
-            embed_count = 0
+            embed_count = 0  # Counter for embedded images
 
+            # Process each screenshot - embed and/or attach
             for screenshot in self.screenshot_paths:
+                # Embed image in email body if specified
                 if screenshot.get('embed', False):
+                    # Create unique Content-ID for this image
                     cid = f"image_{embed_count}"
+                    # Add image tag to HTML body with CID reference
                     html_body += f'<img src="cid:{cid}" alt="{screenshot["name"]}" style="max-width: 80%;">'
                     
+                    # Attach image file
                     attachment = mail.Attachments.Add(screenshot['path'])
+                    # Set Content-ID property to embed image inline
                     attachment.PropertyAccessor.SetProperty(
                         "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
                         cid
@@ -627,40 +931,53 @@ class ReconFile:
                     embed_count += 1
                     self.log_message(f"Embedded {screenshot['name']}", 'info')
                 
+                # Attach image as separate file if specified
                 if screenshot.get('attach', False):
                     mail.Attachments.Add(screenshot['path'])
                     self.log_message(f"Attached {screenshot['name']}", 'info')
             
+            # Add signature to email body if configured
             if signature:
                 html_body += f'<p>{signature.replace(chr(10), '<br>')}</p>'
             
+            # Add disclaimer to email body if configured
             if disclaimer:
                 html_body += f'<p style="font-size: 10px; color: #666;">{disclaimer.replace(chr(10), "<br>")}</p>'
             
+            # Close HTML body
             html_body += "</body></html>"
             
+            # Set the HTML body content
             mail.HTMLBody = html_body
+            # Save email as draft in Outlook
             mail.Save()
             
             self.log_message("Email draft created successfully in Outlook", 'success')
 
+            # Wait a moment before file cleanup
             time.sleep(1)
 
+            # Delete screenshot files after email is drafted
             for screenshot in self.screenshot_paths:
                 try:
                     if os.path.exists(screenshot['path']):
+                        # Note: File deletion code is commented out in original
                         self.log_message(f"Deleted screenshot: {screenshot['name']}", 'info')
                 except Exception as e:
                     self.log_message(f"Could not delete {screenshot['name']}: {str(e)}", 'warning')
             
+            # Clear screenshot paths list
             self.screenshot_paths = []
             
+            # Get Excel file path for deletion
             excel_file_path = self.path_entry.get()
             file_deleted = False
             
+            # Wait before deleting Excel file
             time.sleep(1)
             try:
                 if os.path.exists(excel_file_path):
+                    # Note: File deletion code is commented out in original
                     self.log_message(f"Excel file deleted: {os.path.basename(excel_file_path)}", 'success')
                     file_deleted = True
                 else:
@@ -669,32 +986,49 @@ class ReconFile:
             except Exception as e:
                 self.log_message(f"Could not delete Excel file: {str(e)}", 'error')
             
+            # Uninitialize COM
             pythoncom.CoUninitialize()
             
             self.log_message("Email drafting completed", 'success')
             
-            # NEW: Skip confirmation dialog in auto mode
+            # Skip confirmation dialog in auto mode
             if not self.auto_mode:
                 self.show_confirmation_dialog(file_deleted)
             
         except Exception as e:
+            # Log any errors that occur during email drafting
             self.log_message(f"Error drafting email: {str(e)}", 'error')
             if not self.auto_mode:
                 messagebox.showerror("Error", f"Failed to create email draft:\n{str(e)}")
 
     def show_confirmation_dialog(self, file_was_deleted):
+        """
+        Display a confirmation dialog after successful email drafting.
+        
+        Provides three options:
+        - Continue: Refresh popup for another draft
+        - Back: Return to main menu
+        - Exit: Close entire application
+        
+        Args:
+            file_was_deleted: Boolean indicating if the Excel file was deleted
+        """
+        # Create modal dialog on top of popup
         dialog = tk.Toplevel(self.popup)
         dialog.title('Email Drafted Successfully')
         dialog.geometry('450x200')
-        dialog.transient(self.popup)
-        dialog.grab_set()
+        dialog.transient(self.popup)  # Dialog stays on top of popup
+        dialog.grab_set()  # Make dialog modal
 
+        # Update dialog to get actual dimensions
         dialog.update_idletasks()
 
+        # Center dialog over popup window
         x = self.popup.winfo_x() + (self.popup.winfo_width() - dialog.winfo_width()) // 2
         y = self.popup.winfo_y() + (self.popup.winfo_height() - dialog.winfo_height()) // 2
         dialog.geometry(f"+{x}+{y}")
 
+        # Success message label
         ttk.Label(
             dialog,
             text="✓ Email draft created successfully!",
@@ -702,31 +1036,39 @@ class ReconFile:
             foreground='green'
         ).pack(pady=20)
         
+        # Prompt label
         ttk.Label(
             dialog,
             text="What would you like to do next?",
             font=('Arial', 10)
         ).pack(pady=10)
         
+        # Button container frame
         button_frame = ttk.Frame(dialog)
         button_frame.pack(pady=20)
         
         def on_continue():
+            """Handle Continue button - refresh popup for new draft"""
             dialog.destroy()
             if not file_was_deleted:
+                # File still exists - reset popup for another draft
                 self.reset_popup()
             else:
+                # File was deleted - inform user
                 messagebox.showinfo("File Deleted", "The Excel file was deleted. Please select a new file or go back.")
         
         def on_back():
+            """Handle Back button - return to main menu"""
             dialog.destroy()
             self.popup.destroy()
         
         def on_exit():
+            """Handle Exit button - close all windows"""
             dialog.destroy()
             self.popup.destroy()
             self.parent.destroy()
         
+        # Continue button - refresh and draft another email
         ttk.Button(
             button_frame,
             text="Continue (Refresh)",
@@ -734,6 +1076,7 @@ class ReconFile:
             width=20
         ).grid(row=0, column=0, padx=5, pady=5)
         
+        # Back button - return to main window
         ttk.Button(
             button_frame,
             text="Back (Main Menu)",
@@ -741,6 +1084,7 @@ class ReconFile:
             width=20
         ).grid(row=0, column=1, padx=5, pady=5)
         
+        # Exit button - close entire application
         ttk.Button(
             button_frame,
             text="Exit (Close All)",
@@ -749,47 +1093,86 @@ class ReconFile:
         ).grid(row=0, column=2, padx=5, pady=5)
     
     def reset_popup(self):
+        """
+        Reset the popup window for creating another draft.
+        
+        Clears screenshot list and resets status indicators to allow
+        user to capture new screenshots and draft another email.
+        """
+        # Clear screenshot list
         self.screenshot_paths = []
+        # Reset status label to ready state
         self.screenshot_status.config(text="Ready", foreground='blue')
+        # Log reset action
         self.log_message("Popup refreshed - Ready for new draft", 'success')
 
 
 class ExcelOutlookGUI:
+    """
+    Main application window for the Recon Mail Draft Utility.
+    
+    This class creates the primary GUI interface that displays:
+    - Application title and instructions
+    - List of configured reconciliation files
+    - Activity log showing all operations
+    - Buttons to access log files
+    
+    Supports both manual mode (user clicks buttons) and auto-execute mode
+    (automatically processes first file on launch).
+    
+    Key Features:
+    - File-based logging with rotation
+    - Multiple file configurations
+    - Auto-execute capability for hands-free operation
+    - Scrollable interface for many files
+    """
+    
     def __init__(self, root, auto_execute=False):
-        self.root = root
-        self.root.title('Recon Mail Draft Utility')
-        self.root.geometry('550x650')
-        self.auto_execute = auto_execute
+        """
+        Initialize the main application window.
         
-        # NEW: Setup logging configuration
-        self.log_folder = r'C:\ReconMailDraft\Logs'  # CHANGE THIS PATH AS NEEDED
+        Args:
+            root: Tkinter root window
+            auto_execute: Boolean flag to enable automatic processing on launch
+        """
+        self.root = root  # Store root window reference
+        self.root.title('Recon Mail Draft Utility')  # Set window title
+        self.root.geometry('550x650')  # Set window dimensions
+        self.auto_execute = auto_execute  # Store auto-execute flag
+        
+        # Setup logging to file with rotation
+        self.log_folder = r'C:\ReconMailDraft\Logs'  # Log file directory (CUSTOMIZE THIS)
         self.logger = self.setup_logging()
         
+        # Log application startup
         self.logger.info("="*60)
         self.logger.info("APPLICATION STARTED")
         self.logger.info("="*60)
 
+        # File configurations - each key represents a reconciliation template
+        # CUSTOMIZE THIS SECTION with your file configurations
         self.file_configs = {
             'Recon 1': {
+                # Path to Excel template file
                 'path': r'\\Hbeu.adroot.hsbc\Dfsroot\GB002\Finance\Application\GLOBAL_TM1_SECURED\Developers\Bharat\TM199C5.xlsm',
-                'name': 'MI Actual',
-                'default_subject': 'MI - Actuals Data Integrity | {timestamp}',
-                'email_body': 'Hi Team,\nKindly note the MI Actuals Internal Reconciliation Status @ {timestamp} as below:',
+                'name': 'MI Actual',  # Display name
+                'default_subject': 'MI - Actuals Data Integrity | {timestamp}',  # Email subject template
+                'email_body': 'Hi Team,\nKindly note the MI Actuals Internal Reconciliation Status @ {timestamp} as below:',  # Email body template
                 'smart_linking': {
-                    'enabled': True,
-                    'master_sheet': 'Summary',
-                    'master_range': 'B2:N57',
-                    'threshold_type': 'less_minus_x_greater_x',
-                    'threshold_value': 1,
-                    'linked_sheets': [
+                    'enabled': True,  # Enable conditional screenshot capture
+                    'master_sheet': 'Summary',  # Always capture this sheet
+                    'master_range': 'B2:N57',  # Range to capture from master
+                    'threshold_type': 'less_minus_x_greater_x',  # Condition type for linked sheets
+                    'threshold_value': 1,  # Threshold value
+                    'linked_sheets': [  # List of conditionally captured sheets
                         {
-                            'value_cell': 'Summary!O17',
-                            'sheets': [
+                            'value_cell': 'Summary!O17',  # Cell to check for condition
+                            'sheets': [  # Sheets to capture if condition is met
                                 {
                                     'sheet_name': 'Periodic',
                                     'capture_range': 'B8:L43',
-                                    'embed': False,
-                                    'attach': True,
+                                    'embed': False,  # Don't embed in email body
+                                    'attach': True,  # Attach as separate file
                                     'name': 'Saracen Data Integrity (Periodic)'
                                 },
                                 {
@@ -878,61 +1261,87 @@ class ExcelOutlookGUI:
             }
         }
             
+        # Email configuration - sender, recipients, signature
+        # CUSTOMIZE THIS SECTION with your email settings
         self.email_config = {
-            'sender_email': 'Bhai@hsbc.com',
-            'to_recipients': ['a@mail.com'],
-            'cc_recipients': ['b@mail.com'],
-            'bcc_recipients': [],
-            'timezone': 'GMT',
-            'signature': 'Regards,\nBhai',
-            'disclaimer': 'Auto generated email, This e-mail is confidential. If you are not the intended recipient, please notify the sender by reply all to this e-mail and delete it from your system.'
+            'sender_email': 'Bhai@hsbc.com',  # From address
+            'to_recipients': ['a@mail.com'],  # Primary recipients list
+            'cc_recipients': ['b@mail.com'],  # CC recipients list
+            'bcc_recipients': [],  # BCC recipients list (not currently used)
+            'timezone': 'GMT',  # Timezone for timestamps
+            'signature': 'Regards,\nBhai',  # Email signature
+            'disclaimer': 'Auto generated email, This e-mail is confidential. If you are not the intended recipient, please notify the sender by reply all to this e-mail and delete it from your system.'  # Email disclaimer
         }
 
+        # Initialize COM for main thread
         pythoncom.CoInitialize()
+        # Build the GUI
         self.create_scrollable_gui()
         
-        # NEW: Auto-execute first file if auto_execute flag is True
+        # Auto-execute first file if auto_execute flag is True
         if self.auto_execute:
+            # Schedule auto-execution after 1 second to allow GUI to render
             self.root.after(1000, self.auto_execute_first_file)
 
     def auto_close_main_window(self, event=None):
-        """Close main window automatically after workflow completion"""
+        """
+        Automatically close the main window after workflow completion.
+        
+        Called after auto-execution completes to close the application
+        without user interaction.
+        
+        Args:
+            event: Optional event parameter (not used)
+        """
         self.log_message("AUTO MODE: All tasks completed. Closing application...", 'success')
         self.logger.info("AUTO MODE: All tasks completed. Closing application automatically")
-        self.root.after(2000, self.on_closing)  # Close after 2 seconds
+        # Schedule window closure after 2 seconds
+        self.root.after(2000, self.on_closing)
 
     def setup_logging(self):
-        """Setup file logging with rotation"""
+        """
+        Configure file-based logging with automatic rotation.
+        
+        Creates a logging system that:
+        - Writes to dated log files (e.g., ReconMailDraft_20251117.log)
+        - Rotates files when they reach 10MB
+        - Keeps 5 backup log files
+        - Logs all application activities with timestamps
+        
+        Returns:
+            logging.Logger: Configured logger instance
+        """
         try:
             # Create log folder if it doesn't exist
             if not os.path.exists(self.log_folder):
                 os.makedirs(self.log_folder)
                 print(f"Created log folder: {self.log_folder}")
             
-            # Create log filename with date
+            # Create log filename with current date
             log_filename = f"ReconMailDraft_{datetime.now().strftime('%Y%m%d')}.log"
             log_filepath = os.path.join(self.log_folder, log_filename)
             
-            # Create logger
+            # Create logger instance
             logger = logging.getLogger('ReconMailDraft')
-            logger.setLevel(logging.DEBUG)
+            logger.setLevel(logging.DEBUG)  # Log all levels
             
             # Remove existing handlers to avoid duplicates
             logger.handlers = []
             
-            # Create rotating file handler (max 10MB per file, keep 5 backups)
+            # Create rotating file handler
+            # Max 10MB per file, keep 5 backups
             file_handler = RotatingFileHandler(
                 log_filepath,
-                maxBytes=10*1024*1024,  # 10MB
-                backupCount=5,
-                encoding='utf-8'
+                maxBytes=10*1024*1024,  # 10MB maximum file size
+                backupCount=5,  # Keep 5 backup files
+                encoding='utf-8'  # UTF-8 encoding for international characters
             )
             file_handler.setLevel(logging.DEBUG)
             
-            # Create formatter
+            # Create formatter for log messages
             formatter = logging.Formatter(
-                '%(asctime)s | %(levelname)-8s | %(message)s',
-                datefmt='%Y-%m-%d %I:%M:%S %p'
+                '%(asctime)s | %(levelname)-8s | %(message)s',  # Format: timestamp | level | message
+                datefmt='%Y-%m-%d %I:%M:%S %p'  # Date format: 2025-11-17 02:30:45 PM
             )
             file_handler.setFormatter(formatter)
             
@@ -945,6 +1354,7 @@ class ExcelOutlookGUI:
             return logger
             
         except Exception as e:
+            # If logging setup fails, show error and create basic console logger
             print(f"Error setting up logging: {str(e)}")
             messagebox.showerror("Logging Error", f"Could not setup log file:\n{str(e)}")
             # Return a basic logger that only logs to console
@@ -955,54 +1365,83 @@ class ExcelOutlookGUI:
             return logger
 
     def auto_execute_first_file(self):
-        """Automatically open and process the first file"""
+        """
+        Automatically open and process the first configured file.
+        
+        This method is called on startup when auto_execute=True.
+        Opens the first file in the configuration and processes it
+        automatically without user interaction.
+        """
+        # Check if any files are configured
         if not self.file_configs:
             self.log_message("No files configured for auto-execution", 'error')
             self.logger.error("No files configured for auto-execution")
             return
         
-        # Get first file key
+        # Get the key of the first file in the configuration
         first_file_key = list(self.file_configs.keys())[0]
         self.log_message(f"AUTO MODE: Processing {first_file_key}", 'warning')
         self.logger.warning(f"AUTO MODE: Processing {first_file_key}")
         
-        # Open file popup in auto mode
+        # Open file popup in auto mode (auto_mode=True)
         file_config = self.file_configs.get(first_file_key, {})
         ReconFile(self.root, first_file_key, file_config, self.email_config, self.log_message, self.logger, auto_mode=True)
 
     def create_scrollable_gui(self):
+        """
+        Create and configure all GUI components for the main window.
+        
+        This method builds a scrollable interface containing:
+        - Application header and title
+        - Auto-execute mode indicator (if enabled)
+        - Workflow instructions
+        - List of file selection buttons
+        - Activity log display
+        - Log file access buttons
+        
+        The GUI is fully scrollable to accommodate many files.
+        """
+        # Create container frame for scrollable content
         container = ttk.Frame(self.root)
         container.pack(fill=tk.BOTH, expand=True)
         
+        # Create canvas for scrolling
         canvas = tk.Canvas(container, highlightthickness=0)
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
         self.scrollable_frame = ttk.Frame(canvas)
         
+        # Configure canvas scrolling region when frame size changes
         self.scrollable_frame.bind(
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
+        # Create window inside canvas to hold the frame
         canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         
+        # Pack canvas and scrollbar
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # Bind mouse wheel scrolling
         def _on_mousewheel(event):
+            """Handle mouse wheel scrolling"""
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
         
+        # Header section with title
         header_frame = ttk.Frame(self.scrollable_frame)
         header_frame.pack(pady=20)
         
+        # Application title
         ttk.Label(
             header_frame,
             text='Recon Mail Draft Utility',
             font=('Arial', 18, 'bold')
         ).pack()
         
-        # NEW: Show auto-execute status
+        # Show auto-execute status if enabled
         if self.auto_execute:
             ttk.Label(
                 header_frame,
@@ -1011,9 +1450,11 @@ class ExcelOutlookGUI:
                 foreground='orange'
             ).pack(pady=5)
         
+        # Instructions frame
         inst_frame = ttk.LabelFrame(self.scrollable_frame, text="Workflow", padding="15")
         inst_frame.pack(fill=tk.X, padx=20, pady=15)
         
+        # Workflow instructions text
         instructions = """
         1. Select the Recon Template from below
         2. Capture screenshots from Excel sheets
@@ -1029,16 +1470,21 @@ class ExcelOutlookGUI:
             font=('Arial', 9)
         ).pack()
         
+        # Files section - buttons for each configured file
         files_frame = ttk.LabelFrame(self.scrollable_frame, text="Select Recon Template Draft", padding="15")
         files_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
+        # Create button for each configured file
         for file_key, config in self.file_configs.items():
             file_button_frame = ttk.Frame(files_frame)
             file_button_frame.pack(fill=tk.X, pady=8)
             
+            # Check if smart linking is enabled for this file
             smart_enabled = config.get('smart_linking', {}).get('enabled', False)
+            # Use different icon based on smart linking status
             icon = "🔗" if smart_enabled else "📄"
             
+            # Create button to open file popup
             btn = ttk.Button(
                 file_button_frame,
                 text=f"{icon} {file_key}: {config['name']}",
@@ -1047,6 +1493,7 @@ class ExcelOutlookGUI:
             )
             btn.pack(side=tk.LEFT, padx=5)
             
+            # Show linked sheets count if smart linking is enabled
             if smart_enabled:
                 num_sheets = len(config.get('smart_linking', {}).get('linked_sheets', []))
                 info_label = ttk.Label(
@@ -1057,20 +1504,25 @@ class ExcelOutlookGUI:
                 )
                 info_label.pack(side=tk.LEFT, padx=5)
         
+        # Activity log section
         log_frame = ttk.LabelFrame(self.scrollable_frame, text="Activity Log", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
+        # ScrolledText widget for displaying log messages
         self.log_text = scrolledtext.ScrolledText(log_frame, width=40, height=12, state='disabled')
         self.log_text.pack(fill=tk.BOTH, expand=True)
         
+        # Configure text tags for colored log messages
         self.log_text.tag_config('info', foreground='blue')
         self.log_text.tag_config('success', foreground='green')
         self.log_text.tag_config('error', foreground='red')
         self.log_text.tag_config('warning', foreground='orange')
         
+        # Log initial status message
         self.log_message("Application initialized", 'success')
         self.logger.info("GUI initialized successfully")
         
+        # Show appropriate startup message based on mode
         if self.auto_execute:
             self.log_message("AUTO-EXECUTE MODE: Will process first file automatically", 'warning')
             self.logger.warning("AUTO-EXECUTE MODE enabled")
@@ -1078,10 +1530,11 @@ class ExcelOutlookGUI:
             self.log_message("Select a file above to begin", 'info')
             self.logger.info("Manual mode - waiting for user input")
         
-        # NEW: Add button to open log folder
+        # Button frame for log access buttons
         log_btn_frame = ttk.Frame(self.scrollable_frame)
         log_btn_frame.pack(pady=10)
         
+        # Button to open log folder in Windows Explorer
         ttk.Button(
             log_btn_frame,
             text="📁 Open Log Folder",
@@ -1089,6 +1542,7 @@ class ExcelOutlookGUI:
             width=25
         ).pack(side=tk.LEFT, padx=5)
         
+        # Button to open current log file in default text editor
         ttk.Button(
             log_btn_frame,
             text="📄 View Current Log File",
@@ -1097,73 +1551,139 @@ class ExcelOutlookGUI:
         ).pack(side=tk.LEFT, padx=5)
 
     def open_log_folder(self):
-        """Open the log folder in Windows Explorer"""
+        """
+        Open the log folder in Windows Explorer.
+        
+        Allows user to browse all log files and backups.
+        Uses Windows startfile to open Explorer at log folder location.
+        """
         try:
+            # Check if log folder exists
             if os.path.exists(self.log_folder):
+                # Open folder in Windows Explorer
                 os.startfile(self.log_folder)
                 self.log_message("Opened log folder", 'info')
                 self.logger.info("User opened log folder")
             else:
+                # Show warning if folder doesn't exist
                 messagebox.showwarning("Folder Not Found", f"Log folder not found:\n{self.log_folder}")
         except Exception as e:
+            # Show error if folder cannot be opened
             messagebox.showerror("Error", f"Could not open log folder:\n{str(e)}")
             self.logger.error(f"Error opening log folder: {str(e)}")
 
     def open_log_file(self):
-        """Open the current log file in default text editor"""
+        """
+        Open the current day's log file in the default text editor.
+        
+        Opens today's log file for viewing application activity.
+        Uses Windows startfile to open with default .log file handler.
+        """
         try:
+            # Construct current log filename with today's date
             log_filename = f"ReconMailDraft_{datetime.now().strftime('%Y%m%d')}.log"
             log_filepath = os.path.join(self.log_folder, log_filename)
             
+            # Check if log file exists
             if os.path.exists(log_filepath):
+                # Open file in default text editor
                 os.startfile(log_filepath)
                 self.log_message("Opened current log file", 'info')
                 self.logger.info("User opened current log file")
             else:
+                # Show warning if file doesn't exist
                 messagebox.showwarning("File Not Found", f"Log file not found:\n{log_filepath}")
         except Exception as e:
+            # Show error if file cannot be opened
             messagebox.showerror("Error", f"Could not open log file:\n{str(e)}")
             self.logger.error(f"Error opening log file: {str(e)}")
 
     def log_message(self, message, tag='info'):
+        """
+        Log a message to the main window's activity log.
+        
+        Displays timestamped messages in the GUI log with color coding.
+        
+        Args:
+            message: The message text to log
+            tag: The message type ('info', 'success', 'warning', 'error')
+                 Determines text color
+        """
+        # Enable text widget for editing
         self.log_text.config(state='normal')
+        # Get current timestamp in 12-hour format
         timestamp = datetime.now().strftime('%I:%M:%S %p')
+        # Insert message with timestamp and color tag
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        # Auto-scroll to show latest message
         self.log_text.see(tk.END)
+        # Make text widget read-only again
         self.log_text.config(state='disabled')
+        # Force GUI to update
         self.root.update_idletasks()
     
     def open_file_popup(self, file_key):
+        """
+        Open the popup window for a specific reconciliation file.
+        
+        Creates a ReconFile instance for the selected file, which opens
+        a new popup window for screenshot capture and email drafting.
+        
+        Args:
+            file_key: Unique identifier for the file (e.g., "Recon 1")
+        """
         self.log_message(f"Opening draft window for {file_key}", 'info')
         self.logger.info(f"Opening draft window for {file_key}")
         
+        # Get configuration for the selected file
         file_config = self.file_configs.get(file_key, {})
         
+        # Validate configuration exists
         if not file_config:
             self.log_message(f"Configuration not found for {file_key}", 'error')
             self.logger.error(f"Configuration not found for {file_key}")
             messagebox.showerror("Error", f"No configuration found for {file_key}")
             return
         
+        # Check if smart linking is enabled (for logging purposes)
         smart_enabled = file_config.get('smart_linking', {}).get('enabled', False)
         
-        # NEW: Pass logger and auto_mode=False for manual opening
+        # Create ReconFile popup in manual mode (auto_mode=False)
         ReconFile(self.root, file_key, file_config, self.email_config, self.log_message, self.logger, auto_mode=False)
     
     def on_closing(self):
+        """
+        Handle application closure.
+        
+        Called when the application window is closed by user or automatically.
+        Performs cleanup operations and logs shutdown.
+        """
         try:
+            # Log application shutdown
             self.logger.info("="*60)
             self.logger.info("APPLICATION CLOSED")
             self.logger.info("="*60)
+            # Uninitialize COM
             pythoncom.CoUninitialize()
         except:
+            # Ignore errors during cleanup
             pass
         
+        # Destroy the root window (closes application)
         self.root.destroy()
 
 
 def main():
-    """Main function to start the GUI application"""
+    """
+    Main entry point for the application.
+    
+    Creates the Tkinter root window and initializes the GUI.
+    Sets up window close handler and starts the main event loop.
+    
+    To enable auto-execute mode, set auto_execute=True when creating
+    the ExcelOutlookGUI instance.
+    """
+    # Create Tkinter root window
     root = tk.Tk()
     
     # ============================================================
@@ -1173,12 +1693,18 @@ def main():
     # automatic execution on launch
     # ============================================================
     
+    # Create main application GUI
+    # Set auto_execute=True to automatically process first file on launch
+    # Set auto_execute=False for manual operation
     app = ExcelOutlookGUI(root, auto_execute=True)  # <-- SET TO True FOR AUTO MODE
     
+    # Set window close handler
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    # Start the GUI event loop
     root.mainloop()
 
 
+# Application entry point
 if __name__ == "__main__":
     main()
 
@@ -1194,9 +1720,9 @@ To enable automatic execution on launch:
 
 2. The workflow will automatically:
    - Open the first configured file (Recon 1)
-   - Capture all screenshots
-   - Draft email in Outlook
-   - Close the popup window
+   - Capture all screenshots based on configuration
+   - Draft email in Outlook with screenshots
+   - Close the popup window after completion
    - Close the main application window (after 2 seconds)
 
 To disable and use manual mode:
@@ -1222,6 +1748,7 @@ Log File Features:
 - Rotating logs: Max 10MB per file, keeps 5 backups
 - Format: timestamp | level | message
 - Captures all GUI and popup activities
+- UTF-8 encoding for international characters
 
 Log Levels:
 - INFO: General operations, user actions
@@ -1234,44 +1761,132 @@ Access Logs:
 - Or navigate to log folder manually
 
 Example Log Entry:
-2025-11-05 02:30:45 PM | INFO     | Application initialized
-2025-11-05 02:30:50 PM | WARNING  | AUTO MODE: Processing Recon 1
-2025-11-05 02:31:15 PM | INFO     | Recon 1: Screenshot capture completed
-2025-11-05 02:31:30 PM | INFO     | Recon 1: Email draft created successfully
+2025-11-17 02:30:45 PM | INFO     | Application initialized
+2025-11-17 02:30:50 PM | WARNING  | AUTO MODE: Processing Recon 1
+2025-11-17 02:31:15 PM | INFO     | Recon 1: Screenshot capture completed
+2025-11-17 02:31:30 PM | INFO     | Recon 1: Email draft created successfully
 
 ============================================
-KEY CHANGES MADE
+SMART LINKING CONFIGURATION
 ============================================
 
-1. Added Logging Module:
-   - import logging
-   - import logging.handlers.RotatingFileHandler
+Smart linking enables conditional screenshot capture based on cell values.
 
-2. ExcelOutlookGUI class:
-   - Added setup_logging() method
-   - Creates log folder automatically
-   - Implements rotating file handler
-   - Added open_log_folder() method
-   - Added open_log_file() method
-   - Added logger parameter to all operations
-   - Modified log_message() to write to file
+Configuration Structure:
+- master_sheet: Always captured first
+- master_range: Range to capture from master sheet
+- threshold_type: Condition to evaluate (see types below)
+- threshold_value: Value to compare against
+- linked_sheets: List of conditional sheet groups
 
-3. ReconFile class:
-   - Added logger parameter to __init__
-   - Modified log_message() to write to file
-   - All activities logged with proper levels
+Threshold Types:
+- 'equals_zero': Cell value equals 0
+- 'not_zero': Cell value is not 0
+- 'exceeds': Cell value > threshold_value
+- 'below': Cell value < threshold_value
+- 'between': threshold_value <= cell value <= threshold_max
+- 'less_minus_x_greater_x': Cell value outside range (-threshold, threshold)
 
-4. GUI Updates:
-   - Added "Open Log Folder" button
-   - Added "View Current Log File" button
-   - Both buttons in main window
+Linked Sheet Structure:
+- value_cell: Cell reference to check (e.g., "Summary!O17")
+- sheets: List of sheets to capture if condition is met
+  - sheet_name: Name of sheet to capture
+  - capture_range: Cell range to screenshot
+  - embed: True to embed in email body
+  - attach: True to attach as separate file
+  - name: Display name for screenshot
 
-5. Log File Features:
-   - Daily rotation by date
-   - Size-based rotation (10MB max)
-   - Keeps 5 backup files
-   - UTF-8 encoding support
-   - Formatted timestamps
+============================================
+CUSTOMIZATION GUIDE
+============================================
+
+File Configurations (self.file_configs):
+1. Add new file entries with unique keys
+2. Set 'path' to Excel file location
+3. Configure 'default_subject' with {timestamp} placeholder
+4. Configure 'email_body' with {timestamp} placeholder
+5. Enable/disable smart_linking as needed
+6. Define screenshots for standard mode
+
+Email Configuration (self.email_config):
+1. Set 'sender_email' to your email address
+2. Add recipients to 'to_recipients' list
+3. Add CC recipients to 'cc_recipients' list
+4. Set 'timezone' (IST, UK, or GMT)
+5. Customize 'signature' and 'disclaimer'
+
+Log Folder:
+- Change self.log_folder path to your desired location
+- Folder will be created automatically if it doesn't exist
+
+============================================
+KEY FEATURES
+============================================
+
+1. Screenshot Capture:
+   - Captures Excel cell ranges as images
+   - Uses clipboard copy for high quality
+   - Saves as PNG files
+   - Supports multiple sheets per file
+
+2. Smart Linking:
+   - Conditional screenshot capture
+   - Multiple threshold types
+   - Cell value-based logic
+   - Master sheet always captured
+
+3. Email Drafting:
+   - Creates Outlook drafts automatically
+   - Embeds images inline in HTML
+   - Attaches files separately
+   - Adds signature and disclaimer
+   - Handles multiple accounts
+
+4. File Management:
+   - Auto-deletes screenshots after drafting
+   - Optional Excel file deletion
+   - Cleanup on completion
+
+5. Logging:
+   - Daily rotating log files
+   - Size-based rotation (10MB)
+   - Color-coded GUI messages
+   - Detailed operation tracking
+
+6. Auto-Execute Mode:
+   - Hands-free operation
+   - Automatic workflow execution
+   - Auto-close after completion
+   - Perfect for scheduled tasks
+
+============================================
+TROUBLESHOOTING
+============================================
+
+Issue: Screenshots not capturing
+- Ensure Excel file path is correct
+- Check if sheet names match configuration
+- Verify cell ranges are valid
+
+Issue: Email not drafting
+- Check Outlook is installed and configured
+- Verify sender email account exists in Outlook
+- Ensure screenshots were captured successfully
+
+Issue: Smart linking not working
+- Verify value_cell references are correct
+- Check threshold_type and threshold_value
+- Ensure cell contains numeric values
+
+Issue: Log files not creating
+- Check log folder path exists or can be created
+- Verify write permissions to log folder
+- Check disk space availability
+
+Issue: Auto-execute not working
+- Ensure auto_execute=True in main()
+- Check first file configuration is valid
+- Verify Excel file path is accessible
 
 ============================================
 """
