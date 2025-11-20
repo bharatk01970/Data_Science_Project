@@ -1,3 +1,1689 @@
+
+
+
+
+
+
+
+
+
+
+20 Nov 2025
+auto exec. auto detect
+
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Auto-Execute Mail Draft Utility
+Automatically processes files and drafts emails on launch
+"""
+
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
+import win32com.client
+from PIL import ImageGrab
+import pythoncom
+from datetime import datetime
+import pytz
+import os
+import time
+import threading
+import logging
+from logging.handlers import RotatingFileHandler
+
+
+class ReconFile:
+    def __init__(self, parent, file_key, file_config, email_config, log_callback, logger, auto_mode=False, is_last_file=False):
+        self.parent = parent
+        self.file_key = file_key
+        self.file_config = file_config
+        self.email_config = email_config
+        self.log_callback = log_callback
+        self.logger = logger  # NEW: Logger instance
+        self.screenshot_paths = []
+        self.conditional_screenshots = []
+        self.auto_mode = auto_mode
+        self.is_last_file = is_last_file  # NEW: Track if this is the last file to process  # NEW: Flag for automatic execution
+
+        # Create popup window
+        self.popup = tk.Toplevel(parent)
+        self.popup.title(f"Draft Email - {file_key}")
+        self.popup.geometry("550x560")
+        self.popup.grab_set()
+        
+        pythoncom.CoInitialize()
+        self.create_popup_gui()
+        
+        # NEW: Auto-execute if in auto mode
+        if self.auto_mode:
+            self.popup.after(500, self.auto_execute_workflow)
+
+    def auto_execute_workflow(self):
+        """Automatically execute: Screenshot → Draft → Close"""
+        self.log_message("AUTO MODE: Starting automated workflow", 'info')
+        
+        # Step 1: Capture screenshots
+        self.log_message("AUTO MODE: Step 1/2 - Capturing screenshots...", 'info')
+        thread = threading.Thread(target=self._auto_screenshot_and_draft)
+        thread.daemon = True
+        thread.start()
+
+    def _auto_screenshot_and_draft(self):
+        """Combined thread for screenshot capture and email drafting"""
+        try:
+            # Step 1: Take screenshots
+            self._take_screenshot_thread()
+            
+            # Wait a moment to ensure screenshots are saved
+            time.sleep(2)
+            
+            # Step 2: Draft email
+            if self.screenshot_paths:
+                self.log_message("AUTO MODE: Step 2/2 - Drafting email...", 'info')
+                self._draft_email_thread()
+                
+                # Step 3: Close popup and main window after completion
+                time.sleep(2)
+                self.popup.after(100, self.auto_close)
+            else:
+                self.log_message("AUTO MODE: No screenshots captured, aborting", 'error')
+                
+        except Exception as e:
+            self.log_message(f"AUTO MODE ERROR: {str(e)}", 'error')
+
+    def auto_close(self):
+        """Close popup automatically after drafting, then close main window if last file"""
+        self.log_message("AUTO MODE: Workflow completed, closing popup window", 'success')
+        
+        # NEW: Get reference to main window before destroying popup
+        if self.auto_mode and hasattr(self.parent, 'winfo_exists'):
+            main_window = self.parent
+            
+            # Close popup first
+            self.popup.destroy()
+            
+            # NEW: Only close main window if this is the last file
+            if self.is_last_file and main_window.winfo_exists():
+                main_window.after(2000, self.close_main_window, main_window)
+            elif main_window.winfo_exists():
+                # Not last file - trigger next file processing
+                main_window.after(1000, main_window.process_next_file)
+        else:
+            self.popup.destroy()
+    
+    def close_main_window(self, main_window):
+        """Helper method to close the main window"""
+        try:
+            if main_window.winfo_exists():
+                # Find the ExcelOutlookGUI instance and call its on_closing method
+                for widget in main_window.winfo_children():
+                    if hasattr(widget, 'master'):
+                        break
+                
+                # Direct approach: destroy the main window
+                self.logger.info("AUTO MODE: Closing main application window")
+                main_window.destroy()
+        except Exception as e:
+            print(f"Error closing main window: {e}")
+
+    def create_popup_gui(self):
+        canvas = tk.Canvas(self.popup, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.popup, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        main_frame = scrollable_frame
+
+        title_label = ttk.Label(
+            main_frame,
+            text=f"{self.file_key}: {self.file_config.get('name', 'File')}",
+            font=('Arial', 14, 'bold')
+        )
+        title_label.pack(pady=10)
+
+        # File Path Section
+        path_frame = ttk.LabelFrame(main_frame, text="Recon Template Information", padding='10')
+        path_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(path_frame, text="File Path:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        
+        self.path_entry = ttk.Entry(path_frame, width=70)
+        self.path_entry.insert(0, self.file_config.get('path', ''))
+        self.path_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        path_frame.columnconfigure(1, weight=1)
+
+        # Check smart linking
+        smart_config = self.file_config.get('smart_linking', {})
+        self.smart_enabled = smart_config.get('enabled', False)
+
+        # Screenshot Section
+        screenshot_frame = ttk.Frame(main_frame)
+        screenshot_frame.pack(pady=10)
+        
+        self.screenshot_btn = ttk.Button(
+            screenshot_frame,
+            text="Capture Screenshots",
+            command=self.take_screenshot
+        )
+        self.screenshot_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.screenshot_status = ttk.Label(
+            screenshot_frame,
+            text="Ready" if not self.auto_mode else "AUTO MODE",
+            foreground="blue" if not self.auto_mode else "orange"
+        )
+        self.screenshot_status.pack(side=tk.LEFT, padx=5)
+
+        # Email Configuration Section
+        email_frame = ttk.LabelFrame(main_frame, text="Email Configuration", padding="10")
+        email_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # From
+        ttk.Label(email_frame, text="From:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+        self.sender_entry = ttk.Entry(email_frame, width=70)
+        self.sender_entry.insert(0, self.email_config.get('sender_email', ''))
+        self.sender_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # To
+        ttk.Label(email_frame, text="To:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+        self.to_entry = ttk.Entry(email_frame, width=70)
+        self.to_entry.insert(0, "; ".join(self.email_config.get('to_recipients', [])))
+        self.to_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        # CC
+        ttk.Label(email_frame, text="CC:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=5)
+        self.cc_entry = ttk.Entry(email_frame, width=70)
+        self.cc_entry.insert(0, "; ".join(self.email_config.get('cc_recipients', [])))
+        self.cc_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=5, pady=5)
+        
+        email_frame.columnconfigure(1, weight=1)
+
+        # Draft Button
+        draft_btn = ttk.Button(
+            main_frame,
+            text='Draft Email in Outlook',
+            command=self.draft_email,
+            style='Accent.TButton'
+        )
+        draft_btn.pack(pady=15)
+
+        # Activity Log Section
+        log_frame = ttk.LabelFrame(main_frame, text='Activity Log', padding='5')
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        self.log_text = scrolledtext.ScrolledText(log_frame, width=40, height=8, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text.tag_config('info', foreground='blue')
+        self.log_text.tag_config('success', foreground='green')
+        self.log_text.tag_config('error', foreground='red')
+        self.log_text.tag_config('warning', foreground='orange')
+        
+        if self.auto_mode:
+            self.log_message("AUTO MODE ENABLED - Workflow will execute automatically", 'warning')
+        else:
+            self.log_message("Popup opened - Ready to capture screenshots", 'info')
+        
+        if self.smart_enabled:
+            self.log_message("Will capture based on variance thresholds", 'info')
+
+    def log_message(self, message, tag='info'):
+        self.log_text.config(state='normal')
+        timestamp = datetime.now().strftime('%I:%M:%S %p')
+        full_message = f"[{timestamp}] {message}"
+        self.log_text.insert(tk.END, f"{full_message}\n", tag)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+        self.popup.update_idletasks()
+
+        # NEW: Write to log file using logger
+        if self.logger:
+            log_level = {
+                'info': logging.INFO,
+                'success': logging.INFO,
+                'warning': logging.WARNING,
+                'error': logging.ERROR
+            }.get(tag, logging.INFO)
+            
+            self.logger.log(log_level, f"{self.file_key}: {message}")
+
+        if self.log_callback:
+            self.log_callback(f"{self.file_key}: {message}", tag)
+
+    def extract_cell_value(self, workbook, cell_ref):
+        cell_addr = None
+        sheet = None
+        
+        try:
+            cell_ref = cell_ref.strip()
+            
+            if '!' in cell_ref:
+                parts = cell_ref.split('!')
+                if len(parts) != 2:
+                    self.log_message(f"Invalid cell reference format: {cell_ref}", 'error')
+                    return 0.0
+                
+                sheet_name, cell_addr = parts
+                sheet_name = sheet_name.strip()
+                cell_addr = cell_addr.strip()
+                
+                try:
+                    sheet = workbook.Sheets(sheet_name)
+                except Exception as e:
+                    self.log_message(f"Sheet '{sheet_name}' not found in workbook", 'error')
+                    return 0.0
+            else:
+                sheet = workbook.ActiveSheet
+                cell_addr = cell_ref.strip()
+    
+            if not cell_addr:
+                self.log_message(f"Empty cell address in reference: {cell_ref}", 'error')
+                return 0.0
+    
+            value = sheet.Range(cell_addr).Value
+    
+            if value is None:
+                self.log_message(f"Cell {cell_ref} is empty, using 0.0", 'info')
+                return 0.0
+    
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                self.log_message(f"Non-numeric value in {cell_ref}: {value}", 'warning')
+                return 0.0
+    
+        except Exception as e:
+            self.log_message(f"Error reading cell {cell_ref}: {str(e)}", 'error')
+            return 0.0
+
+    def check_threshold_condition(self, value, threshold_type, threshold_value, threshold_max=None):
+        try:
+            threshold_val = float(threshold_value)
+            if threshold_max is not None:
+                threshold_max_val = float(threshold_max)
+        except (ValueError, TypeError):
+            threshold_val = 0.0
+            threshold_max_val = None
+        
+        if threshold_type == 'equals_zero':
+            return value == 0.0
+        elif threshold_type == 'not_zero':
+            return value != 0.0
+        elif threshold_type == 'exceeds':
+            return value > threshold_val
+        elif threshold_type == 'below':
+            return value < threshold_val
+        elif threshold_type == 'between':
+            if threshold_max_val is not None:
+                return threshold_val <= value <= threshold_max_val
+            else:
+                return False
+        elif threshold_type == 'less_minus_x_greater_x':
+            return (-threshold_val > value) or (threshold_val < value)
+        else:
+            return False
+
+    def analyze_linked_sheets(self, workbook):
+        smart_config = self.file_config.get('smart_linking', {})
+        
+        if not smart_config.get('enabled', False):
+            return []
+
+        master_sheet = smart_config.get('master_sheet', '')
+        linked_sheets = smart_config.get('linked_sheets', [])
+        threshold_type = smart_config.get('threshold_type', 'equals_zero')
+        threshold_value = smart_config.get('threshold_value', 0)
+        threshold_max = smart_config.get('threshold_max', None)
+        
+        self.log_message("Analyzing linked sheets with threshold conditions", 'info')
+        
+        sheets_to_capture = []
+        
+        for linked_group in linked_sheets:
+            value_cell = linked_group.get('value_cell', '')
+            sheets_list = linked_group.get('sheets', [])
+            
+            if not sheets_list and linked_group.get('sheet_name'):
+                sheets_list = [linked_group]
+                value_cell = linked_group.get('value_cell', '')
+            
+            cell_value = self.extract_cell_value(workbook, value_cell)
+            
+            meets_condition = self.check_threshold_condition(
+               cell_value,
+               threshold_type,
+               threshold_value,
+               threshold_max
+            )
+            
+            self.log_message(
+                f"  Value Cell {value_cell}: Value={cell_value}, Condition={meets_condition}",
+                'success' if meets_condition else 'info'
+            )
+            
+            if meets_condition:
+                for sheet_config in sheets_list:
+                    sheet_name = sheet_config.get('sheet_name', '')
+                    capture_range = sheet_config.get('capture_range', 'A1:Z50')
+                    
+                    self.log_message(
+                        f"    → Will capture: {sheet_name}",
+                        'success'
+                    )
+                    
+                    sheets_to_capture.append({
+                        'sheet_name': sheet_name,
+                        'cell_range': capture_range,
+                        'embed': sheet_config.get('embed', True),
+                        'attach': sheet_config.get('attach', False),
+                        'name': sheet_config.get('name', sheet_name),
+                        'value': cell_value,
+                        'value_cell': value_cell
+                    })
+        
+        return sheets_to_capture
+
+    def take_screenshot(self):
+        thread = threading.Thread(target=self._take_screenshot_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _take_screenshot_thread(self):
+        try:
+            self.screenshot_status.config(text='Analyzing...', foreground='orange')
+            self.log_message('Initiating Screenshot Capture Process', 'info')
+
+            file_path = self.path_entry.get()
+
+            if not file_path or not os.path.exists(file_path):
+                self.log_message(f'Invalid file path: {file_path}', 'error')
+                self.screenshot_status.config(text='Error: File not found', foreground='red')
+                return
+
+            pythoncom.CoInitialize()
+
+            excel = win32com.client.gencache.EnsureDispatch("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+
+            workbook = excel.Workbooks.Open(
+                Filename=os.path.abspath(file_path),
+                UpdateLinks=0,
+                ReadOnly=True,
+                IgnoreReadOnlyRecommended=True
+            )
+            
+            file_folder = os.path.dirname(os.path.abspath(file_path))
+            self.screenshot_paths = []
+
+            if self.smart_enabled:
+                smart_config = self.file_config.get('smart_linking', {})
+                master_sheet = smart_config.get('master_sheet', '')
+                master_range = smart_config.get('master_range', 'A1:Z50')
+                
+                self.log_message(f"Capturing Master sheet: {master_sheet}", 'info')
+                self.screenshot_status.config(text=f"Capturing Master Sheet: {master_sheet}...", foreground='orange')
+                
+                self._capture_single_screenshot(
+                    workbook,
+                    master_sheet,
+                    master_range,
+                    f"{master_sheet}",
+                    file_folder,
+                    embed=True,
+                    attach=False
+                )
+
+                self.screenshot_status.config(text="Analyzing linked sheets...", foreground='orange')
+                conditional_sheets = self.analyze_linked_sheets(workbook)
+            
+                for sheet_config in conditional_sheets:
+                    self.screenshot_status.config(
+                        text=f"Capturing: {sheet_config['sheet_name']}...",
+                        foreground='orange'
+                    )
+                    
+                    self._capture_single_screenshot(
+                        workbook,
+                        sheet_config['sheet_name'],
+                        sheet_config['cell_range'],
+                        sheet_config['name'],
+                        file_folder,
+                        embed=sheet_config.get('embed', True),
+                        attach=sheet_config.get('attach', False)
+                    )
+
+            else:
+                screenshots_config = self.file_config.get('screenshots', [])
+                
+                if not screenshots_config:
+                    self.log_message("No screenshot configuration found", 'warning')
+                    self.screenshot_status.config(text="No screenshots configured", foreground='orange')
+                    workbook.Close(SaveChanges=False)
+                    excel.Quit()
+                    pythoncom.CoUninitialize()
+                    return
+
+                for idx, config in enumerate(screenshots_config, 1):
+                    sheet_name = config['sheet_name']
+                    cell_range = config['cell_range']
+                    name = config.get('name', f'screenshot_{idx}')
+                    
+                    self.screenshot_status.config(
+                        text=f"Capturing {idx}/{len(screenshots_config)}: {name}...",
+                        foreground='orange'
+                    )
+
+                    self._capture_single_screenshot(
+                        workbook,
+                        sheet_name,
+                        cell_range,
+                        name,
+                        file_folder,
+                        embed=config.get('embed', True),
+                        attach=config.get('attach', False)
+                    )
+                    
+            workbook.Close(SaveChanges=False)
+            excel.Quit()
+            pythoncom.CoUninitialize()
+            
+            self.screenshot_status.config(
+                text=f"✓ Captured {len(self.screenshot_paths)} screenshots",
+                foreground='green'
+            )
+            self.log_message(
+                f"Screenshot capture completed - {len(self.screenshot_paths)} images saved",
+                'success'
+            )
+            
+        except Exception as e:
+            self.log_message(f"Error taking screenshots: {str(e)}", 'error')
+            self.screenshot_status.config(text="Error", foreground='red')
+
+    def _capture_single_screenshot(self, workbook, sheet_name, cell_range, name, folder, embed=True, attach=False):
+        try:
+            self.log_message(f' Capturing {name} from {sheet_name}!{cell_range}', 'info')
+
+            sheet = workbook.Sheets(sheet_name)
+            range_obj = sheet.Range(cell_range) 
+            range_obj.CopyPicture(Format=2)
+            time.sleep(1)
+
+            img = ImageGrab.grabclipboard()
+
+            if img is None:
+                self.log_message(f"  Failed to capture {name}", 'error')
+                return
+
+            save_path = os.path.join(folder, f"{name}.png")
+            img.save(save_path, 'PNG')
+            
+            screenshot_info = {
+                'path': save_path,
+                'name': name,
+                'embed': embed,
+                'attach': attach
+            }
+            self.screenshot_paths.append(screenshot_info)
+            
+            self.log_message(f"  ✓ Saved {name}", 'success')
+
+        except Exception as e:
+            self.log_message(f"  Error capturing {name}: {str(e)}", 'error')
+
+    def get_timestamp_ampm(self):
+        timezone = self.email_config.get('timezone', 'IST')
+        tz_map = {
+            'IST': pytz.timezone('Asia/Kolkata'),
+            'UK': pytz.timezone('Europe/London'),
+            'GMT': pytz.timezone('GMT')
+        }
+        tz = tz_map.get(timezone, pytz.timezone('GMT'))
+        return datetime.now(tz).strftime('%Y-%m-%d %I:%M:%S %p %Z')
+
+    def draft_email(self):
+        thread = threading.Thread(target=self._draft_email_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _draft_email_thread(self):
+        try:
+            self.log_message("Initiating email draft creation", 'info')
+            
+            if not self.screenshot_paths:
+                self.log_message("No screenshots available. Please capture screenshots first.", 'warning')
+                if not self.auto_mode:
+                    messagebox.showwarning("No Screenshots", "Please capture screenshots first.")
+                return
+            
+            missing_files = [s['name'] for s in self.screenshot_paths if not os.path.exists(s['path'])]
+            
+            if missing_files:
+                self.log_message(f"Missing screenshot files: {', '.join(missing_files)}", 'error')
+                return
+            
+            pythoncom.CoInitialize()
+            
+            outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
+            mail = outlook.CreateItem(0)
+
+            sender_email = self.email_config.get('sender_email', '').strip()
+            if sender_email:
+                try:
+                    account_found = False
+                    for account in outlook.Session.Accounts:
+                        if hasattr(account, 'SmtpAddress') and \
+                            account.SmtpAddress.lower() == sender_email.lower():
+                            mail.SendUsingAccount = account
+                            self.log_message(f"Using sender account: {sender_email}", 'info')
+                            account_found = True
+                            break
+                    
+                    if not account_found:
+                        mail.SentOnBehalfOfName = sender_email
+                        self.log_message(f"Using SentOnBehalfOfName: {sender_email}", 'info')
+                        
+                except Exception as e:
+                    self.log_message(f"Could not set sender: {str(e)}", 'warning')
+
+            to_recipients = self.to_entry.get().strip()
+            if to_recipients:
+                mail.To = to_recipients
+            
+            cc_recipients = self.cc_entry.get().strip()
+            if cc_recipients:
+                mail.CC = cc_recipients
+            
+            timestamp = self.get_timestamp_ampm()
+            
+            email_subject = self.file_config.get('default_subject', '')
+            email_body_text = self.file_config.get('email_body', '')
+
+            email_body_text = email_body_text.replace('{timestamp}', timestamp)
+            email_subject = email_subject.replace('{timestamp}', timestamp)
+            
+            mail.Subject = email_subject
+            
+            signature = self.email_config.get('signature', '')
+            disclaimer = self.email_config.get('disclaimer', '')
+            
+            html_body = f"""
+            <html>
+            <body style="font-family: Century;font-size: 10pt;">
+            <p>{email_body_text.replace(chr(10), '<br>')}</p>
+            """
+            
+            embed_count = 0
+
+            for screenshot in self.screenshot_paths:
+                if screenshot.get('embed', False):
+                    cid = f"image_{embed_count}"
+                    html_body += f'<img src="cid:{cid}" alt="{screenshot["name"]}" style="max-width: 80%;">'
+                    
+                    attachment = mail.Attachments.Add(screenshot['path'])
+                    attachment.PropertyAccessor.SetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F",
+                        cid
+                    )
+                    embed_count += 1
+                    self.log_message(f"Embedded {screenshot['name']}", 'info')
+                
+                if screenshot.get('attach', False):
+                    mail.Attachments.Add(screenshot['path'])
+                    self.log_message(f"Attached {screenshot['name']}", 'info')
+            
+            if signature:
+                html_body += f'<p>{signature.replace(chr(10), '<br>')}</p>'
+            
+            if disclaimer:
+                html_body += f'<p style="font-size: 10px; color: #666;">{disclaimer.replace(chr(10), "<br>")}</p>'
+            
+            html_body += "</body></html>"
+            
+            mail.HTMLBody = html_body
+            mail.Save()
+            
+            self.log_message("Email draft created successfully in Outlook", 'success')
+
+            time.sleep(1)
+
+            for screenshot in self.screenshot_paths:
+                try:
+                    if os.path.exists(screenshot['path']):
+                        self.log_message(f"Deleted screenshot: {screenshot['name']}", 'info')
+                except Exception as e:
+                    self.log_message(f"Could not delete {screenshot['name']}: {str(e)}", 'warning')
+            
+            self.screenshot_paths = []
+            
+            excel_file_path = self.path_entry.get()
+            file_deleted = False
+            
+            time.sleep(1)
+            try:
+                if os.path.exists(excel_file_path):
+                    self.log_message(f"Excel file deleted: {os.path.basename(excel_file_path)}", 'success')
+                    file_deleted = True
+                else:
+                    self.log_message("Excel file not found for deletion", 'warning')
+                    
+            except Exception as e:
+                self.log_message(f"Could not delete Excel file: {str(e)}", 'error')
+            
+            pythoncom.CoUninitialize()
+            
+            self.log_message("Email drafting completed", 'success')
+            
+            # NEW: Skip confirmation dialog in auto mode
+            if not self.auto_mode:
+                self.show_confirmation_dialog(file_deleted)
+            
+        except Exception as e:
+            self.log_message(f"Error drafting email: {str(e)}", 'error')
+            if not self.auto_mode:
+                messagebox.showerror("Error", f"Failed to create email draft:\n{str(e)}")
+
+    def show_confirmation_dialog(self, file_was_deleted):
+        dialog = tk.Toplevel(self.popup)
+        dialog.title('Email Drafted Successfully')
+        dialog.geometry('450x200')
+        dialog.transient(self.popup)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+
+        x = self.popup.winfo_x() + (self.popup.winfo_width() - dialog.winfo_width()) // 2
+        y = self.popup.winfo_y() + (self.popup.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(
+            dialog,
+            text="✓ Email draft created successfully!",
+            font=('Arial', 12, 'bold'),
+            foreground='green'
+        ).pack(pady=20)
+        
+        ttk.Label(
+            dialog,
+            text="What would you like to do next?",
+            font=('Arial', 10)
+        ).pack(pady=10)
+        
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=20)
+        
+        def on_continue():
+            dialog.destroy()
+            if not file_was_deleted:
+                self.reset_popup()
+            else:
+                messagebox.showinfo("File Deleted", "The Excel file was deleted. Please select a new file or go back.")
+        
+        def on_back():
+            dialog.destroy()
+            self.popup.destroy()
+        
+        def on_exit():
+            dialog.destroy()
+            self.popup.destroy()
+            self.parent.destroy()
+        
+        ttk.Button(
+            button_frame,
+            text="Continue (Refresh)",
+            command=on_continue,
+            width=20
+        ).grid(row=0, column=0, padx=5, pady=5)
+        
+        ttk.Button(
+            button_frame,
+            text="Back (Main Menu)",
+            command=on_back,
+            width=20
+        ).grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Button(
+            button_frame,
+            text="Exit (Close All)",
+            command=on_exit,
+            width=20
+        ).grid(row=0, column=2, padx=5, pady=5)
+    
+    def reset_popup(self):
+        self.screenshot_paths = []
+        self.screenshot_status.config(text="Ready", foreground='blue')
+        self.log_message("Popup refreshed - Ready for new draft", 'success')
+
+
+class ExcelOutlookGUI:
+    def __init__(self, root, auto_execute=False, watch_folder=None):
+        self.root = root
+        self.root.title('Recon Mail Draft Utility')
+        self.root.geometry('550x650')
+        self.auto_execute = auto_execute
+        
+        # NEW: Setup logging configuration with master log
+        self.log_folder = r'C:\ReconMailDraft\Logs'  # CHANGE THIS PATH AS NEEDED
+        self.watch_folder = watch_folder or r'C:\ReconMailDraft\InputFiles'  # Folder to watch for files
+        self.master_logger = self.setup_master_logging()  # Master log for all files
+        
+        # NEW: Track files to process in auto mode
+        self.files_to_process = []
+        self.current_file_index = 0
+        
+        self.master_logger.info("="*60)
+        self.master_logger.info("APPLICATION STARTED")
+        self.master_logger.info("="*60)
+        
+        if self.auto_execute:
+            self.master_logger.info(f"Watch folder configured: {self.watch_folder}")
+            # Create watch folder if it doesn't exist
+            if not os.path.exists(self.watch_folder):
+                os.makedirs(self.watch_folder)
+                self.master_logger.info(f"Created watch folder: {self.watch_folder}")
+
+        self.file_configs = {
+            'Recon 1': {
+                'path': r'\\Hbeu.adroot.hsbc\Dfsroot\GB002\Finance\Application\GLOBAL_TM1_SECURED\Developers\Bharat\TM199C5.xlsm',
+                'name': 'MI Actual',
+                'file_pattern': 'TM199C5.xlsm',  # NEW: Pattern to match file in watch folder
+                'default_subject': 'MI - Actuals Data Integrity | {timestamp}',
+                'email_body': 'Hi Team,\nKindly note the MI Actuals Internal Reconciliation Status @ {timestamp} as below:',
+                'smart_linking': {
+                    'enabled': True,
+                    'master_sheet': 'Summary',
+                    'master_range': 'B2:N57',
+                    'threshold_type': 'less_minus_x_greater_x',
+                    'threshold_value': 1,
+                    'linked_sheets': [
+                        {
+                            'value_cell': 'Summary!O17',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'Periodic',
+                                    'capture_range': 'B8:L43',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Saracen Data Integrity (Periodic)'
+                                },
+                                {
+                                    'sheet_name': 'GRC Vs DDC',
+                                    'capture_range': 'B14:T45',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Saracen vs TM1 (GRC vs DDC)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O29',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'GCC',
+                                    'capture_range': 'B13:J19',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'GMI Review Vs GCC (GCC)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O37',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'CC_Rule',
+                                    'capture_range': 'B10:Q84',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Constant Currency (CC_Rule)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O41',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'SI_Data_Integrity',
+                                    'capture_range': 'A14:D22',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Significant Items (SI_Data_Integrity)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O45',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'AVBS_Data_Integrity',
+                                    'capture_range': 'A13:K29',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'AVBS Data (AVBS_Data_Integrity)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O49',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'SI_TOP',
+                                    'capture_range': 'A15:F21',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Significant Items - Top Level (SI_TOP)'
+                                }
+                            ]
+                        },
+                        {
+                            'value_cell': 'Summary!O57',
+                            'sheets': [
+                                {
+                                    'sheet_name': 'Review VS GRC',
+                                    'capture_range': 'B13:J19',
+                                    'embed': False,
+                                    'attach': True,
+                                    'name': 'Journal Data ((GMI Review Vs GRC))'
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            'Recon 2': {
+                'path': '',  # Will be detected from watch folder
+                'name': 'MI Forecast',
+                'file_pattern': 'MI_Forecast*.xlsm',  # NEW: Pattern to match
+                'default_subject': 'MI - Forecast Data Integrity | {timestamp}',
+                'email_body': 'Hi Team,\nKindly note the MI Forecast Internal Reconciliation Status @ {timestamp} as below:',
+                'screenshots': [
+                    {
+                        'sheet_name': 'Summary',
+                        'cell_range': 'A1:M50',
+                        'name': 'Forecast_Summary',
+                        'embed': True,
+                        'attach': False
+                    }
+                ]
+            },
+            'Recon 3': {
+                'path': '',
+                'name': 'Balance Sheet Recon',
+                'file_pattern': 'BalanceSheet*.xlsm',  # NEW: Pattern to match
+                'default_subject': 'Balance Sheet Reconciliation | {timestamp}',
+                'email_body': 'Hi Team,\nPlease find Balance Sheet reconciliation @ {timestamp}:',
+                'screenshots': [
+                    {
+                        'sheet_name': 'Recon',
+                        'cell_range': 'A1:P60',
+                        'name': 'BS_Recon',
+                        'embed': True,
+                        'attach': False
+                    }
+                ]
+            }
+        }
+            
+        self.email_config = {
+            'sender_email': 'Bhai@hsbc.com',
+            'to_recipients': ['a@mail.com'],
+            'cc_recipients': ['b@mail.com'],
+            'bcc_recipients': [],
+            'timezone': 'GMT',
+            'signature': 'Regards,\nBhai',
+            'disclaimer': 'Auto generated email, This e-mail is confidential. If you are not the intended recipient, please notify the sender by reply all to this e-mail and delete it from your system.'
+        }
+
+        pythoncom.CoInitialize()
+        self.create_scrollable_gui()
+        
+        # NEW: Auto-execute by detecting files in watch folder
+        if self.auto_execute:
+            self.prepare_auto_execution()
+            self.root.after(1000, self.process_next_file)
+
+    def detect_files_in_folder(self):
+        """Detect which configured files exist in the watch folder"""
+        import fnmatch
+        
+        detected_files = []
+        
+        if not os.path.exists(self.watch_folder):
+            self.master_logger.error(f"Watch folder does not exist: {self.watch_folder}")
+            return detected_files
+        
+        # Get all files in watch folder
+        folder_files = [f for f in os.listdir(self.watch_folder) 
+                       if os.path.isfile(os.path.join(self.watch_folder, f))]
+        
+        self.master_logger.info(f"Scanning watch folder: {self.watch_folder}")
+        self.master_logger.info(f"Found {len(folder_files)} files in folder")
+        
+        # Match each file config pattern against folder files
+        for file_key, config in self.file_configs.items():
+            pattern = config.get('file_pattern', '')
+            
+            if not pattern:
+                self.master_logger.warning(f"{file_key}: No file_pattern configured, skipping")
+                continue
+            
+            # Find matching files
+            matched_files = fnmatch.filter(folder_files, pattern)
+            
+            if matched_files:
+                # Use the first matched file
+                matched_file = matched_files[0]
+                file_path = os.path.join(self.watch_folder, matched_file)
+                
+                detected_files.append({
+                    'file_key': file_key,
+                    'file_path': file_path,
+                    'file_name': matched_file,
+                    'config': config
+                })
+                
+                self.master_logger.info(f"✓ Detected: {file_key} → {matched_file}")
+                
+                if len(matched_files) > 1:
+                    self.master_logger.warning(f"  Multiple files match pattern '{pattern}': {matched_files}")
+                    self.master_logger.warning(f"  Using first match: {matched_file}")
+            else:
+                self.master_logger.info(f"✗ Not found: {file_key} (pattern: {pattern})")
+        
+        return detected_files
+
+    def setup_master_logging(self):
+        """Setup master log file that captures all files processing"""
+        try:
+            if not os.path.exists(self.log_folder):
+                os.makedirs(self.log_folder)
+                print(f"Created log folder: {self.log_folder}")
+            
+            # Master log filename with timestamp
+            log_filename = f"ReconMailDraft_Master_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            log_filepath = os.path.join(self.log_folder, log_filename)
+            
+            logger = logging.getLogger('ReconMailDraft_Master')
+            logger.setLevel(logging.DEBUG)
+            logger.handlers = []
+            
+            file_handler = RotatingFileHandler(
+                log_filepath,
+                maxBytes=10*1024*1024,
+                backupCount=5,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(logging.DEBUG)
+            
+            formatter = logging.Formatter(
+                '%(asctime)s | %(levelname)-8s | %(message)s',
+                datefmt='%Y-%m-%d %I:%M:%S %p'
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            logger.info(f"Master log file initialized: {log_filepath}")
+            
+            return logger
+            
+        except Exception as e:
+            print(f"Error setting up master logging: {str(e)}")
+            logger = logging.getLogger('ReconMailDraft_Master')
+            logger.setLevel(logging.INFO)
+            console_handler = logging.StreamHandler()
+            logger.addHandler(console_handler)
+            return logger
+
+    def setup_file_specific_logging(self, file_key, actual_filename=None):
+        """Setup individual log file for each recon file"""
+        try:
+            # Use actual filename if provided, otherwise use file_key
+            if actual_filename:
+                # Extract base name without extension
+                base_name = os.path.splitext(actual_filename)[0]
+                log_filename = f"ReconMailDraft_{base_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            else:
+                log_filename = f"ReconMailDraft_{file_key.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+            
+            log_filepath = os.path.join(self.log_folder, log_filename)
+            
+            # Create unique logger for this file
+            logger_name = f'ReconMailDraft_{file_key}_{datetime.now().strftime("%H%M%S%f")}'
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(logging.DEBUG)
+            logger.handlers = []
+            
+            file_handler = logging.FileHandler(
+                log_filepath,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(logging.DEBUG)
+            
+            formatter = logging.Formatter(
+                '%(asctime)s | %(levelname)-8s | %(message)s',
+                datefmt='%Y-%m-%d %I:%M:%S %p'
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            logger.info(f"File-specific log initialized for: {file_key}")
+            if actual_filename:
+                logger.info(f"Processing file: {actual_filename}")
+            logger.info(f"Log file path: {log_filepath}")
+            
+            self.master_logger.info(f"Created individual log file: {log_filename}")
+            
+            return logger
+            
+        except Exception as e:
+            print(f"Error setting up file-specific logging: {str(e)}")
+            self.master_logger.error(f"Error setting up file-specific logging for {file_key}: {str(e)}")
+            return self.master_logger
+
+    def prepare_auto_execution(self):
+        """Detect files in watch folder and prepare processing queue"""
+        detected_files = self.detect_files_in_folder()
+        
+        if not detected_files:
+            self.master_logger.warning("AUTO MODE: No files detected in watch folder")
+            self.log_message("AUTO MODE: No files found to process", 'warning')
+            messagebox.showwarning(
+                "No Files Found",
+                f"No matching files found in watch folder:\n{self.watch_folder}\n\n"
+                "Please place files matching the configured patterns in the folder."
+            )
+            self.root.after(2000, self.on_closing)
+            return
+        
+        self.files_to_process = detected_files
+        self.current_file_index = 0
+        
+        self.master_logger.info(f"AUTO MODE: Detected {len(self.files_to_process)} files for processing")
+        
+        for idx, file_info in enumerate(self.files_to_process, 1):
+            self.master_logger.info(f"  {idx}. {file_info['file_key']}: {file_info['file_name']}")
+        
+        self.log_message(f"AUTO MODE: Detected {len(self.files_to_process)} files to process", 'warning')
+
+    def process_next_file(self):
+        """Process the next file in the queue"""
+        if self.current_file_index >= len(self.files_to_process):
+            self.master_logger.info("AUTO MODE: All files processed successfully")
+            self.log_message("AUTO MODE: All files completed. Closing application...", 'success')
+            self.root.after(2000, self.on_closing)
+            return
+        
+        file_info = self.files_to_process[self.current_file_index]
+        file_key = file_info['file_key']
+        file_path = file_info['file_path']
+        file_name = file_info['file_name']
+        file_config = file_info['config'].copy()
+        
+        # Update config with actual detected file path
+        file_config['path'] = file_path
+        
+        is_last = (self.current_file_index == len(self.files_to_process) - 1)
+        
+        self.master_logger.info(f"AUTO MODE: Processing file {self.current_file_index + 1}/{len(self.files_to_process)}: {file_key}")
+        self.master_logger.info(f"  File: {file_name}")
+        self.master_logger.info(f"  Path: {file_path}")
+        
+        self.log_message(
+            f"AUTO MODE: Processing [{self.current_file_index + 1}/{len(self.files_to_process)}] {file_key} ({file_name})", 
+            'warning'
+        )
+        
+        # Create file-specific logger with actual filename
+        file_logger = self.setup_file_specific_logging(file_key, file_name)
+        
+        # Increment for next iteration
+        self.current_file_index += 1
+        
+        # Process the file with its own logger
+        ReconFile(
+            self.root, 
+            file_key, 
+            file_config, 
+            self.email_config, 
+            self.log_message, 
+            file_logger,  # Pass file-specific logger
+            auto_mode=True,
+            is_last_file=is_last
+        )
+
+    def auto_close_main_window(self, event=None):
+        """Close main window automatically after workflow completion"""
+        self.log_message("AUTO MODE: All tasks completed. Closing application...", 'success')
+        self.logger.info("AUTO MODE: All tasks completed. Closing application automatically")
+        self.root.after(2000, self.on_closing)  # Close after 2 seconds
+
+    def setup_logging(self):
+        """Setup file logging with rotation"""
+        try:
+            # Create log folder if it doesn't exist
+            if not os.path.exists(self.log_folder):
+                os.makedirs(self.log_folder)
+                print(f"Created log folder: {self.log_folder}")
+            
+            # Create log filename with date
+            log_filename = f"ReconMailDraft_{datetime.now().strftime('%Y%m%d')}.log"
+            log_filepath = os.path.join(self.log_folder, log_filename)
+            
+            # Create logger
+            logger = logging.getLogger('ReconMailDraft')
+            logger.setLevel(logging.DEBUG)
+            
+            # Remove existing handlers to avoid duplicates
+            logger.handlers = []
+            
+            # Create rotating file handler (max 10MB per file, keep 5 backups)
+            file_handler = RotatingFileHandler(
+                log_filepath,
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(logging.DEBUG)
+            
+            # Create formatter
+            formatter = logging.Formatter(
+                '%(asctime)s | %(levelname)-8s | %(message)s',
+                datefmt='%Y-%m-%d %I:%M:%S %p'
+            )
+            file_handler.setFormatter(formatter)
+            
+            # Add handler to logger
+            logger.addHandler(file_handler)
+            
+            # Log the log file location
+            logger.info(f"Log file initialized: {log_filepath}")
+            
+            return logger
+            
+        except Exception as e:
+            print(f"Error setting up logging: {str(e)}")
+            messagebox.showerror("Logging Error", f"Could not setup log file:\n{str(e)}")
+            # Return a basic logger that only logs to console
+            logger = logging.getLogger('ReconMailDraft')
+            logger.setLevel(logging.INFO)
+            console_handler = logging.StreamHandler()
+            logger.addHandler(console_handler)
+            return logger
+
+    def auto_execute_first_file(self):
+        """Automatically open and process the first file"""
+        if not self.file_configs:
+            self.log_message("No files configured for auto-execution", 'error')
+            self.logger.error("No files configured for auto-execution")
+            return
+        
+        # Get first file key
+        first_file_key = list(self.file_configs.keys())[0]
+        self.log_message(f"AUTO MODE: Processing {first_file_key}", 'warning')
+        self.logger.warning(f"AUTO MODE: Processing {first_file_key}")
+        
+        # Open file popup in auto mode
+        file_config = self.file_configs.get(first_file_key, {})
+        ReconFile(self.root, first_file_key, file_config, self.email_config, self.log_message, self.logger, auto_mode=True)
+
+    def create_scrollable_gui(self):
+        container = ttk.Frame(self.root)
+        container.pack(fill=tk.BOTH, expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        header_frame = ttk.Frame(self.scrollable_frame)
+        header_frame.pack(pady=20)
+        
+        ttk.Label(
+            header_frame,
+            text='Recon Mail Draft Utility',
+            font=('Arial', 18, 'bold')
+        ).pack()
+        
+        # NEW: Show auto-execute status
+        if self.auto_execute:
+            ttk.Label(
+                header_frame,
+                text="AUTO-EXECUTE MODE ENABLED",
+                font=('Arial', 11, 'bold'),
+                foreground='orange'
+            ).pack(pady=5)
+        
+        inst_frame = ttk.LabelFrame(self.scrollable_frame, text="Workflow", padding="15")
+        inst_frame.pack(fill=tk.X, padx=20, pady=15)
+        
+        instructions = """
+        1. Select the Recon Template from below
+        2. Capture screenshots from Excel sheets
+        3. Configure email recipients
+        4. Draft email in Outlook with embedded screenshots
+        5. Files and screenshots are automatically deleted after drafting
+        """
+        
+        ttk.Label(
+            inst_frame,
+            text=instructions,
+            justify=tk.LEFT,
+            font=('Arial', 9)
+        ).pack()
+        
+        files_frame = ttk.LabelFrame(self.scrollable_frame, text="Select Recon Template Draft", padding="15")
+        files_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        for file_key, config in self.file_configs.items():
+            file_button_frame = ttk.Frame(files_frame)
+            file_button_frame.pack(fill=tk.X, pady=8)
+            
+            smart_enabled = config.get('smart_linking', {}).get('enabled', False)
+            icon = "🔗" if smart_enabled else "📄"
+            
+            btn = ttk.Button(
+                file_button_frame,
+                text=f"{icon} {file_key}: {config['name']}",
+                command=lambda fk=file_key: self.open_file_popup(fk),
+                width=55
+            )
+            btn.pack(side=tk.LEFT, padx=5)
+            
+            if smart_enabled:
+                num_sheets = len(config.get('smart_linking', {}).get('linked_sheets', []))
+                info_label = ttk.Label(
+                    file_button_frame,
+                    text=f"({num_sheets} linked sheets)",
+                    font=('Arial', 8),
+                    foreground='gray'
+                )
+                info_label.pack(side=tk.LEFT, padx=5)
+        
+        log_frame = ttk.LabelFrame(self.scrollable_frame, text="Activity Log", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        self.log_text = scrolledtext.ScrolledText(log_frame, width=40, height=12, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        self.log_text.tag_config('info', foreground='blue')
+        self.log_text.tag_config('success', foreground='green')
+        self.log_text.tag_config('error', foreground='red')
+        self.log_text.tag_config('warning', foreground='orange')
+        
+        self.log_message("Application initialized", 'success')
+        self.master_logger.info("GUI initialized successfully")
+        
+        if self.auto_execute:
+            self.log_message(f"AUTO-EXECUTE MODE: Will process {len(self.file_configs)} files automatically", 'warning')
+            self.master_logger.warning(f"AUTO-EXECUTE MODE enabled - {len(self.file_configs)} files queued")
+        else:
+            self.log_message("Select a file above to begin", 'info')
+            self.master_logger.info("Manual mode - waiting for user input")
+        
+        # NEW: Add button to open log folder
+        log_btn_frame = ttk.Frame(self.scrollable_frame)
+        log_btn_frame.pack(pady=10)
+        
+        ttk.Button(
+            log_btn_frame,
+            text="📁 Open Log Folder",
+            command=self.open_log_folder,
+            width=25
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(
+            log_btn_frame,
+            text="📄 View Current Log File",
+            command=self.open_log_file,
+            width=25
+        ).pack(side=tk.LEFT, padx=5)
+
+    def open_log_folder(self):
+        """Open the log folder in Windows Explorer"""
+        try:
+            if os.path.exists(self.log_folder):
+                os.startfile(self.log_folder)
+                self.log_message("Opened log folder", 'info')
+                self.master_logger.info("User opened log folder")
+            else:
+                messagebox.showwarning("Folder Not Found", f"Log folder not found:\n{self.log_folder}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open log folder:\n{str(e)}")
+            self.master_logger.error(f"Error opening log folder: {str(e)}")
+
+    def open_log_file(self):
+        """Open the current log file in default text editor"""
+        try:
+            log_filename = f"ReconMailDraft_{datetime.now().strftime('%Y%m%d')}.log"
+            log_filepath = os.path.join(self.log_folder, log_filename)
+            
+            if os.path.exists(log_filepath):
+                os.startfile(log_filepath)
+                self.log_message("Opened current log file", 'info')
+                self.master_logger.info("User opened current log file")
+            else:
+                messagebox.showwarning("File Not Found", f"Log file not found:\n{log_filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open log file:\n{str(e)}")
+            self.master_logger.error(f"Error opening log file: {str(e)}")
+
+    def log_message(self, message, tag='info'):
+        self.log_text.config(state='normal')
+        timestamp = datetime.now().strftime('%I:%M:%S %p')
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        self.log_text.see(tk.END)
+        self.log_text.config(state='disabled')
+        self.root.update_idletasks()
+    
+    def open_file_popup(self, file_key):
+        self.log_message(f"Opening draft window for {file_key}", 'info')
+        self.master_logger.info(f"Opening draft window for {file_key}")
+        
+        file_config = self.file_configs.get(file_key, {})
+        
+        if not file_config:
+            self.log_message(f"Configuration not found for {file_key}", 'error')
+            self.master_logger.error(f"Configuration not found for {file_key}")
+            messagebox.showerror("Error", f"No configuration found for {file_key}")
+            return
+        
+        smart_enabled = file_config.get('smart_linking', {}).get('enabled', False)
+        
+        # NEW: Create file-specific logger for manual mode too
+        file_logger = self.setup_file_specific_logging(file_key)
+        
+        # Pass logger and auto_mode=False for manual opening
+        ReconFile(
+            self.root, 
+            file_key, 
+            file_config, 
+            self.email_config, 
+            self.log_message, 
+            file_logger, 
+            auto_mode=False,
+            is_last_file=False
+        )
+    
+    def on_closing(self):
+        try:
+            self.master_logger.info("="*60)
+            self.master_logger.info("APPLICATION CLOSED")
+            self.master_logger.info("="*60)
+            pythoncom.CoUninitialize()
+        except:
+            pass
+        
+        self.root.destroy()
+
+
+def main():
+    """Main function to start the GUI application"""
+    root = tk.Tk()
+    
+    # ============================================================
+    # CONFIGURATION FOR AUTO-EXECUTE MODE
+    # ============================================================
+    
+    # Set auto_execute=True to enable automatic file detection and processing
+    auto_execute_mode = True  # Change to False for manual mode
+    
+    # Set the folder where files will be placed for processing
+    watch_folder = r'C:\ReconMailDraft\InputFiles'  # CHANGE THIS PATH
+    
+    # ============================================================
+    
+    app = ExcelOutlookGUI(root, auto_execute=auto_execute_mode, watch_folder=watch_folder)
+    
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
+
+
+"""
+============================================
+AUTO-EXECUTE MODE WITH FILE DETECTION
+============================================
+
+HOW IT WORKS:
+
+1. Configure a Watch Folder:
+   - Default: C:\ReconMailDraft\InputFiles
+   - Change in main() function: watch_folder = r'C:\YOUR\PATH'
+
+2. Place Files in Watch Folder:
+   - Put any recon Excel files in the watch folder
+   - Files are matched by patterns configured in file_configs
+
+3. Automatic Detection and Processing:
+   - Tool scans watch folder on launch
+   - Detects which files match configured patterns
+   - Processes ONLY the files found (1, 2, or all)
+   - Each file gets its own log
+
+4. File Pattern Matching:
+   Each file config has a 'file_pattern':
+   - 'TM199C5.xlsm' → Exact match
+   - 'MI_Forecast*.xlsm' → Matches MI_Forecast_Jan.xlsm, MI_Forecast_2024.xlsm, etc.
+   - 'BalanceSheet*.xlsm' → Matches BalanceSheet_Q1.xlsm, BalanceSheet_Monthly.xlsm, etc.
+
+EXAMPLES:
+
+Scenario 1: Only File 1 in folder
+   Watch Folder: C:\ReconMailDraft\InputFiles\
+     └── TM199C5.xlsm
+   
+   Result: Processes only "Recon 1"
+   Log: ReconMailDraft_TM199C5_20251106_143025.log
+
+Scenario 2: Only File 2 in folder
+   Watch Folder: C:\ReconMailDraft\InputFiles\
+     └── MI_Forecast_Jan.xlsm
+   
+   Result: Processes only "Recon 2"
+   Log: ReconMailDraft_MI_Forecast_Jan_20251106_143025.log
+
+Scenario 3: Multiple files in folder
+   Watch Folder: C:\ReconMailDraft\InputFiles\
+     ├── TM199C5.xlsm
+     ├── MI_Forecast_Jan.xlsm
+     └── BalanceSheet_Q1.xlsm
+   
+   Result: Processes all 3 files sequentially
+   Logs:
+     - ReconMailDraft_TM199C5_20251106_143025.log
+     - ReconMailDraft_MI_Forecast_Jan_20251106_143045.log
+     - ReconMailDraft_BalanceSheet_Q1_20251106_143105.log
+
+Scenario 4: No matching files
+   Watch Folder: C:\ReconMailDraft\InputFiles\
+     └── SomeOtherFile.xlsx
+   
+   Result: Shows warning message, closes application
+
+============================================
+CONFIGURATION
+============================================
+
+To enable auto-execute mode:
+1. In main() function:
+   auto_execute_mode = True
+   watch_folder = r'C:\ReconMailDraft\InputFiles'
+
+2. In file_configs, add 'file_pattern' for each file:
+   'Recon 1': {
+       'file_pattern': 'TM199C5.xlsm',  # Exact filename
+       ...
+   }
+   'Recon 2': {
+       'file_pattern': 'MI_Forecast*.xlsm',  # Wildcard pattern
+       ...
+   }
+
+Pattern Syntax (fnmatch):
+- * : Matches any characters
+- ? : Matches single character
+- [abc] : Matches a, b, or c
+- [!abc] : Matches any except a, b, c
+
+Examples:
+- 'Report*.xlsx' → Report_Jan.xlsx, Report_2024.xlsx
+- 'Data_?.xlsm' → Data_A.xlsm, Data_1.xlsm
+- 'File[123].xlsx' → File1.xlsx, File2.xlsx, File3.xlsx
+
+============================================
+LOG FILE STRUCTURE
+============================================
+
+1. MASTER LOG (Session overview):
+   Filename: ReconMailDraft_Master_YYYYMMDD_HHMMSS.log
+   
+   Example content:
+   2025-11-06 02:30:45 PM | INFO     | APPLICATION STARTED
+   2025-11-06 02:30:46 PM | INFO     | Watch folder configured: C:\ReconMailDraft\InputFiles
+   2025-11-06 02:30:47 PM | INFO     | Scanning watch folder
+   2025-11-06 02:30:47 PM | INFO     | Found 2 files in folder
+   2025-11-06 02:30:48 PM | INFO     | ✓ Detected: Recon 1 → TM199C5.xlsm
+   2025-11-06 02:30:48 PM | INFO     | ✓ Detected: Recon 2 → MI_Forecast_Jan.xlsm
+   2025-11-06 02:30:48 PM | INFO     | ✗ Not found: Recon 3 (pattern: BalanceSheet*.xlsm)
+   2025-11-06 02:30:49 PM | INFO     | AUTO MODE: Detected 2 files for processing
+   2025-11-06 02:30:50 PM | INFO     | AUTO MODE: Processing file 1/2: Recon 1
+   2025-11-06 02:31:30 PM | INFO     | AUTO MODE: Processing file 2/2: Recon 2
+   2025-11-06 02:32:00 PM | INFO     | AUTO MODE: All files processed successfully
+
+2. INDIVIDUAL FILE LOGS (Per detected file):
+   Filename: ReconMailDraft_[ActualFilename]_YYYYMMDD_HHMMSS.log
+   
+   Examples:
+   - ReconMailDraft_TM199C5_20251106_143030.log
+   - ReconMailDraft_MI_Forecast_Jan_20251106_143145.log
+   - ReconMailDraft_BalanceSheet_Q1_20251106_143300.log
+   
+   Contains detailed operations for that specific file:
+   - Screenshot captures
+   - Threshold analysis
+   - Email drafting
+   - All errors/warnings
+
+============================================
+ADDING NEW FILE TYPES
+============================================
+
+To add support for new recon files:
+
+1. Add configuration in self.file_configs:
+   'Recon 4': {
+       'path': '',  # Leave empty for auto-detection
+       'name': 'Treasury Recon',
+       'file_pattern': 'Treasury_*.xlsm',  # Pattern to match
+       'default_subject': 'Treasury Reconciliation | {timestamp}',
+       'email_body': 'Hi Team,\nTreasury recon status:',
+       'screenshots': [
+           {
+               'sheet_name': 'Summary',
+               'cell_range': 'A1:M50',
+               'name': 'Treasury_Summary',
+               'embed': True,
+               'attach': False
+           }
+       ]
+   }
+
+2. Place matching file in watch folder:
+   C:\ReconMailDraft\InputFiles\Treasury_Nov2024.xlsm
+
+3. Tool automatically detects and processes it!
+
+============================================
+WORKFLOW SUMMARY
+============================================
+
+1. Launch Application
+   ↓
+2. Scan Watch Folder
+   ↓
+3. Match Files by Patterns
+   ↓
+4. For Each Detected File:
+   - Create file-specific log
+   - Capture screenshots
+   - Draft email in Outlook
+   - Close popup
+   - Move to next file
+   ↓
+5. Close Application
+
+All activities logged in:
+- Master log (overall session)
+- Individual logs (per file with actual filename)
+
+============================================
+TROUBLESHOOTING
+============================================
+
+Q: No files detected?
+A: Check:
+   - Files are in correct watch folder
+   - File patterns match actual filenames
+   - Files have correct extensions (.xlsm, .xlsx)
+
+Q: Wrong file processed?
+A: Check file_pattern - use more specific patterns
+   Example: 'MI_Forecast_*.xlsm' instead of '*.xlsm'
+
+Q: Multiple files match same pattern?
+A: Tool uses first match. Make patterns more specific.
+   Tool logs warning about multiple matches.
+
+Q: Want to process specific file only?
+A: Place only that file in watch folder,
+   or make pattern exact: 'TM199C5.xlsm'
+
+============================================
+"""
+
+
+
+
+
+
+
+
+
+##############################
+
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
