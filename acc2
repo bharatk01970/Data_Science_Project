@@ -559,7 +559,15 @@ class ReconFile:
             
             pythoncom.CoInitialize()
             
-            outlook = win32com.client.gencache.EnsureDispatch("Outlook.Application")
+            try:
+                # Use Dispatch instead of EnsureDispatch
+                outlook = win32com.client.Dispatch("Outlook.Application")
+            except Exception as e:
+                self.log_message(f'Error initializing Outlook: {str(e)}', 'error')
+                self.log_message('Trying alternative COM initialization...', 'info')
+                # Alternative approach using dynamic dispatch
+                outlook = win32com.client.dynamic.Dispatch("Outlook.Application")
+            
             mail = outlook.CreateItem(0)
 
             sender_email = self.email_config.get('sender_email', '').strip()
