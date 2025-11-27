@@ -1,764 +1,2807 @@
-# Python: Your Personal Work Assistant
-**A Practical Guide to Automating Daily Tasks**
+# Recon Mail Draft Utility
+## Complete Documentation Package
 
 ---
 
-## Introduction: Why Python?
+# Table of Contents
 
-Imagine having an assistant who never gets tired, works in seconds instead of hours, and handles all your repetitive tasks flawlessly. That's Python.
-
-You don't need to be a programmer or tech expert. Python is simply a tool—like Excel or Word—that helps you work smarter. This guide will show you how everyday professionals are using Python to reclaim hours of their time every week.
-
-**What you'll discover:**
-- How Python solves common workplace frustrations
-- Real examples with simple code you can use
-- Practical ways to start automating your work
-- Resources to begin your journey
+1. [Standard Operating Procedure (SOP)](#standard-operating-procedure)
+2. [Workflow Documentation](#workflow-documentation)
+3. [Technical Algorithm](#technical-algorithm)
+4. [User Guide](#user-guide)
+5. [Troubleshooting Guide](#troubleshooting-guide)
 
 ---
 
-## The Daily Grind: Tasks That Drain Your Time
+# Standard Operating Procedure (SOP)
 
-Think about your typical workday. How much time do you spend on tasks like these?
-
-- **Renaming files:** Updating dozens of file names to match a new format
-- **Excel cleanup:** Removing extra spaces, fixing capitalization, formatting data
-- **Combining reports:** Merging multiple spreadsheets into one master file
-- **Copying data:** Moving information between different files or systems
-- **Sending repetitive messages:** Personalizing and sending similar emails or notifications
-- **Organizing files:** Creating folder structures for new projects
-- **Extracting information:** Pulling specific data from PDFs or documents
-- **Manual calculations:** Performing the same calculations on different datasets
-
-If you're nodding along, you're not alone. These tasks consume hours each week—hours you could spend on meaningful work.
-
-**The good news:** Python can automate most of these tasks in seconds.
+## Document Information
+- **Document Title:** Recon Mail Draft Utility - Standard Operating Procedure
+- **Version:** 1.0
+- **Date:** November 2024
+- **Owner:** Finance Operations Team
+- **Purpose:** To provide standardized procedures for automated reconciliation email drafting
 
 ---
 
-## Real-World Examples: Python in Action
+## 1. Overview
 
-### Example 1: Renaming Multiple Files Instantly
+### 1.1 Purpose
+The Recon Mail Draft Utility automates the process of:
+- Capturing screenshots from reconciliation Excel files
+- Analyzing variance thresholds
+- Drafting formatted emails in Outlook with embedded screenshots
+- Maintaining audit logs for compliance
 
-**The Situation:**
-You have 100 product photos named "IMG_001.jpg" through "IMG_100.jpg" and need them renamed to "Product_Launch_2024_001.jpg" through "Product_Launch_2024_100.jpg."
+### 1.2 Scope
+This SOP applies to:
+- Finance Operations team members processing reconciliation reports
+- Automated batch processing of multiple reconciliation files
+- Manual processing of individual reconciliation files
 
-**Traditional Method:** 
-Right-click each file, rename it carefully, repeat 100 times. Time: 20-30 minutes.
+### 1.3 Benefits
+- **Time Savings:** Reduces manual email drafting from 15 minutes to 30 seconds per file
+- **Consistency:** Ensures standardized email format and content
+- **Accuracy:** Eliminates manual copy-paste errors
+- **Audit Trail:** Complete logging of all operations
+- **Scalability:** Processes multiple files automatically
 
-**Python Method:** 
-Run this simple code. Time: 3 seconds.
+---
 
-```python
-import os
+## 2. Prerequisites
 
-# Specify your folder location
-folder = "C:/Users/YourName/ProductPhotos"
+### 2.1 System Requirements
+- **Operating System:** Windows 10 or higher
+- **Python:** Version 3.12.7 or higher
+- **Microsoft Excel:** 2016 or higher (installed and licensed)
+- **Microsoft Outlook:** 2016 or higher (installed and configured)
+- **RAM:** Minimum 4GB
+- **Disk Space:** 500MB free space
 
-# Rename all JPG files
-for filename in os.listdir(folder):
-    if filename.endswith(".jpg"):
-        new_name = filename.replace("IMG_", "Product_Launch_2024_")
-        old_path = os.path.join(folder, filename)
-        new_path = os.path.join(folder, new_name)
-        os.rename(old_path, new_path)
-
-print("All 100 files renamed successfully!")
+### 2.2 Software Dependencies
+```
+- Python 3.12.7
+- tkinter (included with Python)
+- win32com.client (pywin32 package)
+- PIL (Pillow package)
+- pythoncom (pywin32 package)
 ```
 
-**What this does:**
-- Looks at every file in your folder
-- Finds files ending with ".jpg"
-- Replaces "IMG_" with "Product_Launch_2024_"
-- Renames them all automatically
+### 2.3 Permissions Required
+- Read access to reconciliation file locations
+- Write access to log folder (C:\ReconMailDraft\Logs)
+- Write access to watch folder (C:\ReconMailDraft\InputFiles)
+- Outlook send permissions
 
-**Time saved:** 20+ minutes per batch
+### 2.4 Training Requirements
+- Basic understanding of reconciliation processes
+- Familiarity with Outlook email operations
+- Understanding of file naming conventions
 
 ---
 
-### Example 2: Cleaning Messy Excel Data
+## 3. Procedure
 
-**The Situation:**
-You receive a customer database with 500 rows. Names have inconsistent capitalization, emails have random spaces, and there are duplicate entries throughout.
+### 3.1 Auto-Execute Mode (Recommended for Batch Processing)
 
-**Traditional Method:** 
-Manually review and fix each cell, use Find & Replace multiple times, visually scan for duplicates. Time: 30-45 minutes.
+#### Step 1: Prepare Input Files
+**Time Required:** 2-5 minutes
 
-**Python Method:**
-```python
-import pandas as pd
+**Actions:**
+1. Navigate to the watch folder: `C:\ReconMailDraft\InputFiles`
+2. Copy reconciliation Excel files to the watch folder
+3. Verify file names match configured patterns
+4. Ensure files are not password-protected
+5. Confirm files are not open in Excel
 
-# Open your messy Excel file
-data = pd.read_excel("customer_database_messy.xlsx")
+**Quality Check:**
+- [ ] All files are in .xlsm or .xlsx format
+- [ ] File names match configured patterns
+- [ ] No temporary files (~$*.xlsx) present
 
-# Clean the Name column
-data['Name'] = data['Name'].str.strip()  # Remove extra spaces
-data['Name'] = data['Name'].str.title()  # Standardize Capitalization
+#### Step 2: Launch Application
+**Time Required:** 5 seconds
 
-# Clean the Email column
-data['Email'] = data['Email'].str.lower()  # Make all lowercase
-data['Email'] = data['Email'].str.strip()  # Remove spaces
+**Actions:**
+1. Double-click `ReconMailDraft.exe` or run Python script
+2. Application window appears showing "Recon Mail Draft Utility"
+3. Wait for "AUTO MODE: Detected X files for processing" message
 
-# Clean the Phone column
-data['Phone'] = data['Phone'].str.replace(" ", "")  # Remove spaces
-data['Phone'] = data['Phone'].str.replace("-", "")  # Remove dashes
+**Quality Check:**
+- [ ] Console shows detected files
+- [ ] File count matches expected number
+- [ ] No error messages displayed
 
-# Remove duplicate rows
-data = data.drop_duplicates()
+#### Step 3: Automatic Processing
+**Time Required:** 30-60 seconds per file
 
-# Save the cleaned version
-data.to_excel("customer_database_clean.xlsx", index=False)
+**Actions:**
+1. **Automatic File Detection:**
+   - System scans watch folder
+   - Matches files against configured patterns
+   - Displays list of detected files
 
-print(f"Cleaned! Removed {data.duplicated().sum()} duplicates.")
+2. **For Each File:**
+   - Screenshot capture popup opens
+   - Screenshots captured automatically
+   - Email drafted in Outlook
+   - Popup closes automatically
+   - Next file processed
+
+3. **Completion:**
+   - All files processed
+   - Application closes automatically
+
+**Monitoring:**
+- Watch Activity Log for real-time progress
+- Console shows processing status
+- Individual log files created per file
+
+**Quality Check:**
+- [ ] Each file processed successfully
+- [ ] Email drafts created in Outlook
+- [ ] Log files generated for each file
+- [ ] No error messages in logs
+
+#### Step 4: Review and Send Emails
+**Time Required:** 1-2 minutes per email
+
+**Actions:**
+1. Open Microsoft Outlook
+2. Navigate to Drafts folder
+3. Review each drafted email:
+   - Check subject line
+   - Verify recipients (To, CC)
+   - Review email body text
+   - Confirm screenshots are embedded
+   - Check attachments (if applicable)
+4. Make any necessary edits
+5. Click "Send" for each email
+
+**Quality Check:**
+- [ ] All expected emails present in Drafts
+- [ ] Recipients correct
+- [ ] Screenshots visible and clear
+- [ ] Timestamp accurate
+- [ ] Signature present
+
+#### Step 5: Verify and Archive
+**Time Required:** 2-3 minutes
+
+**Actions:**
+1. Check Sent Items in Outlook
+2. Review log files:
+   - Navigate to `C:\ReconMailDraft\Logs`
+   - Open each log file
+   - Verify no errors
+3. Archive processed files (optional)
+4. Clear watch folder for next run
+
+**Quality Check:**
+- [ ] All emails sent successfully
+- [ ] Log files show no errors
+- [ ] Watch folder cleared
+- [ ] Source files archived
+
+---
+
+### 3.2 Manual Mode (For Individual Files)
+
+#### Step 1: Launch Application
+**Actions:**
+1. Double-click application
+2. Main window displays with file buttons
+
+#### Step 2: Select File
+**Actions:**
+1. Click on desired recon template button
+2. Popup window opens for selected file
+
+#### Step 3: Verify File Path
+**Actions:**
+1. Check file path in "File Path" field
+2. Modify if necessary
+3. Ensure file exists at specified location
+
+#### Step 4: Capture Screenshots
+**Actions:**
+1. Click "Capture Screenshots" button
+2. Wait for processing (15-30 seconds)
+3. Status shows "✓ Captured X screenshots"
+
+#### Step 5: Review Email Configuration
+**Actions:**
+1. Verify "From" email address
+2. Check "To" recipients
+3. Confirm "CC" recipients
+4. Make changes if needed
+
+#### Step 6: Draft Email
+**Actions:**
+1. Click "Draft Email in Outlook" button
+2. Wait for completion message
+3. Email created in Outlook Drafts
+
+#### Step 7: Review and Send
+**Actions:**
+1. Open Outlook
+2. Review draft email
+3. Send when ready
+
+---
+
+## 4. File Pattern Configuration
+
+### 4.1 Pattern Types
+
+#### Exact Match
+```
+'file_pattern': 'TM199C5.xlsm'
+```
+- Matches: TM199C5.xlsm only
+- Use when: Processing specific named file
+
+#### Wildcard Pattern
+```
+'file_pattern': 'MI_Forecast*.xlsm'
+```
+- Matches: MI_Forecast_Jan.xlsm, MI_Forecast_Feb.xlsm, etc.
+- Use when: Processing multiple related files
+
+#### Complex Pattern
+```
+'file_pattern': 'Report_Q[1-4]_*.xlsm'
+```
+- Matches: Report_Q1_2024.xlsm, Report_Q2_Final.xlsm, etc.
+- Use when: Specific naming structure required
+
+### 4.2 Pattern Examples
+
+| Pattern | Matches | Use Case |
+|---------|---------|----------|
+| `'*.xlsm'` | All .xlsm files | Process all files |
+| `'Monthly_*.xlsm'` | Monthly_Jan.xlsm, Monthly_Feb.xlsm | Monthly reports |
+| `'*_Summary.xlsm'` | Q1_Summary.xlsm, Annual_Summary.xlsm | Summary files |
+| `'Recon_202411*.xlsm'` | Recon_20241101.xlsm, Recon_20241130.xlsm | November 2024 files |
+
+---
+
+## 5. Quality Control
+
+### 5.1 Pre-Processing Checks
+- [ ] Files in correct location
+- [ ] File names match patterns
+- [ ] Files not open in Excel
+- [ ] Sufficient disk space available
+- [ ] Outlook is running
+
+### 5.2 During Processing Checks
+- [ ] No error messages in Activity Log
+- [ ] Screenshots captured successfully
+- [ ] Progress updates appearing
+- [ ] Files processing in sequence
+
+### 5.3 Post-Processing Checks
+- [ ] All expected emails in Drafts
+- [ ] Log files created for each file
+- [ ] No errors in log files
+- [ ] Screenshots clear and readable
+- [ ] Recipients correct
+
+### 5.4 Email Content Checks
+- [ ] Subject line correct with timestamp
+- [ ] Body text formatted properly
+- [ ] Screenshots embedded (not attached unless configured)
+- [ ] Signature present
+- [ ] Disclaimer present
+- [ ] Timestamp in email matches current time
+
+---
+
+## 6. Error Handling
+
+### 6.1 Common Errors and Resolutions
+
+#### Error: "No files detected in watch folder"
+**Cause:** No files match configured patterns
+**Resolution:**
+1. Check file names match patterns
+2. Verify files are in correct folder
+3. Check file extensions (.xlsm or .xlsx)
+
+#### Error: "Error opening workbook"
+**Cause:** File locked, corrupted, or password-protected
+**Resolution:**
+1. Close file if open in Excel
+2. Check file is not corrupted
+3. Remove password protection
+4. Verify network path accessible
+
+#### Error: "No screenshots captured"
+**Cause:** Sheet names or ranges incorrect
+**Resolution:**
+1. Verify sheet names in configuration
+2. Check cell ranges exist
+3. Ensure sheets not hidden
+
+#### Error: "Could not set sender"
+**Cause:** Sender email not configured in Outlook
+**Resolution:**
+1. Verify sender email address
+2. Check Outlook accounts
+3. Use default account if needed
+
+### 6.2 Escalation Process
+1. **Level 1:** Check log files for details
+2. **Level 2:** Retry with single file in manual mode
+3. **Level 3:** Contact IT support with log file
+4. **Level 4:** Contact tool developer
+
+---
+
+## 7. Logging and Audit Trail
+
+### 7.1 Log File Location
+```
+C:\ReconMailDraft\Logs\
 ```
 
-**What this does:**
-- Opens your Excel file
-- Removes extra spaces from text
-- Standardizes formatting (capitalization, phone formats)
-- Identifies and removes duplicate entries
-- Saves a clean version
+### 7.2 Log File Naming
+```
+ReconMailDraft_[Filename]_YYYYMMDD_HHMMSS.log
+```
+Example: `ReconMailDraft_TM199C5_20241106_143025.log`
 
-**Time saved:** 30+ minutes per file
+### 7.3 Log File Contents
+- Application start/stop times
+- File detection results
+- Screenshot capture details
+- Threshold analysis (if applicable)
+- Email drafting status
+- Errors and warnings
+- File deletion confirmations
+
+### 7.4 Log Retention
+- **Retention Period:** 90 days
+- **Archive Location:** Network drive backup
+- **Review Frequency:** Weekly for errors
+- **Compliance:** Maintains SOX audit requirements
 
 ---
 
-### Example 3: Combining Multiple Excel Files
+## 8. Roles and Responsibilities
 
-**The Situation:**
-Every Monday, you receive sales reports from 5 regional managers. Each report has the same column structure. You need to combine them into one master report for your weekly meeting.
+### 8.1 Operations Team Member
+**Responsibilities:**
+- Place files in watch folder
+- Launch application
+- Monitor processing
+- Review drafted emails
+- Send emails from Outlook
+- Report errors
 
-**Traditional Method:** 
-Open each file, copy data, paste into master file, ensure columns align, check for errors. Time: 15-20 minutes.
+### 8.2 Team Lead
+**Responsibilities:**
+- Weekly log review
+- Error escalation
+- Process improvements
+- Training new team members
+- Configuration updates
 
-**Python Method:**
-```python
-import pandas as pd
-import glob
+### 8.3 IT Support
+**Responsibilities:**
+- Application installation
+- Troubleshooting technical issues
+- Permissions management
+- System updates
+- Performance monitoring
 
-# Find all Excel files in your "Weekly Reports" folder
-all_files = glob.glob("Weekly_Reports/*.xlsx")
+---
 
-# Combine them all into one
-combined_data = pd.concat([pd.read_excel(file) for file in all_files])
+## 9. Performance Metrics
 
-# Save the master report
-combined_data.to_excel("Master_Sales_Report.xlsx", index=False)
+### 9.1 Key Performance Indicators (KPIs)
 
-print(f"Successfully combined {len(all_files)} reports!")
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Processing Time per File | < 60 seconds | Auto-logged |
+| Email Accuracy | 100% | Manual review |
+| Error Rate | < 2% | Log analysis |
+| Time Savings vs Manual | > 90% | Time study |
+| User Satisfaction | > 4.5/5 | Monthly survey |
+
+### 9.2 Monitoring
+- Daily: Processing counts
+- Weekly: Error logs review
+- Monthly: Performance metrics
+- Quarterly: User feedback
+
+---
+
+## 10. Maintenance and Updates
+
+### 10.1 Regular Maintenance
+- **Weekly:** Clear old log files (>90 days)
+- **Monthly:** Review and optimize configurations
+- **Quarterly:** Software updates
+- **Annually:** Comprehensive review
+
+### 10.2 Configuration Updates
+**When to Update:**
+- New reconciliation file types
+- Email recipient changes
+- Screenshot requirements change
+- Threshold values adjustment
+
+**How to Update:**
+1. Backup current configuration
+2. Modify file_configs in code
+3. Test with sample files
+4. Deploy to production
+5. Update documentation
+
+---
+
+## 11. Compliance and Security
+
+### 11.1 Data Security
+- Files processed locally (no cloud transfer)
+- Log files contain no sensitive data
+- Outlook credentials managed by Windows
+- Files deleted after processing (configurable)
+
+### 11.2 Compliance
+- **SOX Compliance:** Complete audit trail via logs
+- **GDPR:** No personal data stored
+- **Internal Controls:** Segregation of duties maintained
+- **Data Retention:** 90-day log retention
+
+### 11.3 Access Control
+- Application access: Finance Operations team only
+- Watch folder: Write access controlled
+- Log folder: Read access for auditors
+- Configuration: Admin access only
+
+---
+
+## 12. Document Control
+
+### 12.1 Version History
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 1.0 | Nov 2024 | Development Team | Initial release |
+
+### 12.2 Review and Approval
+
+| Role | Name | Signature | Date |
+|------|------|-----------|------|
+| Author | [Name] | | |
+| Reviewer | [Name] | | |
+| Approver | [Name] | | |
+
+### 12.3 Distribution List
+- Finance Operations Team
+- IT Support Team
+- Audit Team
+- Management
+
+---
+
+# Workflow Documentation
+
+## Process Flow Overview
+
+### High-Level Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    START: User Places Files                  │
+│                    in Watch Folder                           │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Launch Application                              │
+│              (Auto-Execute Mode)                             │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│           Scan Watch Folder                                  │
+│           for Files                                          │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│        Match Files Against                                   │
+│        Configured Patterns                                   │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+                ┌──────┴──────┐
+                │ Files Found? │
+                └──────┬──────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │ NO           │              │ YES
+        ▼              │              ▼
+┌──────────────┐      │      ┌──────────────────┐
+│ Show Warning │      │      │ Create Processing│
+│ Exit App     │      │      │ Queue            │
+└──────────────┘      │      └────────┬─────────┘
+                       │               │
+                       │               ▼
+                       │      ┌──────────────────┐
+                       │      │ FOR EACH FILE:   │
+                       │      │                  │
+                       │      │ 1. Open File     │
+                       │      │ 2. Create Logger │
+                       │      │ 3. Open Popup    │
+                       │      └────────┬─────────┘
+                       │               │
+                       │               ▼
+                       │      ┌──────────────────┐
+                       │      │ Capture          │
+                       │      │ Screenshots      │
+                       │      └────────┬─────────┘
+                       │               │
+                       │               ▼
+                       │      ┌──────────────────┐
+                       │      │ Draft Email      │
+                       │      │ in Outlook       │
+                       │      └────────┬─────────┘
+                       │               │
+                       │               ▼
+                       │      ┌──────────────────┐
+                       │      │ Close Popup      │
+                       │      │ Log Results      │
+                       │      └────────┬─────────┘
+                       │               │
+                       │               ▼
+                       │      ┌──────────────────┐
+                       │      │ More Files?      │
+                       │      └────────┬─────────┘
+                       │               │
+                       │      ┌────────┼────────┐
+                       │      │ YES    │    NO  │
+                       │      │        │        │
+                       │      └────────┘        ▼
+                       │               ┌──────────────────┐
+                       │               │ Close Application│
+                       │               └────────┬─────────┘
+                       │                        │
+                       ▼                        ▼
+              ┌──────────────────────────────────┐
+              │         END: All Emails          │
+              │         Drafted in Outlook       │
+              └──────────────────────────────────┘
 ```
 
-**What this does:**
-- Finds all Excel files in a specific folder
-- Reads each file
-- Stacks them on top of each other
-- Creates one master file with all data
+---
 
-**Time saved:** 15+ minutes weekly (12+ hours yearly)
+## Detailed Subprocess Workflows
+
+### 1. File Detection Subprocess
+
+```
+START: detect_files_in_folder()
+│
+├─► Check if watch folder exists
+│   ├─► NO: Return empty list, log error
+│   └─► YES: Continue
+│
+├─► List all files in folder
+│   └─► Store in folder_files array
+│
+├─► FOR EACH configured recon type:
+│   │
+│   ├─► Get file_pattern from config
+│   │   ├─► NO pattern: Skip, log warning
+│   │   └─► Pattern found: Continue
+│   │
+│   ├─► Match pattern against folder_files
+│   │   └─► Use fnmatch for wildcard matching
+│   │
+│   ├─► IF matches found:
+│   │   ├─► FOR EACH matched file:
+│   │   │   ├─► Create file info dict:
+│   │   │   │   ├─► file_key
+│   │   │   │   ├─► original_file_key
+│   │   │   │   ├─► file_path
+│   │   │   │   ├─► file_name
+│   │   │   │   └─► config
+│   │   │   └─► Add to detected_files list
+│   │   └─► Log detection success
+│   │
+│   └─► IF no matches:
+│       └─► Log "not found"
+│
+└─► RETURN detected_files list
+
+END
+```
 
 ---
 
-### Example 4: Creating Personalized Messages
+### 2. Screenshot Capture Subprocess
 
-**The Situation:**
-You need to send appointment reminders to 30 clients. Each message should include their name, appointment date, and specific time.
+```
+START: _take_screenshot_thread()
+│
+├─► Initialize COM
+│   └─► pythoncom.CoInitialize()
+│
+├─► Create Excel Application
+│   ├─► Try: DispatchEx("Excel.Application")
+│   ├─► Fallback: Dispatch("Excel.Application")
+│   └─► Last Resort: dynamic.Dispatch()
+│
+├─► Set Excel Properties
+│   ├─► Visible = False
+│   └─► DisplayAlerts = False
+│
+├─► Open Workbook
+│   ├─► Get file path
+│   ├─► Convert to absolute path
+│   └─► excel.Workbooks.Open(path)
+│
+├─► Determine Screenshot Mode
+│   │
+│   ├─► IF smart_linking enabled:
+│   │   │
+│   │   ├─► Capture Master Sheet
+│   │   │   ├─► Get master_sheet name
+│   │   │   ├─► Get master_range
+│   │   │   └─► Call _capture_single_screenshot()
+│   │   │
+│   │   ├─► Analyze Linked Sheets
+│   │   │   └─► Call analyze_linked_sheets()
+│   │   │       │
+│   │   │       ├─► FOR EACH linked sheet config:
+│   │   │       │   ├─► Read value_cell from master sheet
+│   │   │       │   ├─► Check threshold condition
+│   │   │       │   │   └─► Call check_threshold_condition()
+│   │   │       │   │
+│   │   │       │   └─► IF condition met:
+│   │   │       │       └─► Add all sheets in group to capture list
+│   │   │       │
+│   │   │       └─► RETURN sheets_to_capture list
+│   │   │
+│   │   └─► FOR EACH conditional sheet:
+│   │       └─► Call _capture_single_screenshot()
+│   │
+│   └─► ELSE (standard mode):
+│       │
+│       └─► FOR EACH screenshot in config:
+│           ├─► Get sheet_name
+│           ├─► Get cell_range
+│           ├─► Get name
+│           ├─► Get embed/attach flags
+│           └─► Call _capture_single_screenshot()
+│
+├─► Close Workbook
+│   └─► workbook.Close(SaveChanges=False)
+│
+├─► Quit Excel
+│   └─► excel.Quit()
+│
+├─► Uninitialize COM
+│   └─► pythoncom.CoUninitialize()
+│
+└─► Update Status
+    └─► Log completion with count
 
-**Traditional Method:** 
-Copy template, paste, manually enter each person's details, send individually. Time: 25-30 minutes.
+END
+```
 
-**Python Method:**
-```python
-import pandas as pd
+---
 
-# Load your client list from Excel
-clients = pd.read_excel("appointment_list.xlsx")
+### 3. Single Screenshot Capture
 
-# Create your message template
-message_template = """
-Hi {name},
-
-This is a friendly reminder that your appointment is scheduled for:
-
-Date: {date}
-Time: {time}
-Location: {location}
-
-Please reply to confirm or call us to reschedule.
-
-Best regards,
-The Team
-"""
-
-# Generate personalized messages
-for index, client in clients.iterrows():
-    personalized_message = message_template.format(
-        name=client['Client_Name'],
-        date=client['Appointment_Date'],
-        time=client['Appointment_Time'],
-        location=client['Office_Location']
-    )
+```
+START: _capture_single_screenshot()
+│
+├─► Select Sheet
+│   └─► sheet = workbook.Sheets(sheet_name)
+│
+├─► Select Range
+│   └─► range_obj = sheet.Range(cell_range)
+│
+├─► Copy as Picture
+│   ├─► range_obj.CopyPicture(Format=2)
+│   └─► Wait 1 second for clipboard
+│
+├─► Grab from Clipboard
+│   └─► img = ImageGrab.grabclipboard()
+│
+├─► Check if Image Captured
+│   ├─► IF img is FUNCTION detect_files_in_folder()
+    INPUT: 
+        - watch_folder: String (folder path)
+        - file_configs: Dictionary (recon configurations)
     
-    print(f"Message for {client['Client_Name']}:")
-    print(personalized_message)
-    print("-" * 50)
-```
-
-**What this does:**
-- Reads your client information from Excel
-- Takes your message template
-- Automatically fills in each person's specific details
-- Generates 30 personalized messages instantly
-
-**Time saved:** 20+ minutes per batch
-
----
-
-### Example 5: Extracting Data from PDFs
-
-**The Situation:**
-You have 20 PDF invoices from vendors. You need to extract the invoice number, date, and total amount from each one and compile them in Excel.
-
-**Traditional Method:** 
-Open each PDF, find the information, manually type it into Excel. Time: 40+ minutes.
-
-**Python Method:**
-```python
-import PyPDF2
-import pandas as pd
-
-# List of your PDF files
-pdf_files = ["invoice_001.pdf", "invoice_002.pdf", "invoice_003.pdf"]
-
-# Store extracted data
-invoice_data = []
-
-for pdf_file in pdf_files:
-    # Open and read the PDF
-    with open(pdf_file, 'rb') as file:
-        pdf_reader = PyPDF2.PdfReader(file)
-        first_page = pdf_reader.pages[0]
-        text = first_page.extract_text()
+    OUTPUT:
+        - detected_files: List of dictionaries
+    
+    BEGIN
+        1. Initialize detected_files as empty list
         
-        # Extract specific information (simplified example)
-        lines = text.split('\n')
-        for line in lines:
-            if "Invoice Number:" in line:
-                invoice_num = line.split(":")[-1].strip()
-            if "Total:" in line:
-                total = line.split(":")[-1].strip()
+        2. IF watch_folder does NOT exist THEN
+            RETURN empty list
         
-        invoice_data.append({
-            'PDF_File': pdf_file,
-            'Invoice_Number': invoice_num,
-            'Total_Amount': total
-        })
-
-# Create Excel file with extracted data
-df = pd.DataFrame(invoice_data)
-df.to_excel("extracted_invoice_data.xlsx", index=False)
-
-print(f"Extracted data from {len(pdf_files)} invoices!")
+        3. folder_files ← GET all files in watch_folder
+           WHERE file is NOT directory
+        
+        4. FOR EACH (file_key, config) IN file_configs DO
+            a. pattern ← config['file_pattern']
+            
+            b. IF pattern is empty THEN
+                CONTINUE to next iteration
+            
+            c. matched_files ← FILTER folder_files 
+                              WHERE filename MATCHES pattern (fnmatch)
+            
+            d. IF matched_files is NOT empty THEN
+                i. FOR EACH matched_file IN matched_files DO
+                    - file_path ← JOIN(watch_folder, matched_file)
+                    
+                    - IF multiple matches THEN
+                        file_key_with_index ← file_key + "_" + index
+                    ELSE
+                        file_key_with_index ← file_key
+                    
+                    - file_info ← CREATE dictionary:
+                        {
+                            'file_key': file_key_with_index,
+                            'original_file_key': file_key,
+                            'file_path': file_path,
+                            'file_name': matched_file,
+                            'config': config
+                        }
+                    
+                    - APPEND file_info TO detected_files
+                    
+                    - LOG "Detected: " + matched_file
+        
+        5. RETURN detected_files
+    END
 ```
 
-**What this does:**
-- Opens each PDF file
-- Extracts all text
-- Searches for specific information (invoice numbers, amounts)
-- Compiles everything into an organized Excel file
-
-**Time saved:** 35+ minutes per batch
+**Complexity Analysis:**
+- **Time Complexity:** O(F × C × P)
+  - F = number of files in folder
+  - C = number of configured recon types
+  - P = pattern matching complexity (typically O(n))
+- **Space Complexity:** O(M) where M = number of matched files
 
 ---
 
-### Example 6: Creating Project Folder Structures
+### Algorithm 2: Threshold Evaluation Engine
 
-**The Situation:**
-Every time you start a new client project, you need to create the same folder structure: Contracts, Invoices, Correspondence, Drafts, Finals, Assets. You onboard 10 new clients per month.
+```
+FUNCTION analyze_linked_sheets()
+    INPUT:
+        - workbook: Excel Workbook object
+        - smart_config: Dictionary (smart linking configuration)
+    
+    OUTPUT:
+        - sheets_to_capture: List of sheet configurations
+    
+    BEGIN
+        1. Initialize sheets_to_capture as empty list
+        
+        2. threshold_type ← smart_config['threshold_type']
+        3. threshold_value ← smart_config['threshold_value']
+        4. threshold_max ← smart_config['threshold_max']
+        5. linked_sheets ← smart_config['linked_sheets']
+        
+        6. FOR EACH linked_group IN linked_sheets DO
+            a. value_cell ← linked_group['value_cell']
+            b. sheets_list ← linked_group['sheets']
+            
+            c. cell_value ← extract_cell_value(workbook, value_cell)
+            
+            d. condition_met ← check_threshold_condition(
+                    cell_value,
+                    threshold_type,
+                    threshold_value,
+                    threshold_max
+               )
+            
+            e. IF condition_met == TRUE THEN
+                i. FOR EACH sheet_config IN sheets_list DO
+                    - sheet_info ← CREATE dictionary:
+                        {
+                            'sheet_name': sheet_config['sheet_name'],
+                            'cell_range': sheet_config['capture_range'],
+                            'embed': sheet_config['embed'],
+                            'attach': sheet_config['attach'],
+                            'name': sheet_config['name'],
+                            'value': cell_value,
+                            'value_cell': value_cell
+                        }
+                    
+                    - APPEND sheet_info TO sheets_to_capture
+                    - LOG "Will capture: " + sheet_name
+        
+        7. RETURN sheets_to_capture
+    END
 
-**Traditional Method:** 
-Manually create each folder, ensuring consistency and correct naming. Time: 5 minutes per project.
 
-**Python Method:**
-```python
-import os
-
-# List of new projects
-new_projects = [
-    "Client_ABC_Website_Redesign",
-    "Client_XYZ_Marketing_Campaign",
-    "Client_DEF_Brand_Strategy"
-]
-
-# Standard folder structure
-folder_structure = [
-    "01_Contracts",
-    "02_Invoices",
-    "03_Correspondence",
-    "04_Drafts",
-    "05_Finals",
-    "06_Assets"
-]
-
-# Create folders for each project
-for project in new_projects:
-    for folder in folder_structure:
-        path = f"C:/Projects/{project}/{folder}"
-        os.makedirs(path, exist_ok=True)
-
-print(f"Created complete folder structures for {len(new_projects)} projects!")
+FUNCTION check_threshold_condition()
+    INPUT:
+        - value: Float (cell value)
+        - threshold_type: String (condition type)
+        - threshold_value: Float (comparison value)
+        - threshold_max: Float (optional max for range)
+    
+    OUTPUT:
+        - Boolean (condition result)
+    
+    BEGIN
+        1. SWITCH threshold_type:
+            
+            CASE 'equals_zero':
+                RETURN (value == 0.0)
+            
+            CASE 'not_zero':
+                RETURN (value != 0.0)
+            
+            CASE 'exceeds':
+                RETURN (value > threshold_value)
+            
+            CASE 'below':
+                RETURN (value < threshold_value)
+            
+            CASE 'between':
+                IF threshold_max is NOT NULL THEN
+                    RETURN (threshold_value <= value <= threshold_max)
+                ELSE
+                    RETURN FALSE
+            
+            CASE 'less_minus_x_greater_x':
+                RETURN (value < -threshold_value) OR (value > threshold_value)
+            
+            DEFAULT:
+                RETURN FALSE
+    END
 ```
 
-**What this does:**
-- Takes your list of new projects
-- Creates the same folder structure for each one
-- Ensures consistent naming and organization
-- Completes in seconds what would take minutes manually
+**Threshold Types Table:**
 
-**Time saved:** 5 minutes per project (50+ minutes monthly)
+| Type | Formula | Example | Use Case |
+|------|---------|---------|----------|
+| `equals_zero` | `value == 0` | 0.00 | Perfect reconciliation |
+| `not_zero` | `value ≠ 0` | ±0.01 | Any variance |
+| `exceeds` | `value > threshold` | value > 1000 | Large variances |
+| `below` | `value < threshold` | value < 100 | Small variances |
+| `between` | `min ≤ value ≤ max` | 100 ≤ value ≤ 1000 | Range check |
+| `less_minus_x_greater_x` | `value < -x OR value > x` | value < -50 OR value > 50 | Absolute variance |
 
 ---
 
-### Example 7: Automated Task Reminders
+### Algorithm 3: Screenshot Capture Engine
 
-**The Situation:**
-You have specific tasks to complete at certain times throughout your day, but often forget in the midst of meetings and emails.
+```
+FUNCTION capture_screenshots()
+    INPUT:
+        - file_path: String (Excel file path)
+        - config: Dictionary (screenshot configuration)
+    
+    OUTPUT:
+        - screenshot_paths: List of screenshot info dictionaries
+    
+    BEGIN
+        1. Initialize screenshot_paths as empty list
+        
+        2. Initialize COM
+           pythoncom.CoInitialize()
+        
+        3. TRY:
+            a. excel ← CREATE Excel.Application (COM object)
+            b. excel.Visible ← FALSE
+            c. excel.DisplayAlerts ← FALSE
+        CATCH Exception:
+            TRY alternative COM initialization methods
+        
+        4. TRY:
+            a. workbook ← excel.Workbooks.Open(file_path)
+        CATCH Exception:
+            LOG error
+            CLEANUP and RETURN empty list
+        
+        5. file_folder ← EXTRACT directory from file_path
+        
+        6. IF smart_linking is enabled THEN
+            a. Capture master sheet:
+                i. master_sheet ← config['master_sheet']
+                ii. master_range ← config['master_range']
+                iii. screenshot_info ← capture_single_screenshot(
+                        workbook, master_sheet, master_range, "Master", file_folder
+                     )
+                iv. APPEND screenshot_info TO screenshot_paths
+            
+            b. Analyze linked sheets:
+                i. conditional_sheets ← analyze_linked_sheets(workbook, config)
+                
+                ii. FOR EACH sheet_config IN conditional_sheets DO
+                    - screenshot_info ← capture_single_screenshot(
+                            workbook,
+                            sheet_config['sheet_name'],
+                            sheet_config['cell_range'],
+                            sheet_config['name'],
+                            file_folder,
+                            sheet_config['embed'],
+                            sheet_config['attach']
+                      )
+                    - APPEND screenshot_info TO screenshot_paths
+        
+        ELSE (standard mode):
+            a. screenshots_config ← config['screenshots']
+            
+            b. FOR EACH screenshot_config IN screenshots_config DO
+                i. screenshot_info ← capture_single_screenshot(
+                        workbook,
+                        screenshot_config['sheet_name'],
+                        screenshot_config['cell_range'],
+                        screenshot_config['name'],
+                        file_folder,
+                        screenshot_config['embed'],
+                        screenshot_config['attach']
+                   )
+                ii. APPEND screenshot_info TO screenshot_paths
+        
+        7. CLEANUP:
+            a. workbook.Close(SaveChanges=FALSE)
+            b. excel.Quit()
+            c. pythoncom.CoUninitialize()
+        
+        8. RETURN screenshot_paths
+    END
 
-**Python Method:**
+
+FUNCTION capture_single_screenshot()
+    INPUT:
+        - workbook: Excel Workbook object
+        - sheet_name: String
+        - cell_range: String (e.g., "A1:Z50")
+        - name: String (screenshot name)
+        - folder: String (save folder path)
+        - embed: Boolean (default TRUE)
+        - attach: Boolean (default FALSE)
+    
+    OUTPUT:
+        - screenshot_info: Dictionary
+    
+    BEGIN
+        1. TRY:
+            a. sheet ← workbook.Sheets(sheet_name)
+            
+            b. range_obj ← sheet.Range(cell_range)
+            
+            c. Copy range as picture to clipboard:
+               range_obj.CopyPicture(Format=2)
+            
+            d. WAIT 1 second (for clipboard operation)
+            
+            e. img ← ImageGrab.grabclipboard()
+            
+            f. IF img is NULL THEN
+                LOG "Failed to capture"
+                RETURN NULL
+            
+            g. save_path ← JOIN(folder, name + ".png")
+            
+            h. img.save(save_path, 'PNG')
+            
+            i. screenshot_info ← CREATE dictionary:
+                {
+                    'path': save_path,
+                    'name': name,
+                    'embed': embed,
+                    'attach': attach
+                }
+            
+            j. LOG "Saved: " + name
+            
+            k. RETURN screenshot_info
+        
+        CATCH Exception as e:
+            LOG "Error capturing " + name + ": " + e
+            RETURN NULL
+    END
+```
+
+**Screenshot Capture Flow:**
+
+```
+Excel Range → CopyPicture() → Windows Clipboard → PIL ImageGrab → PNG File
+```
+
+---
+
+### Algorithm 4: Email Drafting Engine
+
+```
+FUNCTION draft_email()
+    INPUT:
+        - screenshot_paths: List of screenshot info
+        - config: Dictionary (email configuration)
+        - email_config: Dictionary (recipient configuration)
+    
+    OUTPUT:
+        - success: Boolean
+    
+    BEGIN
+        1. VALIDATE:
+            IF screenshot_paths is EMPTY THEN
+                LOG warning
+                RETURN FALSE
+        
+        2. Initialize COM
+           pythoncom.CoInitialize()
+        
+        3. TRY:
+            a. outlook ← CREATE Outlook.Application (COM object)
+            b. mail ← outlook.CreateItem(0)  // 0 = Mail item
+        CATCH Exception:
+            TRY alternative COM initialization
+        
+        4. SET SENDER:
+            a. sender_email ← email_config['sender_email']
+            b. IF sender_email is NOT empty THEN
+                i. FOR EACH account IN outlook.Session.Accounts DO
+                    IF account.SmtpAddress == sender_email THEN
+                        mail.SendUsingAccount ← account
+                        BREAK
+                
+                ii. IF no matching account found THEN
+                    mail.SentOnBehalfOfName ← sender_email
+        
+        5. SET RECIPIENTS:
+            a. mail.To ← JOIN email_config['to_recipients'] WITH '; '
+            b. mail.CC ← JOIN email_config['cc_recipients'] WITH '; '
+        
+        6. BUILD SUBJECT:
+            a. subject ← config['default_subject']
+            b. timestamp ← GET current datetime in configured timezone
+            c. subject ← REPLACE '{timestamp}' IN subject WITH timestamp
+            d. mail.Subject ← subject
+        
+        7. BUILD HTML BODY:
+            a. html_body ← START HTML document
+            
+            b. email_body_text ← config['email_body']
+            c. email_body_text ← REPLACE '{timestamp}' WITH timestamp
+            d. email_body_text ← REPLACE newlines WITH '<br>'
+            e. APPEND email_body_text TO html_body
+            
+            f. embed_count ← 0
+            g. FOR EACH screenshot IN screenshot_paths DO
+                IF screenshot['embed'] == TRUE THEN
+                    i. cid ← "image_" + embed_count
+                    ii. APPEND '<img src="cid:' + cid + '">' TO html_body
+                    iii. attachment ← mail.Attachments.Add(screenshot['path'])
+                    iv. SET attachment.PropertyAccessor to embed with cid
+                    v. embed_count ← embed_count + 1
+                
+                IF screenshot['attach'] == TRUE THEN
+                    i. mail.Attachments.Add(screenshot['path'])
+            
+            h. IF signature exists THEN
+                APPEND signature TO html_body
+            
+            i. IF disclaimer exists THEN
+                APPEND disclaimer TO html_body
+            
+            j. CLOSE HTML document
+        
+        8. SET MAIL BODY:
+            mail.HTMLBody ← html_body
+        
+        9. SAVE DRAFT:
+            mail.Save()
+        
+        10. LOG "Email draft created successfully"
+        
+        11. CLEANUP:
+            a. pythoncom.CoUninitialize()
+        
+        12. RETURN TRUE
+    END
+```
+
+**Email HTML Structure:**
+
+```html
+<html>
+  <body style="font-family: Century; font-size: 10pt;">
+    <p>[Email Body Text with timestamp]</p>
+    
+    <!-- Embedded Screenshots -->
+    <img src="cid:image_0" style="max-width: 80%;">
+    <img src="cid:image_1" style="max-width: 80%;">
+    
+    <!-- Signature -->
+    <p>[Signature]</p>
+    
+    <!-- Disclaimer -->
+    <p style="font-size: 10px; color: #666;">
+      [Disclaimer Text]
+    </p>
+  </body>
+</html>
+```
+
+---
+
+### Algorithm 5: Sequential File Processing
+
+```
+FUNCTION process_all_files()
+    INPUT:
+        - files_to_process: List of file info dictionaries
+    
+    OUTPUT:
+        - None (processes all files)
+    
+    BEGIN
+        1. current_file_index ← 0
+        
+        2. WHILE current_file_index < LENGTH(files_to_process) DO
+            
+            a. file_info ← files_to_process[current_file_index]
+            b. file_key ← file_info['file_key']
+            c. file_path ← file_info['file_path']
+            d. file_name ← file_info['file_name']
+            e. config ← file_info['config']
+            
+            f. is_last_file ← (current_file_index == LENGTH(files_to_process) - 1)
+            
+            g. LOG "Processing file " + (current_file_index + 1) + "/" + LENGTH(files_to_process)
+            
+            h. logger ← setup_file_specific_logging(file_key, file_name)
+            
+            i. TRY:
+                i. screenshot_paths ← capture_screenshots(file_path, config)
+                
+                ii. IF screenshot_paths is NOT empty THEN
+                    - success ← draft_email(screenshot_paths, config, email_config)
+                    - LOG "Email drafted for " + file_name
+                ELSE
+                    - LOG "No screenshots captured for " + file_name
+            
+            CATCH Exception as e:
+                LOG "Error processing " + file_name + ": " + e
+            
+            j. current_file_index ← current_file_index + 1
+            
+            k. IF is_last_file THEN
+                - CLOSE application after delay
+            ELSE
+                - TRIGGER process_next_file() after delay
+        
+        3. LOG "All files processed successfully"
+    END
+```
+
+**Processing Timeline:**
+
+```
+File 1: Start → Screenshot (20s) → Email (10s) → Close (1s) → Total: 31s
+   ↓ (1 second delay)
+File 2: Start → Screenshot (25s) → Email (8s) → Close (1s) → Total: 34s
+   ↓ (1 second delay)
+File 3: Start → Screenshot (22s) → Email (9s) → Close (1s) → Total: 32s
+   ↓ (2 second delay)
+Close Application
+
+Total Time: 31 + 1 + 34 + 1 + 32 + 2 = 101 seconds (~1.7 minutes)
+```
+
+---
+
+## Data Structures
+
+### 1. File Configuration Structure
+
 ```python
-import time
-from datetime import datetime
-import winsound  # For Windows sound alert
-
-# Your daily task schedule
-daily_tasks = {
-    "09:00": "Check and respond to priority emails",
-    "11:30": "Review project status updates",
-    "14:00": "Team check-in and progress report",
-    "16:00": "End-of-day planning for tomorrow",
-    "17:30": "Send daily summary to manager"
+file_config = {
+    'path': String,              # Excel file path (can be empty for auto-detect)
+    'name': String,              # Display name
+    'file_pattern': String,      # Pattern for file matching (e.g., "*.xlsm")
+    'default_subject': String,   # Email subject template
+    'email_body': String,        # Email body template
+    
+    # Option A: Standard Screenshots
+    'screenshots': [
+        {
+            'sheet_name': String,     # Sheet name in workbook
+            'cell_range': String,     # Range to capture (e.g., "A1:Z50")
+            'name': String,           # Screenshot file name
+            'embed': Boolean,         # Embed in email body
+            'attach': Boolean         # Attach as file
+        },
+        ...
+    ],
+    
+    # Option B: Smart Linking (Threshold-based)
+    'smart_linking': {
+        'enabled': Boolean,
+        'master_sheet': String,
+        'master_range': String,
+        'threshold_type': String,      # See threshold types table
+        'threshold_value': Float,
+        'threshold_max': Float,        # Optional, for 'between' type
+        
+        'linked_sheets': [
+            {
+                'value_cell': String,  # Cell to check (e.g., "Summary!O17")
+                'sheets': [            # Sheets to capture if condition met
+                    {
+                        'sheet_name': String,
+                        'capture_range': String,
+                        'embed': Boolean,
+                        'attach': Boolean,
+                        'name': String
+                    },
+                    ...
+                ]
+            },
+            ...
+        ]
+    }
 }
+```
 
-print("Task reminder system activated! 🔔")
-print("Working in the background...\n")
+### 2. Email Configuration Structure
 
-completed_tasks = []
+```python
+email_config = {
+    'sender_email': String,           # Sender email address
+    'to_recipients': [String, ...],   # List of To recipients
+    'cc_recipients': [String, ...],   # List of CC recipients
+    'bcc_recipients': [String, ...],  # List of BCC recipients
+    'timezone': String,               # 'IST', 'GMT', 'UK'
+    'signature': String,              # Email signature
+    'disclaimer': String              # Email disclaimer
+}
+```
 
-while True:
-    current_time = datetime.now().strftime("%H:%M")
+### 3. Screenshot Info Structure
+
+```python
+screenshot_info = {
+    'path': String,      # Full file path to PNG
+    'name': String,      # Screenshot name
+    'embed': Boolean,    # Embed in email body
+    'attach': Boolean    # Attach as file
+}
+```
+
+### 4. Detected File Info Structure
+
+```python
+file_info = {
+    'file_key': String,           # Unique key (may have _1, _2 suffix)
+    'original_file_key': String,  # Original config key
+    'file_path': String,          # Full path to Excel file
+    'file_name': String,          # Just filename
+    'config': Dictionary          # File configuration
+}
+```
+
+---
+
+## Performance Optimization
+
+### 1. COM Object Reuse
+**Problem:** Creating new COM objects is expensive  
+**Solution:** Reuse Excel/Outlook instances when possible
+
+```python
+# Bad: Create new instance each time
+for file in files:
+    excel = Dispatch("Excel.Application")
+    process_file(excel, file)
+    excel.Quit()
+
+# Good: Reuse instance (if implementing batch in same thread)
+excel = Dispatch("Excel.Application")
+for file in files:
+    process_file(excel, file)
+excel.Quit()
+```
+
+### 2. Clipboard Operations
+**Problem:** Clipboard operations can be slow/unreliable  
+**Solution:** Add delays and retry logic
+
+```python
+range_obj.CopyPicture(Format=2)
+time.sleep(1)  # Wait for clipboard
+img = ImageGrab.grabclipboard()
+
+if img is None:
+    # Retry once
+    time.sleep(1)
+    img = ImageGrab.grabclipboard()
+```
+
+### 3. File I/O Optimization
+**Problem:** Network file access is slow  
+**Solution:** Cache file paths, use absolute paths
+
+```python
+# Convert to absolute path once
+abs_path = os.path.abspath(file_path)
+
+# Use cached path for all operations
+workbook = excel.Workbooks.Open(abs_path)
+```
+
+---
+
+## Security Considerations
+
+### 1. File Access Control
+```
+Input Folder:  Read/Write - Operations Team only
+Output Folder: Read/Write - Operations Team only
+Log Folder:    Read - Audit Team, Admin
+               Write - Application only
+```
+
+### 2. Email Security
+- Sender verification via Outlook accounts
+- No plaintext credentials stored
+- Uses Windows Authentication
+- All emails saved as drafts (manual send required)
+
+### 3. Data Protection
+```
+Data Flow:
+Local Excel File → Local Memory → Local Screenshot → 
+Local Email Draft → Manual Review → Send
+
+No data leaves local network
+No cloud services involved
+No external API calls
+```
+
+### 4. Audit Trail
+```
+Every operation logged:
+├─ File detection results
+├─ Screenshot captures
+├─ Threshold evaluations
+├─ Email drafts created
+└─ Errors and exceptions
+
+Log retention: 90 days
+Log access: Restricted to authorized personnel
+```
+
+---
+
+## Error Recovery Strategies
+
+### 1. COM Object Initialization
+```
+Strategy: Multi-tier fallback
+├─ Attempt 1: DispatchEx (best for new instances)
+├─ Attempt 2: Dispatch (standard)
+└─ Attempt 3: dynamic.Dispatch (always works)
+```
+
+### 2. File Access Errors
+```
+Strategy: Validate and retry
+├─ Check file exists
+├─ Check file not locked
+├─ Try open with ReadOnly=True
+└─ Log detailed error for manual intervention
+```
+
+### 3. Screenshot Capture Failures
+```
+Strategy: Continue processing others
+├─ Log failed screenshot
+├─ Continue with remaining screenshots
+├─ Proceed to email draft if any screenshots succeeded
+└─ Abort only if no screenshots captured
+```
+
+### 4. Email Drafting Errors
+```
+Strategy: Preserve data
+├─ Keep screenshots on disk
+├─ Keep Excel file intact
+├─ Log error details
+└─ Allow manual email creation
+```
+
+---
+
+# User Guide
+
+## Quick Start Guide
+
+### For First-Time Users
+
+#### Step 1: Installation (One-time Setup)
+1. Ensure Python 3.12.7 is installed
+2. Install required packages:
+   ```
+   pip install pywin32 Pillow pytz
+   ```
+3. Verify Excel and Outlook are installed and configured
+4. Create folder structure:
+   ```
+   C:\ReconMailDraft\
+   ├── InputFiles\
+   └── Logs\
+   ```
+
+#### Step 2: Basic Usage (Auto Mode)
+1. Copy Excel files to `C:\ReconMailDraft\InputFiles\`
+2. Double-click application icon
+3. Wait for processing (watch Activity Log)
+4. Open Outlook → Drafts folder
+5. Review and send emails
+
+#### Step 3: Manual Mode Usage
+1. Launch application
+2. Click desired recon button (e.g., "Recon 1")
+3. Verify file path
+4. Click "Capture Screenshots"
+5. Click "Draft Email in Outlook"
+6. Review in Outlook and send
+
+---
+
+## Detailed Feature Guide
+
+### Pattern Matching Examples
+
+#### Example 1: Process All Monthly Reports
+**Scenario:** You have files named:
+- `Monthly_Report_January.xlsm`
+- `Monthly_Report_February.xlsm`
+- `Monthly_Report_March.xlsm`
+
+**Configuration:**
+```python
+'file_pattern': 'Monthly_Report_*.xlsm'
+```
+
+**Result:** All three files processed automatically
+
+#### Example 2: Process Specific Quarter
+**Scenario:** Process only Q1 files:
+- `Q1_Recon_North.xlsm`
+- `Q1_Recon_South.xlsm`
+- `Q2_Recon_North.xlsm` (should be skipped)
+
+**Configuration:**
+```python
+'file_pattern': 'Q1_Recon_*.xlsm'
+```
+
+**Result:** Only Q1 files processed
+
+#### Example 3: Process by Date Range
+**Scenario:** Process November 2024 files:
+- `Recon_20241101.xlsm`
+- `Recon_20241115.xlsm`
+- `Recon_20241130.xlsm`
+
+**Configuration:**
+```python
+'file_pattern': 'Recon_202411*.xlsm'
+```
+
+**Result:** All November 2024 files processed
+
+---
+
+### Smart Linking Feature
+
+#### What is Smart Linking?
+Smart linking automatically determines which additional sheets to capture based on variance thresholds in a master sheet.
+
+#### When to Use:
+- Variable reconciliation requirements
+- Conditional detail capture
+- Exception-based reporting
+- Threshold-driven workflows
+
+#### Example Configuration:
+
+```python
+'smart_linking': {
+    'enabled': True,
+    'master_sheet': 'Summary',
+    'master_range': 'B2:N57',
+    'threshold_type': 'less_minus_x_greater_x',
+    'threshold_value': 1,
     
-    if current_time in daily_tasks and current_time not in completed_tasks:
-        task = daily_tasks[current_time]
-        print(f"\n⏰ REMINDER [{current_time}]: {task}")
-        winsound.Beep(1000, 500)  # Sound alert
-        completed_tasks.append(current_time)
+    'linked_sheets': [
+        {
+            'value_cell': 'Summary!O17',  # Check this cell
+            'sheets': [                    # Capture these if condition met
+                {
+                    'sheet_name': 'Detail_North',
+                    'capture_range': 'A1:M50',
+                    'embed': False,
+                    'attach': True,
+                    'name': 'North_Region_Detail'
+                }
+            ]
+        }
+    ]
+}
+```
+
+#### How It Works:
+1. **Always captures master sheet** (Summary)
+2. **Reads value from** `Summary!O17`
+3. **Checks condition:** Is value < -1 OR > 1?
+4. **If TRUE:** Captures `Detail_North` sheet
+5. **If FALSE:** Skips `Detail_North` sheet
+
+---
+
+### Email Customization
+
+#### Customizing Subject Line
+```python
+'default_subject': 'MI - Actuals Data Integrity | {timestamp}'
+```
+- `{timestamp}` is automatically replaced with current date/time
+- Timezone configured in email_config
+
+#### Customizing Body Text
+```python
+'email_body': '''Hi Team,
+
+Kindly note the MI Actuals Reconciliation Status @ {timestamp}:
+
+Best regards'''
+```
+- Use `\n` for new lines (converted to `<br>` in HTML)
+- `{timestamp}` placeholder available
+
+#### Customizing Recipients
+```python
+email_config = {
+    'sender_email': 'your.email@company.com',
+    'to_recipients': ['recipient1@company.com', 'recipient2@company.com'],
+    'cc_recipients': ['manager@company.com'],
+    'timezone': 'GMT',  # or 'IST', 'UK'
+    'signature': '''Regards,
+Your Name
+Finance Team''',
+    'disclaimer': 'This email is confidential...'
+}
+```
+
+---
+
+## Troubleshooting Guide
+
+### Common Issues and Solutions
+
+#### Issue 1: "No files detected"
+**Symptoms:**
+- Warning message appears
+- Application exits immediately
+- No processing occurs
+
+**Causes:**
+- Files not in watch folder
+- File names don't match patterns
+- Wrong file extensions
+
+**Solutions:**
+1. Check files are in `C:\ReconMailDraft\InputFiles\`
+2. Verify file names match configured patterns
+3. Ensure files are `.xlsm` or `.xlsx` format
+4. Check pattern syntax (no typos)
+
+**Verification:**
+```
+Console output should show:
+✓ Detected 3 file(s) for Recon 1 pattern 'MI_*.xlsm':
+  1. MI_Forecast_Jan.xlsm
+  2. MI_Forecast_Feb.xlsm
+  3. MI_Forecast_Mar.xlsm
+```
+
+---
+
+#### Issue 2: "Error opening workbook"
+**Symptoms:**
+- Error in log: "Excel.Application.Workbooks"
+- Screenshot capture fails
+- Process aborts for that file
+
+**Causes:**
+- File is open in Excel
+- File is corrupted
+- File is password-protected
+- Network path unavailable
+
+**Solutions:**
+1. Close file in Excel if open
+2. Try opening file manually to verify it's not corrupted
+3. Remove password protection
+4. Check network connectivity if file on network drive
+5. Copy file to local drive temporarily
+
+**Verification:**
+- File should open in Excel manually without errors
+
+---
+
+#### Issue 3: Screenshots not captured
+**Symptoms:**
+- Status shows "✓ Captured 0 screenshots"
+- Email draft fails or is empty
+
+**Causes:**
+- Sheet names incorrect
+- Cell ranges invalid
+- Sheets are hidden
+
+**Solutions:**
+1. Open Excel file and verify sheet names exactly match config
+2. Check cell ranges exist (e.g., "A1:Z50")
+3. Unhide any hidden sheets
+4. Verify ranges contain data
+
+**Verification:**
+```
+Log should show:
+[Time] Capturing Master from Summary!A1:Z50
+[Time] ✓ Saved Master
+[Time] Screenshot capture completed - 3 images saved
+```
+
+---
+
+#### Issue 4: Email not drafted
+**Symptoms:**
+- No email in Outlook Drafts
+- Error in log about Outlook
+
+**Causes:**
+- Outlook not running
+- Outlook not default email client
+- COM initialization failed
+
+**Solutions:**
+1. Open Outlook before running tool
+2. Set Outlook as default email client
+3. Restart computer to reset COM registration
+4. Run as Administrator
+
+**Verification:**
+- Email should appear in Outlook Drafts folder
+
+---
+
+#### Issue 5: Screenshots missing in email
+**Symptoms:**
+- Email drafted but screenshots not visible
+- Red "X" placeholders appear
+
+**Causes:**
+- Screenshots deleted before email opened
+- Embed/attach flags incorrect
+
+**Solutions:**
+1. Don't delete screenshots until after reviewing email
+2. Check embed/attach configuration:
+   ```python
+   'embed': True,   # Shows in email body
+   'attach': False  # Attaches as file
+   ```
+3. Re-run process if screenshots deleted
+
+---
+
+#### Issue 6: Wrong recipients
+**Symptoms:**
+- Email goes to incorrect people
+- Missing CC recipients
+
+**Causes:**
+- Configuration outdated
+- Email addresses changed
+
+**Solutions:**
+1. Review email_config section:
+   ```python
+   'to_recipients': ['current@email.com'],
+   'cc_recipients': ['current@manager.com']
+   ```
+2. Update configuration file
+3. Test with single file first
+
+**Verification:**
+- Review draft email before sending
+- Check To and CC fields
+
+---
+
+### Log File Analysis
+
+#### Reading Log Files
+
+**Log Location:**
+```
+C:\ReconMailDraft\Logs\ReconMailDraft_[Filename]_[DateTime].log
+```
+
+**Log Entry Format:**
+```
+2024-11-06 02:30:48 PM | INFO     | Message here
+         ↑                  ↑            ↑
+    Timestamp          Log Level    Message Content
+```
+
+**Log Levels:**
+- `INFO` - Normal operations
+- `WARNING` - Important notices
+- `ERROR` - Operation failures
+
+#### Example Log Analysis
+
+**Successful Processing:**
+```
+2024-11-06 02:30:48 PM | INFO | FILE PROCESSING STARTED: Recon 1
+2024-11-06 02:30:48 PM | INFO | Processing file: TM199C5.xlsm
+2024-11-06 02:30:50 PM | INFO | Initiating Screenshot Capture Process
+2024-11-06 02:30:55 PM | INFO | Capturing Master from Summary!B2:N57
+2024-11-06 02:31:00 PM | INFO | ✓ Saved Master
+2024-11-06 02:31:02 PM | INFO | Analyzing linked sheets with threshold conditions
+2024-11-06 02:31:03 PM | INFO | Value Cell Summary!O17: Value=2.5, Condition=True
+2024-11-06 02:31:05 PM | INFO | → Will capture: Periodic
+2024-11-06 02:31:10 PM | INFO | ✓ Saved Saracen Data Integrity (Periodic)
+2024-11-06 02:31:15 PM | INFO | Screenshot capture completed - 2 images saved
+2024-11-06 02:31:20 PM | INFO | Initiating email draft creation
+2024-11-06 02:31:28 PM | INFO | Email draft created successfully in Outlook
+2024-11-06 02:31:30 PM | INFO | Email drafting completed
+```
+**Analysis:** ✅ Successful - 2 screenshots captured, email drafted
+
+**Failed Processing Example:**
+```
+2024-11-06 02:30:48 PM | INFO | FILE PROCESSING STARTED: Recon 2
+2024-11-06 02:30:48 PM | INFO | Processing file: MI_Forecast.xlsm
+2024-11-06 02:30:50 PM | INFO | Initiating Screenshot Capture Process
+2024-11-06 02:30:51 PM | ERROR | Invalid file path: C:\ReconMailDraft\InputFiles\MI_Forecast.xlsm
+2024-11-06 02:30:51 PM | ERROR | Error taking screenshots: File not found
+2024-11-06 02:30:53 PM | WARNING | No screenshots captured, aborting
+```
+**Analysis:** ❌ Failed - File not found, need to verify file location
+
+**Threshold Not Met Example:**
+```
+2024-11-06 02:30:55 PM | INFO | Analyzing linked sheets with threshold conditions
+2024-11-06 02:30:56 PM | INFO | Value Cell Summary!O17: Value=0.5, Condition=False
+2024-11-06 02:30:56 PM | INFO | Value Cell Summary!O29: Value=0.0, Condition=False
+2024-11-06 02:30:57 PM | INFO | Screenshot capture completed - 1 images saved
+```
+**Analysis:** ⚠️ Only master sheet captured (no variances exceeded threshold)
+
+---
+
+### Performance Troubleshooting
+
+#### Issue: Processing is slow
+
+**Symptoms:**
+- Each file takes > 2 minutes
+- Application appears frozen
+
+**Diagnostic Steps:**
+1. Check CPU usage (Task Manager)
+2. Check network connectivity (if files on network drive)
+3. Check Excel file size
+4. Review number of screenshots configured
+
+**Optimization Tips:**
+```
+Performance Factors:
+├─ File Size: Larger files slower to open
+├─ Network Drive: Copy to local drive first
+├─ Screenshot Count: Reduce if possible
+├─ Range Size: Smaller ranges = faster capture
+└─ System Resources: Close other applications
+```
+
+**Benchmarks:**
+| File Size | Network/Local | Screenshots | Expected Time |
+|-----------|---------------|-------------|---------------|
+| < 5MB | Local | 1-3 | 20-30 seconds |
+| 5-20MB | Local | 1-3 | 30-60 seconds |
+| < 5MB | Network | 1-3 | 40-70 seconds |
+| > 20MB | Local | 5+ | 60-120 seconds |
+
+---
+
+### Advanced Troubleshooting
+
+#### Enable Detailed Logging
+
+**For Developers/IT Support:**
+
+Add debug logging to code:
+```python
+# Add at start of function
+self.logger.debug(f"Function started with parameters: {locals()}")
+
+# Add before critical operations
+self.logger.debug(f"About to open file: {file_path}")
+
+# Add after operations
+self.logger.debug(f"Operation result: {result}")
+```
+
+#### COM Object Debugging
+
+**Check COM Registration:**
+```cmd
+# Open Command Prompt as Administrator
+# Check Excel registration
+reg query "HKEY_CLASSES_ROOT\Excel.Application"
+
+# Check Outlook registration
+reg query "HKEY_CLASSES_ROOT\Outlook.Application"
+```
+
+**Re-register COM Objects:**
+```cmd
+# Excel
+"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE" /regserver
+
+# Outlook
+"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE" /regserver
+```
+
+---
+
+## Best Practices
+
+### 1. File Organization
+
+**Naming Conventions:**
+```
+Good Examples:
+├─ MI_Forecast_Jan2024.xlsm
+├─ MI_Forecast_Feb2024.xlsm
+├─ Q1_Recon_2024.xlsm
+└─ BalanceSheet_Monthly_202411.xlsm
+
+Poor Examples:
+├─ File1.xlsm (not descriptive)
+├─ Copy of Recon.xlsm (ambiguous)
+├─ Recon Final Final v2.xlsm (unclear version)
+└─ ~$TempFile.xlsm (temporary Excel file)
+```
+
+**Folder Structure:**
+```
+C:\ReconMailDraft\
+├─ InputFiles\              # Active files to process
+├─ Logs\                    # Application logs
+├─ Archive\
+│  ├─ 2024-11\              # Monthly archives
+│  │  ├─ Processed\         # Successfully processed files
+│  │  └─ Failed\            # Files with errors
+│  └─ 2024-12\
+└─ Documentation\           # SOPs, guides
+```
+
+### 2. Regular Maintenance
+
+**Daily Tasks:**
+- [ ] Review Activity Log for errors
+- [ ] Verify emails sent successfully
+- [ ] Clear InputFiles folder after processing
+
+**Weekly Tasks:**
+- [ ] Review all log files
+- [ ] Archive old files
+- [ ] Check disk space
+
+**Monthly Tasks:**
+- [ ] Delete logs older than 90 days
+- [ ] Review performance metrics
+- [ ] Update configuration if needed
+- [ ] Test with sample files
+
+**Quarterly Tasks:**
+- [ ] Full system backup
+- [ ] Review and update documentation
+- [ ] User feedback survey
+- [ ] Software updates
+
+### 3. Quality Assurance
+
+**Pre-Processing Checklist:**
+```
+Before Running Tool:
+├─ [ ] Files in correct folder
+├─ [ ] File names match patterns
+├─ [ ] Files closed in Excel
+├─ [ ] Outlook is running
+├─ [ ] Sufficient disk space (>500MB)
+└─ [ ] Network connection stable (if applicable)
+```
+
+**Post-Processing Checklist:**
+```
+After Processing:
+├─ [ ] Check Activity Log for errors
+├─ [ ] Verify all emails in Drafts
+├─ [ ] Review email content
+├─ [ ] Verify screenshots clear
+├─ [ ] Check recipients correct
+├─ [ ] Review log files
+└─ [ ] Archive processed files
+```
+
+**Email Review Checklist:**
+```
+Before Sending Email:
+├─ [ ] Subject line correct
+├─ [ ] Timestamp accurate
+├─ [ ] Recipients (To, CC) correct
+├─ [ ] Body text formatted properly
+├─ [ ] Screenshots visible and clear
+├─ [ ] All expected screenshots present
+├─ [ ] Signature present
+├─ [ ] Disclaimer present
+└─ [ ] No placeholder text remaining
+```
+
+---
+
+## Advanced Features
+
+### 1. Multiple Pattern Processing
+
+**Scenario:** Process different file types in one run
+
+**Configuration:**
+```python
+file_configs = {
+    'Monthly_Reports': {
+        'file_pattern': 'Monthly_*.xlsm',
+        ...
+    },
+    'Quarterly_Reports': {
+        'file_pattern': 'Q[1-4]_*.xlsm',
+        ...
+    },
+    'Annual_Summary': {
+        'file_pattern': '*_Annual_Summary.xlsm',
+        ...
+    }
+}
+```
+
+**Result:**
+```
+Watch Folder: C:\ReconMailDraft\InputFiles\
+├─ Monthly_Jan.xlsm       → Matches 'Monthly_Reports'
+├─ Monthly_Feb.xlsm       → Matches 'Monthly_Reports'
+├─ Q1_North.xlsm          → Matches 'Quarterly_Reports'
+├─ Q2_South.xlsm          → Matches 'Quarterly_Reports'
+└─ 2024_Annual_Summary.xlsm → Matches 'Annual_Summary'
+
+Processing Order:
+1. Monthly_Jan.xlsm
+2. Monthly_Feb.xlsm
+3. Q1_North.xlsm
+4. Q2_South.xlsm
+5. 2024_Annual_Summary.xlsm
+```
+
+### 2. Conditional Attachments
+
+**Use Case:** Embed summary, attach details
+
+**Configuration:**
+```python
+'screenshots': [
+    {
+        'sheet_name': 'Summary',
+        'cell_range': 'A1:M50',
+        'name': 'Summary_View',
+        'embed': True,      # Show in email body
+        'attach': False     # Don't attach as file
+    },
+    {
+        'sheet_name': 'Detail',
+        'cell_range': 'A1:Z100',
+        'name': 'Detailed_Breakdown',
+        'embed': False,     # Don't show in email body
+        'attach': True      # Attach as file
+    }
+]
+```
+
+**Result:**
+- Summary screenshot appears in email body
+- Detail screenshot attached as separate file
+- Recipients see summary immediately
+- Detail available for deeper analysis
+
+### 3. Dynamic Thresholds
+
+**Scenario:** Different thresholds for different sheets
+
+**Configuration:**
+```python
+'linked_sheets': [
+    {
+        'value_cell': 'Summary!O17',
+        'threshold_type': 'exceeds',
+        'threshold_value': 1000,  # Capture if > 1000
+        'sheets': [...]
+    },
+    {
+        'value_cell': 'Summary!O29',
+        'threshold_type': 'between',
+        'threshold_value': 100,   # Capture if 100-500
+        'threshold_max': 500,
+        'sheets': [...]
+    }
+]
+```
+
+---
+
+## Integration Scenarios
+
+### Scenario 1: Scheduled Automation
+
+**Requirement:** Run tool automatically at 8 AM daily
+
+**Solution:** Windows Task Scheduler
+
+**Setup Steps:**
+1. Open Task Scheduler
+2. Create Basic Task
+3. Name: "Recon Mail Draft - Daily Run"
+4. Trigger: Daily at 8:00 AM
+5. Action: Start a program
+6. Program: `python.exe`
+7. Arguments: `C:\Path\To\ReconMailDraft.py`
+8. Start in: `C:\Path\To\`
+
+**Task Scheduler XML:**
+```xml
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2">
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2024-11-06T08:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Actions>
+    <Exec>
+      <Command>python.exe</Command>
+      <Arguments>C:\ReconMailDraft\ReconMailDraft.py</Arguments>
+      <WorkingDirectory>C:\ReconMailDraft\</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+```
+
+### Scenario 2: Network Shared Folder
+
+**Requirement:** Multiple users access same input folder
+
+**Setup:**
+1. Create network share:
+   ```
+   \\FileServer\Shared\ReconMailDraft\InputFiles\
+   ```
+
+2. Update configuration:
+   ```python
+   watch_folder = r'\\FileServer\Shared\ReconMailDraft\InputFiles'
+   ```
+
+3. Set permissions:
+   ```
+   Operations Team: Read/Write
+   Finance Team: Read/Write
+   Audit Team: Read only
+   ```
+
+4. Best practices:
+   - Use naming convention to identify owner
+   - Clear folder after processing
+   - Archive to separate location
+
+### Scenario 3: Multiple Email Templates
+
+**Requirement:** Different templates for different report types
+
+**Configuration:**
+```python
+file_configs = {
+    'Daily_Recon': {
+        'file_pattern': 'Daily_*.xlsm',
+        'default_subject': 'Daily Reconciliation | {timestamp}',
+        'email_body': 'Daily recon attached...',
+        ...
+    },
+    'Weekly_Summary': {
+        'file_pattern': 'Weekly_*.xlsm',
+        'default_subject': 'Weekly Summary Report | {timestamp}',
+        'email_body': 'Please review weekly summary...',
+        ...
+    },
+    'Monthly_Close': {
+        'file_pattern': 'MonthEnd_*.xlsm',
+        'default_subject': 'Month-End Close Report | {timestamp}',
+        'email_body': 'Month-end reconciliation complete...',
+        ...
+    }
+}
+```
+
+---
+
+## FAQ (Frequently Asked Questions)
+
+### General Questions
+
+**Q1: Can I process files manually instead of auto mode?**  
+A: Yes, launch the application and click individual file buttons for manual processing.
+
+**Q2: How many files can be processed at once?**  
+A: No hard limit. The tool processes all matching files sequentially.
+
+**Q3: Can I cancel processing midway?**  
+A: Close the application window. Already drafted emails remain in Outlook Drafts.
+
+**Q4: Are the original Excel files modified?**  
+A: No, files are opened in ReadOnly mode. Original files remain unchanged.
+
+**Q5: Where are screenshots saved?**  
+A: Screenshots are temporarily saved in the same folder as the Excel file, then deleted after email drafting (configurable).
+
+### Configuration Questions
+
+**Q6: How do I add a new file type?**  
+A: Add new entry to `file_configs` dictionary with appropriate pattern and settings.
+
+**Q7: Can I change email recipients?**  
+A: Yes, modify `email_config` section in the code or edit recipients before sending draft.
+
+**Q8: How do I change the watch folder location?**  
+A: Update `watch_folder` parameter in `main()` function.
+
+**Q9: Can I use different timezones?**  
+A: Yes, set timezone in `email_config`: 'IST', 'GMT', or 'UK'.
+
+**Q10: How do I disable file deletion after processing?**  
+A: Comment out the `os.remove()` lines in `_draft_email_thread()` function.
+
+### Technical Questions
+
+**Q11: Which Python version is required?**  
+A: Python 3.12.7 or higher recommended.
+
+**Q12: Why does it use COM objects?**  
+A: COM is the standard Microsoft interface for automating Office applications.
+
+**Q13: Can this run on Mac or Linux?**  
+A: No, this tool requires Windows with Excel and Outlook installed.
+
+**Q14: How much disk space is needed?**  
+A: Minimum 500MB free. More if processing large files or keeping logs long-term.
+
+**Q15: Can I run multiple instances simultaneously?**  
+A: Not recommended. Excel/Outlook COM objects may conflict. Process files sequentially.
+
+### Troubleshooting Questions
+
+**Q16: Why aren't my files being detected?**  
+A: Check file patterns match exactly, including case and extensions.
+
+**Q17: Screenshots are blank/empty?**  
+A: Verify sheet names and cell ranges exist in the Excel file.
+
+**Q18: Email drafts not appearing in Outlook?**  
+A: Ensure Outlook is running and configured correctly.
+
+**Q19: Getting "COM object" errors?**  
+A: Restart computer to reset COM registration. Run as Administrator if needed.
+
+**Q20: Where can I get support?**  
+A: Contact IT Support with log files for assistance.
+
+---
+
+## Appendices
+
+### Appendix A: File Pattern Reference
+
+#### Basic Patterns
+
+| Pattern | Description | Examples Matched |
+|---------|-------------|------------------|
+| `*.xlsm` | All XLSM files | Any .xlsm file |
+| `Report_*.xlsx` | Files starting with "Report_" | Report_Q1.xlsx, Report_Final.xlsx |
+| `*_Summary.xlsm` | Files ending with "_Summary" | Q1_Summary.xlsm, Annual_Summary.xlsm |
+| `MI_*.xlsm` | Files starting with "MI_" | MI_Forecast.xlsm, MI_Actual.xlsm |
+
+#### Advanced Patterns
+
+| Pattern | Description | Examples Matched |
+|---------|-------------|------------------|
+| `Q[1-4]_*.xlsm` | Q1, Q2, Q3, or Q4 prefix | Q1_Report.xlsm, Q3_Final.xlsm |
+| `Report_202411??.xlsm` | November 2024 dates | Report_20241101.xlsm, Report_20241130.xlsm |
+| `[ABC]_Report.xlsm` | A, B, or C prefix | A_Report.xlsm, C_Report.xlsm |
+| `Report_[!X]*.xlsm` | Not starting with X after "Report_" | Report_ABC.xlsm (excludes Report_XYZ.xlsm) |
+
+#### Character Classes
+
+| Pattern Element | Matches | Example |
+|----------------|---------|---------|
+| `*` | Zero or more characters | `*.xlsm` matches all .xlsm files |
+| `?` | Exactly one character | `File?.xlsm` matches File1.xlsm, FileA.xlsm |
+| `[abc]` | One of: a, b, or c | `File[123].xlsm` matches File1.xlsm, File2.xlsm |
+| `[a-z]` | Any lowercase letter | `Report[a-z].xlsm` matches Reporta.xlsm |
+| `[!abc]` | Not a, b, or c | `File[!X].xlsm` matches FileA.xlsm (not FileX.xlsm) |
+
+---
+
+### Appendix B: Threshold Types Reference
+
+#### Complete Threshold Types
+
+| Type | Formula | Python Expression | Use Case | Example |
+|------|---------|-------------------|----------|---------|
+| **equals_zero** | value = 0 | `value == 0.0` | Perfect match | Balance = 0.00 |
+| **not_zero** | value ≠ 0 | `value != 0.0` | Any variance | Balance ≠ 0.00 |
+| **exceeds** | value > threshold | `value > threshold_value` | Variance too high | Diff > 1000 |
+| **below** | value < threshold | `value < threshold_value` | Variance acceptable | Diff < 100 |
+| **between** | min ≤ value ≤ max | `threshold_value <= value <= threshold_max` | Range check | 100 ≤ Diff ≤ 1000 |
+| **less_minus_x_greater_x** | value < -x OR value > x | `value < -threshold_value OR value > threshold_value` | Absolute variance | Diff < -50 OR Diff > 50 |
+
+#### Configuration Examples
+
+**Example 1: Capture only if perfect reconciliation**
+```python
+'threshold_type': 'equals_zero',
+'threshold_value': 0
+```
+Captures when: Cell value = 0.00
+
+**Example 2: Capture if any variance exists**
+```python
+'threshold_type': 'not_zero',
+'threshold_value': 0
+```
+Captures when: Cell value ≠ 0.00
+
+**Example 3: Capture if variance exceeds materiality**
+```python
+'threshold_type': 'exceeds',
+'threshold_value': 1000
+```
+Captures when: Cell value > 1000
+
+**Example 4: Capture if variance within acceptable range**
+```python
+'threshold_type': 'between',
+'threshold_value': 100,
+'threshold_max': 1000
+```
+Captures when: 100 ≤ Cell value ≤ 1000
+
+**Example 5: Capture if absolute variance significant**
+```python
+'threshold_type': 'less_minus_x_greater_x',
+'threshold_value': 50
+```
+Captures when: Cell value < -50 OR Cell value > 50  
+(Handles both positive and negative variances)
+
+---
+
+### Appendix C: Error Codes Reference
+
+| Code | Description | Severity | Action Required |
+|------|-------------|----------|-----------------|
+| E001 | File not found | High | Verify file path and existence |
+| E002 | COM initialization failed | High | Restart application, run as Admin |
+| E003 | Workbook open failed | Medium | Check file not locked/corrupted |
+| E004 | Screenshot capture failed | Medium | Verify sheet names and ranges |
+| E005 | Email draft failed | High | Check Outlook running and configured |
+| E006 | No files detected | Low | Verify files in watch folder |
+| E007 | Pattern matching failed | Low | Check file naming conventions |
+| E008 | Threshold evaluation error | Medium | Verify cell references exist |
+| E009 | Logger initialization failed | Low | Check log folder permissions |
+| E010 | Clipboard operation failed | Low | Retry or reboot system |
+
+---
+
+### Appendix D: Performance Benchmarks
+
+#### Processing Time Benchmarks
+
+**Test Environment:**
+- Windows 10 Pro
+- Intel i7 processor
+- 16GB RAM
+- Local SSD storage
+- Excel 2019
+- Outlook 2019
+
+**Results:**
+
+| Scenario | Files | Screenshots/File | Avg Time/File | Total Time | Time Saved vs Manual |
+|----------|-------|------------------|---------------|------------|---------------------|
+| Single file | 1 | 2 | 25 sec | 25 sec | 14 min 35 sec (97%) |
+| Small batch | 3 | 2 | 30 sec | 1 min 30 sec | 43 min 30 sec (97%) |
+| Medium batch | 5 | 3 | 35 sec | 2 min 55 sec | 72 min 5 sec (96%) |
+| Large batch | 10 | 2 | 28 sec | 4 min 40 sec | 145 min 20 sec (97%) |
+| Complex file | 1 | 8 | 55 sec | 55 sec | 14 min 5 sec (96%) |
+
+**Network Drive Impact:**
+- Local storage: Baseline
+- Network drive (1 Gbps): +15-25% time
+- Network drive (100 Mbps): +50-75% time
+- VPN connection: +100-150% time
+
+---
+
+### Appendix E: Glossary
+
+| Term | Definition |
+|------|------------|
+| **Auto-Execute Mode** | Automatic processing of all detected files without user interaction |
+| **COM Object** | Component Object Model - Microsoft's framework for inter-application communication |
+| **Embed** | Screenshot displayed within email body (inline) |
+| **Attach** | Screenshot included as separate file attachment |
+| **File Pattern** | Wildcard expression used to match file names |
+| **fnmatch** | Python module for Unix-style filename pattern matching |
+| **Log File** | Text file containing timestamped record of operations |
+| **Manual Mode** | User-initiated processing of individual files |
+| **Master Sheet** | Primary summary sheet always captured in smart linking |
+| **Screenshot** | PNG image of Excel cell range |
+| **Smart Linking** | Conditional screenshot capture based on threshold values |
+| **Threshold** | Numeric condition determining if linked sheets are captured |
+| **Watch Folder** | Directory monitored for input files |
+| **Workbook** | Excel file (.xlsm or .xlsx) |
+
+---
+
+### Appendix F: Contact Information
+
+#### Support Contacts
+
+**Level 1 Support (Operations Team)**
+- Email: finance.operations@company.com
+- Phone: ext. 1234
+- Hours: 8 AM - 5 PM (Mon-Fri)
+- Response Time: 2 hours
+
+**Level 2 Support (IT Support)**
+- Email: it.support@company.com
+- Phone: ext. 5678
+- Hours: 24/7
+- Response Time: 4 hours
+
+**Level 3 Support (Tool Developer)**
+- Email: dev.team@company.com
+- For: Configuration changes, feature requests, critical issues
+- Response Time: Next business day
+
+#### Escalation Process
+
+```
+Issue Reported
+    ↓
+Level 1: Operations Team
+├─ Check logs
+├─ Verify configuration
+└─ Try standard solutions
+    ↓ (If unresolved after 2 hours)
+Level 2: IT Support
+├─ Technical troubleshooting
+├─ System diagnostics
+└─ COM object issues
+    ↓ (If unresolved after 4 hours)
+Level 3: Tool Developer
+├─ Code analysis
+├─ Custom solutions
+└─ Bug fixes/enhancements
+```
+
+---
+
+### Appendix G: Change Log
+
+#### Version History
+
+**Version 1.0 (November 2024)**
+- Initial release
+- Auto-execute mode
+- Pattern matching for multiple files
+- Smart linking with threshold evaluation
+- Individual log files per processed file
+- Comprehensive error handling
+- GUI interface with activity log
+
+**Planned Features (Future Versions)**
+- Email auto-send option
+- Database integration for audit trail
+- Web-based configuration interface
+- Real-time processing monitoring dashboard
+- Multiple watch folders support
+- Email template library
+- Advanced scheduling options
+
+---
+
+### Appendix H: Compliance Matrix
+
+#### Regulatory Compliance
+
+| Requirement | Implementation | Evidence |
+|-------------|----------------|----------|
+| **SOX - Audit Trail** | Complete logging of all operations | Individual log files per transaction |
+| **SOX - Segregation of Duties** | Manual review before send | Emails saved as drafts only |
+| **SOX - Data Integrity** | ReadOnly file access | No modifications to source data |
+| **GDPR - Data Minimization** | No personal data in logs | Logs contain filenames only |
+| **GDPR - Right to Erasure** | 90-day log retention | Automated cleanup script |
+| **Internal - Change Management** | Version-controlled code | Git repository |
+| **Internal - Documentation** | Comprehensive SOP | This document |
+| **Internal - Access Control** | Folder permissions | Windows ACLs configured |
+
+---
+
+## Summary
+
+### Key Takeaways
+
+1. **Automated Efficiency**
+   - Reduces email drafting time by 95%
+   - Processes multiple files sequentially
+   - Eliminates manual errors
+
+2. **Flexibility**
+   - Pattern-based file detection
+   - Conditional screenshot capture
+   - Customizable email templates
+
+3. **Reliability**
+   - Comprehensive error handling
+   - Multiple fallback mechanisms
+   - Complete audit trail
+
+4. **Compliance**
+   - SOX-compliant logging
+   - Data integrity maintained
+   - Secure local processing
+
+5. **Scalability**
+   - Handles 1 to 100+ files
+   - Configurable for new file types
+   - Integration-ready architecture
+
+---
+
+## Document Version Control
+
+**Current Version:** 1.0  
+**Last Updated:** November 2024  
+**Next Review Date:** February 2025  
+**Document Owner:** Finance Operations Team  
+
+**Distribution:**
+- Finance Operations Team
+- IT Support Team
+- Audit Team
+- Management
+
+**Feedback:**
+Please send feedback and suggestions to: finance.operations@company.com
+
+---
+
+**END OF DOCUMENTATION**
+
+---
+
+*This documentation package includes:*
+- *Standard Operating Procedure (SOP)*
+- *Workflow Documentation*
+- *Technical Algorithm Specifications*
+- *User Guide*
+- *Troubleshooting Guide*
+- *Appendices and References*
+
+*For questions or support, contact the Finance Operations Team.*:
+│   │   └─► Log error, return
+│   │
+│   └─► ELSE: Continue
+│
+├─► Save Image
+│   ├─► Create file path: folder/name.png
+│   └─► img.save(save_path, 'PNG')
+│
+├─► Store Screenshot Info
+│   ├─► Create info dict:
+│   │   ├─► path
+│   │   ├─► name
+│   │   ├─► embed flag
+│   │   └─► attach flag
+│   └─► Append to screenshot_paths list
+│
+└─► Log success
+
+END
+```
+
+---
+
+### 4. Email Drafting Subprocess
+
+```
+START: _draft_email_thread()
+│
+├─► Validate Screenshots
+│   ├─► Check screenshot_paths not empty
+│   └─► Check all files exist
+│
+├─► Initialize COM
+│   └─► pythoncom.CoInitialize()
+│
+├─► Create Outlook Application
+│   ├─► Try: Dispatch("Outlook.Application")
+│   └─► Fallback: dynamic.Dispatch()
+│
+├─► Create New Mail Item
+│   └─► mail = outlook.CreateItem(0)
+│
+├─► Set Sender
+│   ├─► Get sender_email from config
+│   ├─► Try: Find matching Outlook account
+│   └─► Fallback: Use SentOnBehalfOfName
+│
+├─► Set Recipients
+│   ├─► mail.To = to_recipients
+│   └─► mail.CC = cc_recipients
+│
+├─► Build Subject
+│   ├─► Get default_subject from config
+│   ├─► Replace {timestamp} placeholder
+│   └─► mail.Subject = subject
+│
+├─► Build HTML Body
+│   │
+│   ├─► Add email body text
+│   │   └─► Replace newlines with <br>
+│   │
+│   ├─► Add Embedded Screenshots
+│   │   └─► FOR EACH screenshot where embed=True:
+│   │       ├─► Create unique CID
+│   │       ├─► Add <img src="cid:..."> tag
+│   │       ├─► Add attachment
+│   │       └─► Set PropertyAccessor for embedding
+│   │
+│   ├─► Add Regular Attachments
+│   │   └─► FOR EACH screenshot where attach=True:
+│   │       └─► mail.Attachments.Add(path)
+│   │
+│   ├─► Add Signature
+│   │   └─► Append signature HTML
+│   │
+│   └─► Add Disclaimer
+│       └─► Append disclaimer HTML
+│
+├─► Set HTMLBody
+│   └─► mail.HTMLBody = html_body
+│
+├─► Save Draft
+│   └─► mail.Save()
+│
+├─► Log Success
+│
+├─► Delete Screenshots
+│   └─► FOR EACH screenshot:
+│       └─► os.remove(path) [commented out in code]
+│
+├─► Delete Source Excel File
+│   └─► os.remove(excel_file_path) [commented out in code]
+│
+└─► Uninitialize COM
+
+END
+```
+
+---
+
+### 5. Threshold Analysis Subprocess
+
+```
+START: analyze_linked_sheets()
+│
+├─► Get Smart Config
+│   ├─► master_sheet
+│   ├─► threshold_type
+│   ├─► threshold_value
+│   └─► threshold_max
+│
+├─► Initialize sheets_to_capture list
+│
+├─► FOR EACH linked_group in config:
+│   │
+│   ├─► Get value_cell
+│   ├─► Get sheets_list
+│   │
+│   ├─► Read Cell Value
+│   │   └─► Call extract_cell_value(workbook, value_cell)
+│   │       │
+│   │       ├─► Parse cell reference
+│   │       │   ├─► Split by '!' if present
+│   │       │   ├─► Extract sheet_name
+│   │       │   └─► Extract cell_addr
+│   │       │
+│   │       ├─► Get sheet object
+│   │       ├─► Read cell value
+│   │       ├─► Convert to float
+│   │       └─► RETURN numeric value
+│   │
+│   ├─► Check Threshold
+│   │   └─► Call check_threshold_condition(value, type, threshold)
+│   │       │
+│   │       ├─► SWITCH threshold_type:
+│   │       │   ├─► 'equals_zero': value == 0
+│   │       │   ├─► 'not_zero': value != 0
+│   │       │   ├─► 'exceeds': value > threshold
+│   │       │   ├─► 'below': value < threshold
+│   │       │   ├─► 'between': min <= value <= max
+│   │       │   └─► 'less_minus_x_greater_x': value < -threshold OR value > threshold
+│   │       │
+│   │       └─► RETURN boolean
+│   │
+│   └─► IF condition met:
+│       │
+│       └─► FOR EACH sheet in sheets_list:
+│           ├─► Create sheet_config dict
+│           └─► Add to sheets_to_capture
+│
+└─► RETURN sheets_to_capture
+
+END
+```
+
+---
+
+## Process Timing
+
+### Typical Processing Times
+
+| Operation | Time (seconds) | Factors Affecting Time |
+|-----------|----------------|------------------------|
+| Application Launch | 2-3 | System performance |
+| File Detection | 1-2 | Number of files in folder |
+| File Opening | 3-5 | File size, network speed |
+| Screenshot Capture (each) | 2-3 | Range size, complexity |
+| Threshold Analysis | 1-2 | Number of conditions |
+| Email Drafting | 5-10 | Number of screenshots, network |
+| **Total per File** | **20-60** | Varies by configuration |
+
+### Batch Processing Example
+
+**Scenario:** 5 files to process
+
+```
+Time Breakdown:
+├─ Application Launch: 3 sec
+├─ File Detection: 2 sec
+├─ File 1 Processing: 45 sec
+├─ File 2 Processing: 40 sec
+├─ File 3 Processing: 50 sec
+├─ File 4 Processing: 42 sec
+├─ File 5 Processing: 38 sec
+└─ Total: ~220 seconds (3.7 minutes)
+
+Manual Process (Estimated):
+├─ 5 files × 15 minutes each = 75 minutes
+└─ Time Saved: 71.3 minutes (95% reduction)
+```
+
+---
+
+## Error Handling Workflow
+
+```
+┌─────────────────────────────────┐
+│     Operation Starts            │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│    Try Operation                │
+└────────────┬────────────────────┘
+             │
+      ┌──────┴──────┐
+      │   Success?   │
+      └──────┬───────┘
+             │
+   ┌─────────┼─────────┐
+   │ YES     │     NO  │
+   │         │         │
+   ▼         │         ▼
+┌────────┐  │  ┌──────────────┐
+│Continue│  │  │ Log Error    │
+│Process │  │  │ with Details │
+└────────┘  │  └──────┬───────┘
+            │         │
+            │         ▼
+            │  ┌──────────────┐
+            │  │ Try Fallback │
+            │  │ Method       │
+            │  └──────┬───────┘
+            │         │
+            │   ┌─────┴─────┐
+            │   │ Success?  │
+            │   └─────┬─────┘
+            │         │
+            │    ┌────┼────┐
+            │    │YES │ NO │
+            │    │    │    │
+            │    ▼    │    ▼
+            │  ┌────┐ │ ┌─────────┐
+            │  │Log │ │ │Show     │
+            │  │&   │ │ │Error    │
+            │  │Cont│ │ │Message  │
+            │  └────┘ │ │& Abort  │
+            │         │ └─────────┘
+            └─────────┘
+```
+
+---
+
+# Technical Algorithm
+
+## Core Algorithms
+
+### Algorithm 1: Pattern Matching Engine
+
+```
+FUNCTION detect_files_in_folder()
+    INPUT: 
+        - watch_folder: String (folder path)
+        - file_configs: Dictionary (recon configurations)
+    
+    OUTPUT:
+        - detected_files: List of dictionaries
+    
+    BEGIN
+        1. Initialize detected_files as empty list
         
-    time.sleep(30)  # Check every 30 seconds
-    
-    if len(completed_tasks) == len(daily_tasks):
-        print("\n✓ All tasks for today completed!")
-        break
-```
-
-**What this does:**
-- Monitors the current time continuously
-- Alerts you when it's time for specific tasks
-- Keeps track of what's been completed
-- Runs in the background while you work
-
-**Time saved:** Prevents missed deadlines and forgotten tasks
-
----
-
-## More Time-Saving Use Cases
-
-### 8. Backup Important Files Automatically
-Schedule Python to copy critical files to a backup folder daily—no manual copying needed.
-
-### 9. Generate Reports from Data
-Create formatted reports with charts and summaries automatically from your raw data files.
-
-### 10. Monitor Website Changes
-Check if a webpage has updated content (like price changes, new postings, or status updates) and alert you.
-
-### 11. Organize Downloads Folder
-Automatically sort files by type (PDFs to Documents, images to Pictures, etc.) as they arrive.
-
-### 12. Calculate and Email Weekly Metrics
-Pull data from various sources, perform calculations, format results, and email them to stakeholders—all automatically.
-
----
-
-## Getting Started: Your Path to Automation
-
-### Step 1: Set Up Python (30 minutes)
-
-**Download Python:**
-1. Visit python.org
-2. Download the latest version (it's free)
-3. During installation, check "Add Python to PATH"
-4. Click "Install Now"
-
-**Install a Code Editor:**
-- **VS Code** (recommended for beginners): code.visualstudio.com
-- **PyCharm Community Edition**: jetbrains.com/pycharm
-- **Jupyter Notebook**: Great for learning and experimentation
-
-**Install Essential Libraries:**
-Open your command prompt or terminal and type:
-```
-pip install pandas openpyxl PyPDF2
-```
-
-These libraries handle Excel files, PDFs, and data manipulation.
-
----
-
-### Step 2: Learn the Basics (1-2 weeks)
-
-**Core Concepts You Need:**
-
-**Variables** (storing information):
-```python
-company_name = "ABC Corp"
-employee_count = 150
-```
-
-**Lists** (storing multiple items):
-```python
-departments = ["Sales", "Marketing", "IT", "HR"]
-```
-
-**Loops** (doing things repeatedly):
-```python
-for department in departments:
-    print(f"Processing {department} data...")
-```
-
-**If/Else** (making decisions):
-```python
-if employee_count > 100:
-    print("Large company")
-else:
-    print("Small-medium company")
-```
-
----
-
-### Step 3: Pick Your First Automation Project
-
-**Start with something:**
-- You do regularly (at least weekly)
-- That's time-consuming (takes 10+ minutes)
-- That follows a pattern (same steps each time)
-- That's frustrating or boring
-
-**Good first projects:**
-- Renaming files in a folder
-- Cleaning up a messy Excel file
-- Combining multiple spreadsheets
-- Creating folder structures
-
----
-
-### Step 4: Find and Adapt Code
-
-**You don't need to write code from scratch!**
-
-**Where to find code examples:**
-- Google: "Python automate [your specific task]"
-- Stack Overflow: programming questions and answers
-- GitHub: repository of code examples
-- YouTube: visual tutorials
-
-**How to adapt code:**
-1. Find code that does something similar
-2. Copy it into your editor
-3. Change file names and folder paths to match yours
-4. Change variable names to make sense for your task
-5. Run it and see what happens
-6. Adjust until it works perfectly
-
----
-
-## Essential Python Libraries
-
-Think of libraries as toolboxes—each contains ready-made tools for specific jobs.
-
-### **pandas** – The Excel Master
-Handles Excel files, data cleaning, and manipulation.
-```python
-import pandas as pd
-data = pd.read_excel("file.xlsx")
-```
-
-### **os** – The File Manager
-Works with files, folders, and file systems.
-```python
-import os
-os.listdir("folder")  # List files
-os.rename("old.txt", "new.txt")  # Rename
-```
-
-### **datetime** – The Time Keeper
-Manages dates, times, and scheduling.
-```python
-from datetime import datetime
-today = datetime.now()
-```
-
-### **glob** – The File Finder
-Finds files matching patterns.
-```python
-import glob
-excel_files = glob.glob("*.xlsx")  # Find all Excel files
-```
-
-### **PyPDF2** – The PDF Reader
-Extracts text and information from PDFs.
-```python
-import PyPDF2
-# Open and read PDFs
-```
-
-### **openpyxl** – The Advanced Excel Tool
-For detailed Excel operations (formatting, formulas, charts).
-```python
-import openpyxl
-# Work with Excel in detail
-```
-
----
-
-## Learning Resources (All Free)
-
-### **Online Books:**
-- **"Automate the Boring Stuff with Python"** by Al Sweigart
-  - Perfect for beginners
-  - Focuses on practical automation
-  - Available free online: automatetheboringstuff.com
-
-### **Video Courses:**
-- **"Python for Everybody"** by Dr. Chuck (Coursera)
-  - Comprehensive beginner course
-  - Free to audit
-
-- **Corey Schafer's Python Tutorials** (YouTube)
-  - Clear explanations
-  - Practical examples
-
-### **Interactive Learning:**
-- **Codecademy** – Learn Python Basics
-- **DataCamp** – Python for Data Science
-- **Real Python** – Tutorials and guides
-
-### **Community Support:**
-- **r/learnpython** (Reddit) – Beginner-friendly community
-- **Stack Overflow** – Q&A for specific problems
-- **Python Discord** – Real-time help from developers
-
----
-
-## Quick Reference Guide
-
-### Common Python Commands
-
-**Working with Excel:**
-```python
-# Read Excel file
-data = pd.read_excel("input.xlsx")
-
-# Save Excel file
-data.to_excel("output.xlsx", index=False)
-
-# Read specific sheet
-data = pd.read_excel("file.xlsx", sheet_name="Sheet2")
-```
-
-**Working with Files:**
-```python
-# List files in folder
-files = os.listdir("C:/MyFolder")
-
-# Rename file
-os.rename("old_name.txt", "new_name.txt")
-
-# Create new folder
-os.makedirs("NewFolder")
-
-# Check if file exists
-if os.path.exists("file.txt"):
-    print("File exists!")
-```
-
-**Working with Text:**
-```python
-# Remove extra spaces
-clean_text = text.strip()
-
-# Replace text
-new_text = text.replace("old", "new")
-
-# Convert to uppercase
-upper_text = text.upper()
-
-# Convert to lowercase
-lower_text = text.lower()
-```
-
-**Working with Dates:**
-```python
-# Get current date and time
-now = datetime.now()
-
-# Format date
-formatted = now.strftime("%Y-%m-%d")
-
-# Get current date
-today = datetime.now().date()
-```
-
----
-
-## Success Tips
-
-### 1. Start Small
-Don't try to automate your entire workflow on day one. Pick one task, automate it, celebrate the win, then move to the next.
-
-### 2. Embrace Errors
-Every programmer gets errors constantly. They're not failures—they're feedback. Read the error message, Google it, and learn.
-
-### 3. Save Your Code
-Keep a personal library of scripts that work. You'll reuse them and adapt them for new tasks.
-
-### 4. Comment Your Code
-Add notes explaining what each part does:
-```python
-# This loop renames all the files
-for filename in files:
-    # Add "2024_" to the beginning
-    new_name = "2024_" + filename
-```
-
-Future you will thank present you.
-
-### 5. Join a Community
-Learning with others makes the journey easier and more fun. Join online forums, attend meetups, or find a Python learning buddy at work.
-
-### 6. Track Your Time Savings
-Keep a simple log of tasks you've automated and time saved. Watching the hours add up is incredibly motivating.
-
----
-
-## Real Stories from Non-Programmers
-
-### Sarah, Marketing Manager
-*"I used to spend 2 hours every Monday combining regional sales reports. Now my Python script does it in 10 seconds while I make coffee. I've reclaimed 100+ hours this year."*
-
-### James, HR Coordinator
-*"Employee onboarding required creating 12 folders and 30 files for each new hire. My Python script creates everything perfectly in under a minute. What used to take 20 minutes now takes one."*
-
-### Maria, Financial Analyst
-*"Cleaning messy data from different departments was my nightmare—inconsistent formats, duplicates, errors everywhere. Python turned a 2-hour weekly task into a 30-second automated process."*
-
-### David, Operations Manager
-*"I needed to extract specific information from 50+ PDF reports every week. Manually, this took my entire Friday afternoon. Now Python does it Thursday night while I sleep."*
-
----
-
-## Common Questions
-
-**Q: Do I need to be good at math?**
-A: No. Basic arithmetic is enough. Python handles the complex math for you.
-
-**Q: How long until I can automate real tasks?**
-A: Many people automate their first task within a week of starting. Complex automation might take a month or two of learning.
-
-**Q: What if I get stuck?**
-A: Google your error message—someone else has had the same problem. Stack Overflow and Python forums are incredibly helpful.
-
-**Q: Is Python the only option?**
-A: No, but it's the most beginner-friendly for automation and has the largest community for support.
-
-**Q: Can Python work with my company's systems?**
-A: Python can interact with most file types and many business systems. Some might require additional setup or permissions from IT.
-
-**Q: What if I make a mistake and break something?**
-A: Start by working on copies of your files, not originals. Test on small batches before processing large volumes.
-
-**Q: Do I need expensive software?**
-A: No. Python and all essential tools are completely free and open-source.
-
----
-
-## Your Action Plan
-
-### This Week:
-- [ ] Install Python on your computer
-- [ ] Install VS Code or another editor
-- [ ] Install pandas and other essential libraries
-- [ ] Write your first "Hello, World!" program
-
-### Next Week:
-- [ ] Complete 2-3 beginner tutorials
-- [ ] Identify one task at work you want to automate
-- [ ] Find code examples similar to your task
-
-### This Month:
-- [ ] Adapt an example script for your specific task
-- [ ] Test it on sample data
-- [ ] Run it on real work (with backups!)
-- [ ] Calculate time saved
-- [ ] Identify your next automation project
-
-### This Quarter:
-- [ ] Automate 3-5 regular tasks
-- [ ] Share your success with colleagues
-- [ ] Help others get started
-- [ ] Build a personal library of useful scripts
-
----
-
-## Final Thoughts
-
-Python isn't about becoming a software developer. It's about working smarter, not harder. It's about getting your time back for the work that actually matters—the creative thinking, the strategic planning, the human connections that can't be automated.
-
-Every hour you save is an hour you can spend on meaningful work, professional development, or simply leaving the office on time to enjoy your life outside of work.
-
-**The best time to start was yesterday. The second-best time is today.**
-
-Pick one repetitive task. Find a tutorial. Give it 30 minutes. See what happens.
-
-You might be surprised at how quickly your personal work assistant starts saving you real time.
-
----
-
-## Additional Resources
-
-**Official Documentation:**
-- Python.org – Official Python documentation
-- Pandas documentation – pandas.pydata.org
-
-**Practice Platforms:**
-- HackerRank – Coding challenges
-- LeetCode – Problem-solving practice
-- Codewars – Gamified learning
-
-**Cheat Sheets:**
-- Python Basics Cheat Sheet
-- Pandas Cheat Sheet
-- Excel with Python Cheat Sheet
-
-(Search for these online—many free downloadable versions available)
-
-**Books:**
-- "Python Crash Course" by Eric Matthes
-- "Automate the Boring Stuff" by Al Sweigart
-- "Python for Data Analysis" by Wes McKinney
-
----
-
-**Ready to get started? Your future, more efficient self is waiting.**
-
----
-
-*This guide is designed for sharing, saving, and referencing. Feel free to distribute it to colleagues, teams, or anyone who could benefit from automation. Python is for everyone—including you.*
+        2. IF watch_folder does NOT exist THEN
+            RETURN empty list
+        
+        3. folder_files ← GET all
