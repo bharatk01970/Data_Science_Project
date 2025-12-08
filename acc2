@@ -1,140 +1,256 @@
-=================================================================================
-EXCEL FORMULA SOLUTION - INPUT TO OUTPUT TRANSFORMATION
-=================================================================================
+Sub TransformInputToOutput()
+    '=================================================================================
+    ' EXCEL TRANSFORMATION MACRO
+    ' Purpose: Transform one input row into three output rows with specific rules
+    '=================================================================================
+    
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim inputRow As Long
+    Dim outputRow As Long
+    Dim level5ID As String
+    Dim level5Name As String
+    Dim level4ID As String
+    Dim level4Name As String
+    Dim level3ID As String
+    Dim level3Name As String
+    Dim level2ID As String
+    Dim level2Name As String
+    Dim level1ID As String
+    Dim level1Name As String
+    Dim topC As String
+    Dim middleCStatus As String
+    Dim isStandard As Boolean
+    
+    ' Configuration - Change these if your sheet names are different
+    Const INPUT_SHEET = "Input"
+    Const OUTPUT_SHEET = "Output"
+    Const INPUT_START_ROW = 2  ' First data row (after headers)
+    Const OUTPUT_START_ROW = 2 ' First output data row
+    
+    ' Configurable code values
+    Const CODE_GRC = "GRCALL"
+    Const CODE_RAC = "RACALL"
+    
+    ' Turn off screen updating for faster processing
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set worksheet references
+    Set wsInput = ThisWorkbook.Sheets(INPUT_SHEET)
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    
+    ' Clear previous output data (keep headers)
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    If lastRow >= OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":E" & lastRow).ClearContents
+    End If
+    
+    ' Find last row with data in input sheet
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to process
+    If lastRow < INPUT_START_ROW Then
+        MsgBox "No input data found. Please add data starting from row " & INPUT_START_ROW, vbExclamation, "No Data"
+        GoTo CleanExit
+    End If
+    
+    ' Initialize output row counter
+    outputRow = OUTPUT_START_ROW
+    
+    ' Loop through each input row
+    For inputRow = INPUT_START_ROW To lastRow
+        
+        ' Read input data (Columns A to J)
+        level5ID = Trim(wsInput.Cells(inputRow, 1).Value)    ' Column A
+        level5Name = Trim(wsInput.Cells(inputRow, 2).Value)  ' Column B
+        level4ID = Trim(wsInput.Cells(inputRow, 3).Value)    ' Column C
+        level4Name = Trim(wsInput.Cells(inputRow, 4).Value)  ' Column D
+        level3ID = Trim(wsInput.Cells(inputRow, 5).Value)    ' Column E
+        level3Name = Trim(wsInput.Cells(inputRow, 6).Value)  ' Column F
+        level2ID = Trim(wsInput.Cells(inputRow, 7).Value)    ' Column G
+        level2Name = Trim(wsInput.Cells(inputRow, 8).Value)  ' Column H
+        level1ID = Trim(wsInput.Cells(inputRow, 9).Value)    ' Column I
+        level1Name = Trim(wsInput.Cells(inputRow, 10).Value) ' Column J
+        
+        ' Skip empty rows
+        If level5ID = "" Then
+            GoTo NextInputRow
+        End If
+        
+        ' Calculate Top C (Column 1)
+        topC = "SAS - " & level2Name & " (L2)"
+        
+        ' Calculate Middle C Status (Column 2)
+        ' Check if Level 5 Name contains (STD) or (STANDARD)
+        isStandard = False
+        If InStr(1, UCase(level5Name), "(STD)") > 0 Or _
+           InStr(1, UCase(level5Name), "(STANDARD)") > 0 Then
+            isStandard = True
+        End If
+        
+        If isStandard Then
+            middleCStatus = "SAS - ALL"
+        Else
+            middleCStatus = "SAS - ALT"
+        End If
+        
+        '=========================================================================
+        ' OUTPUT ROW 1
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                    ' Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus           ' Middle C Status
+        wsOutput.Cells(outputRow, 3).Value = "SOS - " & CODE_GRC     ' Middle C Code
+        wsOutput.Cells(outputRow, 4).Value = ""                      ' Lowest C (empty)
+        wsOutput.Cells(outputRow, 5).Value = "SAS_" & level5ID & "_NCR"  ' N element
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 2
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                    ' Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus           ' Middle C Status
+        wsOutput.Cells(outputRow, 3).Value = "SOS - " & CODE_RAC     ' Middle C Code
+        wsOutput.Cells(outputRow, 4).Value = "SOS - ARAC"            ' Lowest C
+        wsOutput.Cells(outputRow, 5).Value = "SAS_" & level5ID & "_ARAC"  ' N element
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 3
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                    ' Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus           ' Middle C Status
+        wsOutput.Cells(outputRow, 3).Value = "SOS - " & CODE_RAC     ' Middle C Code
+        wsOutput.Cells(outputRow, 4).Value = "SOS - SRAC"            ' Lowest C
+        wsOutput.Cells(outputRow, 5).Value = "SAS_" & level5ID & "_SRAC"  ' N element
+        outputRow = outputRow + 1
+        
+NextInputRow:
+    Next inputRow
+    
+    ' Format output (optional)
+    If outputRow > OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":E" & (outputRow - 1)).Font.Name = "Calibri"
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":E" & (outputRow - 1)).Font.Size = 11
+        wsOutput.Columns("A:E").AutoFit
+    End If
+    
+    ' Success message
+    MsgBox "Transformation Complete!" & vbCrLf & vbCrLf & _
+           "Input Rows Processed: " & (lastRow - INPUT_START_ROW + 1) & vbCrLf & _
+           "Output Rows Generated: " & (outputRow - OUTPUT_START_ROW), _
+           vbInformation, "Success"
+    
+CleanExit:
+    ' Restore settings
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Exit Sub
+    
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    MsgBox "Error: " & Err.Description & vbCrLf & vbCrLf & _
+           "Please check:" & vbCrLf & _
+           "1. Sheet names are correct (Input/Output)" & vbCrLf & _
+           "2. Data format is correct" & vbCrLf & _
+           "3. No special characters in data", _
+           vbCritical, "Error"
+End Sub
 
-ASSUMPTIONS:
-- Input data starts in Row 2 (Row 1 has headers)
-- Input columns: A=Level 5 ID, B=Level 5 Name, C=Level 4 ID, D=Level 4 Name, 
-  E=Level 3 ID, F=Level 3 Name, G=Level 2 ID, H=Level 2 Name, I=Level 1 ID, J=Level 1 Name
-- Output starts in Row 2
-- Each input row generates 3 output rows
 
-=================================================================================
-OUTPUT COLUMN FORMULAS
-=================================================================================
-
-SETUP:
-------
-1. Create a helper column (let's say Column K) with row numbers: 1, 2, 3, 4, 5, 6...
-2. For each input row, you need 3 output rows
-
-
-OUTPUT ROW CALCULATION:
------------------------
-Helper Column (K2): =INT((ROW()-2)/3)+2
-This identifies which input row this output row corresponds to
-
-
-COLUMN 1: Level 2 Name (Top C)
--------------------------------
-Formula for Output Column 1 (e.g., L2):
-
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","","SAS - "&INDIRECT("H"&INT((ROW()-2)/3)+2)&" (L2)")
-
-Result: "SAS - Auroma_1.0 (L2)"
-
-
-COLUMN 2: Middle C (Status Based)
-----------------------------------
-Formula for Output Column 2 (e.g., M2):
-
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",IF(OR(ISNUMBER(SEARCH("(STD)",INDIRECT("B"&INT((ROW()-2)/3)+2))),ISNUMBER(SEARCH("(STANDARD)",INDIRECT("B"&INT((ROW()-2)/3)+2)))),"SAS - ALL","SAS - ALT"))
-
-Result: "SAS - ALL" if (STD) or (STANDARD) found, else "SAS - ALT"
-
-
-COLUMN 3: Middle C (Code Row 1/2/3)
-------------------------------------
-Formula for Output Column 3 (e.g., N2):
-
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",IF(MOD(ROW()-2,3)=0,"SOS - GRCALL",IF(MOD(ROW()-2,3)=1,"SOS - RACALL","SOS - RACALL")))
-
-Note: GRC/RAC are configurable defaults. Adjust as needed.
-
-Alternative if you want different values for Row 2 and Row 3:
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",CHOOSE(MOD(ROW()-2,3)+1,"SOS - GRCALL","SOS - RACALL","SOS - RACALL"))
-
-
-COLUMN 4: Lowest C (Mapped Code)
----------------------------------
-Formula for Output Column 4 (e.g., O2):
-
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",IF(MOD(ROW()-2,3)=0,"",IF(MOD(ROW()-2,3)=1,"SOS - ARAC","SOS - SRAC")))
-
-Result: Empty for Row 1, "SOS - ARAC" for Row 2, "SOS - SRAC" for Row 3
-
-
-COLUMN 5: N element (Final Code Output)
-----------------------------------------
-Formula for Output Column 5 (e.g., P2):
-
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","","SAS_"&INDIRECT("A"&INT((ROW()-2)/3)+2)&"_"&CHOOSE(MOD(ROW()-2,3)+1,"NCR","ARAC","SRAC"))
-
-Result: "SAS_XXX001_NCR", "SAS_XXX001_ARAC", "SAS_XXX001_SRAC"
-
-
-=================================================================================
-COMPLETE FORMULA SET (Copy-Paste Ready)
-=================================================================================
-
-Assuming:
-- Input data in columns A-J starting Row 2
-- Output in columns L-P starting Row 2
-- Helper column K
-
-HELPER COLUMN K2:
-=INT((ROW()-2)/3)+2
-
-OUTPUT L2 (Top C):
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","","SAS - "&INDIRECT("H"&INT((ROW()-2)/3)+2)&" (L2)")
-
-OUTPUT M2 (Middle C - Status):
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",IF(OR(ISNUMBER(SEARCH("(STD)",INDIRECT("B"&INT((ROW()-2)/3)+2))),ISNUMBER(SEARCH("(STANDARD)",INDIRECT("B"&INT((ROW()-2)/3)+2)))),"SAS - ALL","SAS - ALT"))
-
-OUTPUT N2 (Middle C - Code):
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",CHOOSE(MOD(ROW()-2,3)+1,"SOS - GRCALL","SOS - RACALL","SOS - RACALL"))
-
-OUTPUT O2 (Lowest C):
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","",IF(MOD(ROW()-2,3)=0,"",IF(MOD(ROW()-2,3)=1,"SOS - ARAC","SOS - SRAC")))
-
-OUTPUT P2 (N element):
-=IF(INDIRECT("B"&INT((ROW()-2)/3)+2)="","","SAS_"&INDIRECT("A"&INT((ROW()-2)/3)+2)&"_"&CHOOSE(MOD(ROW()-2,3)+1,"NCR","ARAC","SRAC"))
-
-
-COPY THESE FORMULAS DOWN FOR ALL OUTPUT ROWS (3x the number of input rows)
-
-
-=================================================================================
-EXAMPLE RESULT FOR INPUT ROW: XXX001 | Auroma_1 (std)
-=================================================================================
-
-Output Row 1:
-- Top C: SAS - Auroma_1.0 (L2)
-- Middle C Status: SAS - ALL
-- Middle C Code: SOS - GRCALL
-- Lowest C: [empty]
-- N element: SAS_XXX001_NCR
-
-Output Row 2:
-- Top C: SAS - Auroma_1.0 (L2)
-- Middle C Status: SAS - ALL
-- Middle C Code: SOS - RACALL
-- Lowest C: SOS - ARAC
-- N element: SAS_XXX001_ARAC
-
-Output Row 3:
-- Top C: SAS - Auroma_1.0 (L2)
-- Middle C Status: SAS - ALL
-- Middle C Code: SOS - RACALL
-- Lowest C: SOS - SRAC
-- N element: SAS_XXX001_SRAC
-
-
-=================================================================================
-NOTES:
-=================================================================================
-1. Adjust GRC/RAC values in Column 3 formula as needed for your configuration
-2. All formulas use INDIRECT to reference input rows dynamically
-3. MOD function determines which of the 3 output rows we're on (0, 1, or 2)
-4. CHOOSE function selects appropriate code based on output row number
-5. Formula assumes continuous data - adjust if rows have gaps
+'=================================================================================
+' OPTIONAL: Quick Setup Macro - Creates Input and Output sheets with headers
+'=================================================================================
+Sub SetupSheets()
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim wb As Workbook
+    
+    Set wb = ThisWorkbook
+    
+    ' Create or clear Input sheet
+    On Error Resume Next
+    Set wsInput = wb.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        Set wsInput = wb.Sheets.Add
+        wsInput.Name = "Input"
+    Else
+        wsInput.Cells.Clear
+    End If
+    
+    ' Create or clear Output sheet
+    On Error Resume Next
+    Set wsOutput = wb.Sheets("Output")
+    On Error GoTo 0
+    
+    If wsOutput Is Nothing Then
+        Set wsOutput = wb.Sheets.Add
+        wsOutput.Name = "Output"
+    Else
+        wsOutput.Cells.Clear
+    End If
+    
+    ' Setup Input Headers
+    With wsInput
+        .Cells(1, 1).Value = "Level 5 ID"
+        .Cells(1, 2).Value = "Level 5 Name"
+        .Cells(1, 3).Value = "Level 4 ID"
+        .Cells(1, 4).Value = "Level 4 Name"
+        .Cells(1, 5).Value = "Level 3 ID"
+        .Cells(1, 6).Value = "Level 3 Name"
+        .Cells(1, 7).Value = "Level 2 ID"
+        .Cells(1, 8).Value = "Level 2 Name"
+        .Cells(1, 9).Value = "Level 1 ID"
+        .Cells(1, 10).Value = "Level 1 Name"
+        
+        ' Format headers
+        .Range("A1:J1").Font.Bold = True
+        .Range("A1:J1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:J").AutoFit
+    End With
+    
+    ' Setup Output Headers
+    With wsOutput
+        .Cells(1, 1).Value = "Top C"
+        .Cells(1, 2).Value = "Middle C"
+        .Cells(1, 3).Value = "basis A"
+        .Cells(1, 4).Value = "Lowest C"
+        .Cells(1, 5).Value = "N element"
+        
+        ' Format headers
+        .Range("A1:E1").Font.Bold = True
+        .Range("A1:E1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:E").AutoFit
+    End With
+    
+    ' Add sample data to Input sheet
+    With wsInput
+        .Cells(2, 1).Value = "XXX001"
+        .Cells(2, 2).Value = "Auroma_1 (std)"
+        .Cells(2, 3).Value = "XXX001_A"
+        .Cells(2, 4).Value = "Auroma_1"
+        .Cells(2, 5).Value = "XXX001_B"
+        .Cells(2, 6).Value = "Auroma_1"
+        .Cells(2, 7).Value = "XXX001_C"
+        .Cells(2, 8).Value = "Auroma_1.0"
+        .Cells(2, 9).Value = "XXX001_D"
+        .Cells(2, 10).Value = "Auroma_1.00"
+    End With
+    
+    MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
+           "✓ Input sheet created with headers and sample data" & vbCrLf & _
+           "✓ Output sheet created with headers" & vbCrLf & vbCrLf & _
+           "You can now:" & vbCrLf & _
+           "1. Add your data to the Input sheet" & vbCrLf & _
+           "2. Run the 'TransformInputToOutput' macro", _
+           vbInformation, "Setup Complete"
+    
+    ' Activate Input sheet
+    wsInput.Activate
+End Sub
