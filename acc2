@@ -1,8 +1,8 @@
 Sub TransformInputToOutput()
     '=================================================================================
-    ' EXCEL TRANSFORMATION MACRO - FINAL VERSION WITH CONFIGURABLE TOP C MAPPING
+    ' EXCEL TRANSFORMATION MACRO - DIAGNOSTIC VERSION
     ' Purpose: Transform one input row into three output rows with specific rules
-    ' Updated: Added configurable Level 2 Name to Top C mapping
+    ' Includes: Debug mode to troubleshoot issues
     '=================================================================================
     
     Dim wsInput As Worksheet
@@ -27,12 +27,13 @@ Sub TransformInputToOutput()
     Dim allAltSuffix As String
     Dim shouldTransform As Boolean
     Dim skippedCount As Long
+    Dim skipReason As String
     
-    ' Configuration - Change these if your sheet names are different
+    ' Configuration
     Const INPUT_SHEET = "Input"
     Const OUTPUT_SHEET = "Output"
-    Const INPUT_START_ROW = 2  ' First data row (after headers)
-    Const OUTPUT_START_ROW = 2 ' First output data row
+    Const INPUT_START_ROW = 2
+    Const OUTPUT_START_ROW = 2
     
     ' Turn off screen updating for faster processing
     Application.ScreenUpdating = False
@@ -41,8 +42,23 @@ Sub TransformInputToOutput()
     On Error GoTo ErrorHandler
     
     ' Set worksheet references
+    On Error Resume Next
     Set wsInput = ThisWorkbook.Sheets(INPUT_SHEET)
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!" & vbCrLf & vbCrLf & _
+               "Please create a sheet named 'Input' or run SetupSheets macro.", _
+               vbCritical, "Sheet Not Found"
+        GoTo CleanExit
+    End If
+    
     Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!" & vbCrLf & vbCrLf & _
+               "Please create a sheet named 'Output' or run SetupSheets macro.", _
+               vbCritical, "Sheet Not Found"
+        GoTo CleanExit
+    End If
+    On Error GoTo ErrorHandler
     
     ' Clear previous output data (keep headers)
     lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
@@ -63,35 +79,42 @@ Sub TransformInputToOutput()
     outputRow = OUTPUT_START_ROW
     skippedCount = 0
     
+    ' Create debug message
+    Dim debugMsg As String
+    debugMsg = "PROCESSING ROWS:" & vbCrLf & String(60, "=") & vbCrLf
+    
     ' Loop through each input row
     For inputRow = INPUT_START_ROW To lastRow
         
         ' Read input data (Columns A to K)
-        level5ID = Trim(wsInput.Cells(inputRow, 1).Value)    ' Column A
-        level5Name = Trim(wsInput.Cells(inputRow, 2).Value)  ' Column B
-        level4ID = Trim(wsInput.Cells(inputRow, 3).Value)    ' Column C
-        level4Name = Trim(wsInput.Cells(inputRow, 4).Value)  ' Column D
-        level3ID = Trim(wsInput.Cells(inputRow, 5).Value)    ' Column E
-        level3Name = Trim(wsInput.Cells(inputRow, 6).Value)  ' Column F
-        level2ID = Trim(wsInput.Cells(inputRow, 7).Value)    ' Column G
-        level2Name = Trim(wsInput.Cells(inputRow, 8).Value)  ' Column H
-        level1ID = Trim(wsInput.Cells(inputRow, 9).Value)    ' Column I
-        level1Name = Trim(wsInput.Cells(inputRow, 10).Value) ' Column J
-        comments = Trim(wsInput.Cells(inputRow, 11).Value)   ' Column K - Comments
+        level5ID = Trim(CStr(wsInput.Cells(inputRow, 1).Value))
+        level5Name = Trim(CStr(wsInput.Cells(inputRow, 2).Value))
+        level4ID = Trim(CStr(wsInput.Cells(inputRow, 3).Value))
+        level4Name = Trim(CStr(wsInput.Cells(inputRow, 4).Value))
+        level3ID = Trim(CStr(wsInput.Cells(inputRow, 5).Value))
+        level3Name = Trim(CStr(wsInput.Cells(inputRow, 6).Value))
+        level2ID = Trim(CStr(wsInput.Cells(inputRow, 7).Value))
+        level2Name = Trim(CStr(wsInput.Cells(inputRow, 8).Value))
+        level1ID = Trim(CStr(wsInput.Cells(inputRow, 9).Value))
+        level1Name = Trim(CStr(wsInput.Cells(inputRow, 10).Value))
+        comments = Trim(CStr(wsInput.Cells(inputRow, 11).Value))
         
         ' Skip empty rows
         If level5ID = "" Then
+            debugMsg = debugMsg & "Row " & inputRow & ": EMPTY - Skipped" & vbCrLf
             GoTo NextInputRow
         End If
         
         ' Initialize transformation flag
         shouldTransform = True
+        skipReason = ""
         
         '=========================================================================
-        ' FILTER 1: Comments must contain "new" (case-insensitive, wildcard match)
+        ' FILTER 1: Comments must contain "new"
         '=========================================================================
         If InStr(1, UCase(comments), "NEW") = 0 Then
             shouldTransform = False
+            skipReason = "Comments doesn't contain 'new' (value: '" & comments & "')"
         End If
         
         '=========================================================================
@@ -102,6 +125,7 @@ Sub TransformInputToOutput()
                UCase(level1Name) <> "KENAMMA" And _
                UCase(level1Name) <> "NAAGO" Then
                 shouldTransform = False
+                skipReason = "Level1 Name not Alpha/Kenamma/Naago (value: '" & level1Name & "')"
             End If
         End If
         
@@ -113,11 +137,15 @@ Sub TransformInputToOutput()
                InStr(1, UCase(level5Name), "RETD") > 0 Or _
                InStr(1, UCase(level5Name), "RTD") > 0 Then
                 shouldTransform = False
+                skipReason = "Level5 Name contains Retained/Retd/Rtd (value: '" & level5Name & "')"
             End If
         End If
         
-        ' Skip this row if it doesn't meet all criteria
-        If Not shouldTransform Then
+        ' Add to debug message
+        If shouldTransform Then
+            debugMsg = debugMsg & "Row " & inputRow & ": PROCESSING ✓ (ID: " & level5ID & ")" & vbCrLf
+        Else
+            debugMsg = debugMsg & "Row " & inputRow & ": SKIPPED - " & skipReason & vbCrLf
             skippedCount = skippedCount + 1
             GoTo NextInputRow
         End If
@@ -126,11 +154,10 @@ Sub TransformInputToOutput()
         ' ROW PASSED ALL FILTERS - PROCEED WITH TRANSFORMATION
         '=========================================================================
         
-        ' Calculate Top C (Column 1) using configurable mapping function
+        ' Calculate Top C using mapping function
         topC = GetTopCValue(level2Name)
         
-        ' Calculate Middle C Status (Column 2)
-        ' Check if Level 5 Name contains (STD) or (STEWARDSHIP)
+        ' Calculate Middle C Status
         isStandard = False
         If InStr(1, UCase(level5Name), "(STD)") > 0 Or _
            InStr(1, UCase(level5Name), "(STEWARDSHIP)") > 0 Then
@@ -148,65 +175,62 @@ Sub TransformInputToOutput()
         '=========================================================================
         ' OUTPUT ROW 1
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC                                ' Column 1: Top C
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus                       ' Column 2: Middle C (Status)
-        wsOutput.Cells(outputRow, 3).Value = "GIA_NCR" & allAltSuffix           ' Column 3: Middle C (NCR + ALL/ATT)
-        wsOutput.Cells(outputRow, 4).Value = "."                                 ' Column 4: Middle C (.)
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"      ' Column 5: Lowest C
-        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID                     ' Column 6: N element (R-)
+        wsOutput.Cells(outputRow, 1).Value = topC
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus
+        wsOutput.Cells(outputRow, 3).Value = "GIA_NCR" & allAltSuffix
+        wsOutput.Cells(outputRow, 4).Value = "."
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"
+        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID
         outputRow = outputRow + 1
         
         '=========================================================================
         ' OUTPUT ROW 2
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC                                ' Column 1: Top C
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus                       ' Column 2: Middle C (Status)
-        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix           ' Column 3: Middle C (RAC + ALL/ATT)
-        wsOutput.Cells(outputRow, 4).Value = "GIA_ARAC" & allAltSuffix          ' Column 4: Middle C (ARAC + ALL/ATT)
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"     ' Column 5: Lowest C
-        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                           ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 1).Value = topC
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus
+        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix
+        wsOutput.Cells(outputRow, 4).Value = "GIA_ARAC" & allAltSuffix
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"
         outputRow = outputRow + 1
         
         '=========================================================================
         ' OUTPUT ROW 3
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC                                ' Column 1: Top C
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus                       ' Column 2: Middle C (Status)
-        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix           ' Column 3: Middle C (RAC + ALL/ATT)
-        wsOutput.Cells(outputRow, 4).Value = "GIA_SRAC" & allAltSuffix          ' Column 4: Middle C (SRAC + ALL/ATT)
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"     ' Column 5: Lowest C
-        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                           ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 1).Value = topC
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus
+        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix
+        wsOutput.Cells(outputRow, 4).Value = "GIA_SRAC" & allAltSuffix
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"
         outputRow = outputRow + 1
         
 NextInputRow:
     Next inputRow
     
-    ' Format output (optional)
+    ' Format output
     If outputRow > OUTPUT_START_ROW Then
         wsOutput.Range("A" & OUTPUT_START_ROW & ":F" & (outputRow - 1)).Font.Name = "Calibri"
         wsOutput.Range("A" & OUTPUT_START_ROW & ":F" & (outputRow - 1)).Font.Size = 11
         wsOutput.Columns("A:F").AutoFit
     End If
     
-    ' Success message with detailed statistics
-    Dim processedCount As Long
+    ' Show detailed results
     Dim totalRows As Long
+    Dim processedCount As Long
     totalRows = lastRow - INPUT_START_ROW + 1
     processedCount = totalRows - skippedCount
     
-    MsgBox "Transformation Complete!" & vbCrLf & vbCrLf & _
-           "Total Input Rows: " & totalRows & vbCrLf & _
-           "Rows Processed: " & processedCount & vbCrLf & _
-           "Rows Skipped: " & skippedCount & vbCrLf & _
-           "Output Rows Generated: " & (outputRow - OUTPUT_START_ROW) & vbCrLf & vbCrLf & _
-           "Rows were skipped if they didn't meet ALL criteria:" & vbCrLf & _
-           "  - Comments contains 'new'" & vbCrLf & _
-           "  - Level1 Name is Alpha/Kenamma/Naago" & vbCrLf & _
-           "  - Level5 Name doesn't contain Retained/Retd/Rtd", _
-           vbInformation, "Success"
+    debugMsg = debugMsg & vbCrLf & String(60, "=") & vbCrLf
+    debugMsg = debugMsg & "SUMMARY:" & vbCrLf
+    debugMsg = debugMsg & "Total Input Rows: " & totalRows & vbCrLf
+    debugMsg = debugMsg & "Rows Processed: " & processedCount & vbCrLf
+    debugMsg = debugMsg & "Rows Skipped: " & skippedCount & vbCrLf
+    debugMsg = debugMsg & "Output Rows Generated: " & (outputRow - OUTPUT_START_ROW)
+    
+    MsgBox debugMsg, vbInformation, "Transformation Complete"
     
 CleanExit:
-    ' Restore settings
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
     Exit Sub
@@ -214,99 +238,134 @@ CleanExit:
 ErrorHandler:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
-    MsgBox "Error: " & Err.Description & vbCrLf & vbCrLf & _
-           "Please check:" & vbCrLf & _
-           "1. Sheet names are correct (Input/Output)" & vbCrLf & _
-           "2. Data format is correct" & vbCrLf & _
-           "3. All required columns exist (A-K)" & vbCrLf & _
-           "4. No special characters in data", _
-           vbCritical, "Error"
+    MsgBox "Error on row " & inputRow & ": " & Err.Description & vbCrLf & vbCrLf & _
+           "Level5 ID: " & level5ID & vbCrLf & _
+           "Level5 Name: " & level5Name & vbCrLf & _
+           "Level2 Name: " & level2Name & vbCrLf & _
+           "Level1 Name: " & level1Name & vbCrLf & _
+           "Comments: " & comments, _
+           vbCritical, "Error Details"
+End Sub
+
+
+'=================================================================================
+' DIAGNOSTIC MACRO - Run this to check your data
+'=================================================================================
+Sub DiagnoseData()
+    Dim wsInput As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim msg As String
+    
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!" & vbCrLf & vbCrLf & _
+               "Please create a sheet named 'Input'.", vbCritical, "Error"
+        Exit Sub
+    End If
+    
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    msg = "DATA DIAGNOSIS" & vbCrLf & String(60, "=") & vbCrLf & vbCrLf
+    msg = msg & "Sheet: Input" & vbCrLf
+    msg = msg & "Last row with data: " & lastRow & vbCrLf
+    msg = msg & "Total data rows: " & (lastRow - 1) & vbCrLf & vbCrLf
+    
+    If lastRow < 2 Then
+        msg = msg & "ERROR: No data rows found!" & vbCrLf
+        msg = msg & "Please add data starting from Row 2."
+        MsgBox msg, vbCritical, "No Data"
+        Exit Sub
+    End If
+    
+    msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
+    
+    For i = 2 To Application.Min(lastRow, 6)
+        msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
+        msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
+        msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
+        msg = msg & "  Level2 Name: " & wsInput.Cells(i, 8).Value & vbCrLf
+        msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
+        msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
+        
+        ' Check filters
+        Dim hasNew As Boolean
+        Dim validLevel1 As Boolean
+        Dim notRetained As Boolean
+        Dim level5Name As String, level1Name As String, comments As String
+        
+        level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
+        level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
+        comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
+        
+        hasNew = InStr(1, comments, "NEW") > 0
+        validLevel1 = (level1Name = "ALPHA" Or level1Name = "KENAMMA" Or level1Name = "NAAGO")
+        notRetained = InStr(1, level5Name, "RETAINED") = 0 And _
+                      InStr(1, level5Name, "RETD") = 0 And _
+                      InStr(1, level5Name, "RTD") = 0
+        
+        msg = msg & "  ✓ Has 'new': " & hasNew & vbCrLf
+        msg = msg & "  ✓ Valid Level1: " & validLevel1 & vbCrLf
+        msg = msg & "  ✓ Not Retained: " & notRetained & vbCrLf
+        
+        If hasNew And validLevel1 And notRetained Then
+            msg = msg & "  → WILL BE PROCESSED ✓" & vbCrLf
+        Else
+            msg = msg & "  → WILL BE SKIPPED ✗" & vbCrLf
+        End If
+    Next i
+    
+    MsgBox msg, vbInformation, "Data Diagnosis"
 End Sub
 
 
 '=================================================================================
 ' CONFIGURABLE TOP C MAPPING FUNCTION
-' This function maps Level 2 Name to Top C value
-' To add/modify mappings, simply edit the entries in this function
 '=================================================================================
 Function GetTopCValue(level2Name As String) As String
-    '-------------------------------------------------------------------------
-    ' CONFIGURATION: Add or modify mappings below
-    ' Format: Case "[Level 2 Name]": GetTopCValue = "[Top C Value]"
-    '-------------------------------------------------------------------------
-    
     Dim cleanName As String
     cleanName = UCase(Trim(level2Name))
     
     Select Case cleanName
-        ' Central & Core Services
         Case "CENTRAL MANAGED OFFICES"
             GetTopCValue = "RBMI - MISC"
-        
         Case "CENTRAL MANAGED SERVICES"
             GetTopCValue = "RBMI - MISC"
-        
-        ' Communications & Brand
         Case "COMM BUSINESSES & MKTS"
             GetTopCValue = "RBMI - Group Communications & Brand (L3)"
-        
         Case "GROUP BRAND L2"
             GetTopCValue = "RBMI - Group Brand L2"
-        
         Case "GROUP EXTERNAL COMMUNICATION"
             GetTopCValue = "RBMI - Group External Communication"
-        
-        ' Governance & Compliance
         Case "ENTERPRISE TALENT BC"
             GetTopCValue = "RBMI - Enterprise Talent BC"
-        
         Case "GOVERNANCE"
             GetTopCValue = "RBMI - Governance"
-        
         Case "GRP CHIEF CNTRL OVERSIGHT OFF"
             GetTopCValue = "RBMI - Grp Chief Cntrl Oversight Off"
-        
         Case "INTERNAL AUDIT"
             GetTopCValue = "RBMI - Internal Audit (L2)"
-        
         Case "LEGAL"
             GetTopCValue = "RBMI - Legal (L2)"
-        
         Case "RISK & COMPLIANCE"
             GetTopCValue = "RBMI - Risk & Compliance (L2)"
-        
-        ' Finance & Support Functions
         Case "FINANCE FUNCTION"
             GetTopCValue = "RBMI - Finance Function"
-        
         Case "GLOBAL SUSTAINABILITY"
             GetTopCValue = "RBMI - Global Sustainability"
-        
         Case "PEOPLE"
             GetTopCValue = "RBMI - HR"
-        
-        '---------------------------------------------------------------------
-        ' ADD MORE MAPPINGS HERE AS NEEDED
-        ' Simply copy the pattern above and add new cases
-        '---------------------------------------------------------------------
-        ' Example:
-        ' Case "NEW DEPARTMENT NAME"
-        '     GetTopCValue = "RBMI - New Department Output"
-        '
-        ' Case "ANOTHER DEPARTMENT"
-        '     GetTopCValue = "RBMI - Another Department (L2)"
-        '---------------------------------------------------------------------
-        
-        ' Default case: If no match found, use standard format
         Case Else
             GetTopCValue = "RBMI - " & level2Name & " (L2)"
-    
     End Select
 End Function
 
 
 '=================================================================================
-' OPTIONAL: Quick Setup Macro - Creates Input and Output sheets with headers
+' SETUP SHEETS MACRO
 '=================================================================================
 Sub SetupSheets()
     Dim wsInput As Worksheet
@@ -315,7 +374,6 @@ Sub SetupSheets()
     
     Set wb = ThisWorkbook
     
-    ' Create or clear Input sheet
     On Error Resume Next
     Set wsInput = wb.Sheets("Input")
     On Error GoTo 0
@@ -327,7 +385,6 @@ Sub SetupSheets()
         wsInput.Cells.Clear
     End If
     
-    ' Create or clear Output sheet
     On Error Resume Next
     Set wsOutput = wb.Sheets("Output")
     On Error GoTo 0
@@ -353,7 +410,6 @@ Sub SetupSheets()
         .Cells(1, 10).Value = "Level 1 Name"
         .Cells(1, 11).Value = "Comments"
         
-        ' Format headers
         .Range("A1:K1").Font.Bold = True
         .Range("A1:K1").Interior.Color = RGB(255, 242, 204)
         .Columns("A:K").AutoFit
@@ -368,16 +424,13 @@ Sub SetupSheets()
         .Cells(1, 5).Value = "Lowest C"
         .Cells(1, 6).Value = "N element"
         
-        ' Format headers
         .Range("A1:F1").Font.Bold = True
         .Range("A1:F1").Interior.Color = RGB(255, 242, 204)
         .Columns("A:F").AutoFit
     End With
     
-    ' Add comprehensive sample data to Input sheet
+    ' Add sample data
     With wsInput
-        ' Sample with mapped Level 2 Names
-        ' Row 2: Central Managed offices + Alpha + New
         .Cells(2, 1).Value = "XXX001"
         .Cells(2, 2).Value = "Product_1 (std)"
         .Cells(2, 3).Value = "XXX001_A"
@@ -389,175 +442,15 @@ Sub SetupSheets()
         .Cells(2, 9).Value = "XXX001_D"
         .Cells(2, 10).Value = "Alpha"
         .Cells(2, 11).Value = "New"
-        
-        ' Row 3: People (HR) + Kenamma + New_11
-        .Cells(3, 1).Value = "XXX002"
-        .Cells(3, 2).Value = "Product_2 (Stewardship)"
-        .Cells(3, 3).Value = "XXX002_A"
-        .Cells(3, 4).Value = "Product_2"
-        .Cells(3, 5).Value = "XXX002_B"
-        .Cells(3, 6).Value = "Product_2"
-        .Cells(3, 7).Value = "XXX002_C"
-        .Cells(3, 8).Value = "People"
-        .Cells(3, 9).Value = "XXX002_D"
-        .Cells(3, 10).Value = "Kenamma"
-        .Cells(3, 11).Value = "New_11"
-        
-        ' Row 4: Finance Function + Naago + all New
-        .Cells(4, 1).Value = "XXX004"
-        .Cells(4, 2).Value = "Product_4"
-        .Cells(4, 3).Value = "XXX004_A"
-        .Cells(4, 4).Value = "Product_4"
-        .Cells(4, 5).Value = "XXX004_B"
-        .Cells(4, 6).Value = "Product_4"
-        .Cells(4, 7).Value = "XXX004_C"
-        .Cells(4, 8).Value = "Finance Function"
-        .Cells(4, 9).Value = "XXX004_D"
-        .Cells(4, 10).Value = "Naago"
-        .Cells(4, 11).Value = "all New"
-        
-        ' Row 5: Group Brand L2 + Alpha + New
-        .Cells(5, 1).Value = "XXX005"
-        .Cells(5, 2).Value = "Product_5"
-        .Cells(5, 3).Value = "XXX005_A"
-        .Cells(5, 4).Value = "Product_5"
-        .Cells(5, 5).Value = "XXX005_B"
-        .Cells(5, 6).Value = "Product_5"
-        .Cells(5, 7).Value = "XXX005_C"
-        .Cells(5, 8).Value = "Group Brand L2"
-        .Cells(5, 9).Value = "XXX005_D"
-        .Cells(5, 10).Value = "Alpha"
-        .Cells(5, 11).Value = "New"
-        
-        ' Row 6: Unmapped department (will use default)
-        .Cells(6, 1).Value = "XXX006"
-        .Cells(6, 2).Value = "Product_6"
-        .Cells(6, 3).Value = "XXX006_A"
-        .Cells(6, 4).Value = "Product_6"
-        .Cells(6, 5).Value = "XXX006_B"
-        .Cells(6, 6).Value = "Product_6"
-        .Cells(6, 7).Value = "XXX006_C"
-        .Cells(6, 8).Value = "Custom Department"
-        .Cells(6, 9).Value = "XXX006_D"
-        .Cells(6, 10).Value = "Naago"
-        .Cells(6, 11).Value = "New"
     End With
     
     MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
-           "✓ Input sheet created with headers and sample data" & vbCrLf & _
-           "✓ Output sheet created with headers" & vbCrLf & _
-           "  (Top C | Middle C | Middle C | Middle C | Lowest C | N element)" & vbCrLf & vbCrLf & _
-           "Sample data includes mapped Level 2 Names:" & vbCrLf & _
-           "  - Central Managed offices → RBMI - MISC" & vbCrLf & _
-           "  - People → RBMI - HR" & vbCrLf & _
-           "  - Finance Function → RBMI - Finance Function" & vbCrLf & _
-           "  - Group Brand L2 → RBMI - Group Brand L2" & vbCrLf & _
-           "  - Custom Department → RBMI - Custom Department (L2)" & vbCrLf & vbCrLf & _
-           "To add more mappings, edit the GetTopCValue function!" & vbCrLf & vbCrLf & _
-           "Run 'TransformInputToOutput' to test!", _
+           "✓ Input and Output sheets created" & vbCrLf & _
+           "✓ Sample data added" & vbCrLf & vbCrLf & _
+           "Next steps:" & vbCrLf & _
+           "1. Run 'DiagnoseData' to check your data" & vbCrLf & _
+           "2. Run 'TransformInputToOutput' to transform", _
            vbInformation, "Setup Complete"
     
-    ' Activate Input sheet
     wsInput.Activate
 End Sub
-
-
-'=================================================================================
-' UTILITY: View Current Top C Mappings
-' This macro displays all currently configured mappings
-'=================================================================================
-Sub ViewTopCMappings()
-    Dim msg As String
-    
-    msg = "CURRENT TOP C MAPPINGS" & vbCrLf & String(50, "=") & vbCrLf & vbCrLf
-    msg = msg & "Level 2 Name → Top C Value" & vbCrLf & vbCrLf
-    
-    msg = msg & "Central Managed offices → RBMI - MISC" & vbCrLf
-    msg = msg & "Central Managed Services → RBMI - MISC" & vbCrLf
-    msg = msg & "Comm Businesses & Mkts → RBMI - Group Communications & Brand (L3)" & vbCrLf
-    msg = msg & "Group Brand L2 → RBMI - Group Brand L2" & vbCrLf
-    msg = msg & "Group External Communication → RBMI - Group External Communication" & vbCrLf
-    msg = msg & "Enterprise Talent BC → RBMI - Enterprise Talent BC" & vbCrLf
-    msg = msg & "Governance → RBMI - Governance" & vbCrLf
-    msg = msg & "Grp Chief Cntrl Oversight Off → RBMI - Grp Chief Cntrl Oversight Off" & vbCrLf
-    msg = msg & "Internal Audit → RBMI - Internal Audit (L2)" & vbCrLf
-    msg = msg & "Legal → RBMI - Legal (L2)" & vbCrLf
-    msg = msg & "Risk & Compliance → RBMI - Risk & Compliance (L2)" & vbCrLf
-    msg = msg & "Finance Function → RBMI - Finance Function" & vbCrLf
-    msg = msg & "Global Sustainability → RBMI - Global Sustainability" & vbCrLf
-    msg = msg & "People → RBMI - HR" & vbCrLf
-    msg = msg & vbCrLf & "Any unmapped name → RBMI - [Name] (L2)" & vbCrLf & vbCrLf
-    msg = msg & "To add/modify mappings, edit the GetTopCValue function."
-    
-    MsgBox msg, vbInformation, "Top C Mappings"
-End Sub
-
-
-'=================================================================================
-' TRANSFORMATION RULES SUMMARY - FINAL VERSION WITH MAPPING
-'=================================================================================
-'
-' OUTPUT COLUMN HEADERS:
-' Column 1: Top C (mapped from Level 2 Name using GetTopCValue function)
-' Column 2: Middle C
-' Column 3: Middle C
-' Column 4: Middle C
-' Column 5: Lowest C
-' Column 6: N element
-'
-' TOP C MAPPING (Configurable in GetTopCValue function):
-' - Central Managed offices → RBMI - MISC
-' - Central Managed Services → RBMI - MISC
-' - Comm Businesses & Mkts → RBMI - Group Communications & Brand (L3)
-' - Group Brand L2 → RBMI - Group Brand L2
-' - Group External Communication → RBMI - Group External Communication
-' - Enterprise Talent BC → RBMI - Enterprise Talent BC
-' - Governance → RBMI - Governance
-' - Grp Chief Cntrl Oversight Off → RBMI - Grp Chief Cntrl Oversight Off
-' - Internal Audit → RBMI - Internal Audit (L2)
-' - Legal → RBMI - Legal (L2)
-' - Risk & Compliance → RBMI - Risk & Compliance (L2)
-' - Finance Function → RBMI - Finance Function
-' - Global Sustainability → RBMI - Global Sustainability
-' - People → RBMI - HR
-' - [Any other] → RBMI - [Level 2 Name] (L2)
-'
-' TO ADD NEW MAPPINGS:
-' 1. Open VBA Editor (Alt+F11)
-' 2. Find the GetTopCValue function
-' 3. Add a new Case statement in the Select Case block
-' 4. Format: Case "LEVEL 2 NAME": GetTopCValue = "Desired Output"
-' 5. Save and run
-'
-' FILTERING RULES (ALL MUST BE TRUE TO PROCESS):
-' 1. Comments column must contain "new" (case-insensitive, wildcard)
-' 2. Level1 Name must be "Alpha" OR "Kenamma" OR "Naago"
-' 3. Level5 Name must NOT contain "Retained", "Retd", or "Rtd"
-'
-' FOR EACH INPUT ROW THAT PASSES FILTERS, GENERATE 3 OUTPUT ROWS:
-'
-' Row 1:
-'   Column 1 (Top C): [Mapped value from GetTopCValue function]
-'   Column 2 (Middle C): "RBMI - GIA_ALL" if STD/STEWARDSHIP, else "RBMI - GIA_ATT"
-'   Column 3 (Middle C): "GIA_NCRALL" if STD/STEWARDSHIP, else "GIA_NCRATT"
-'   Column 4 (Middle C): "."
-'   Column 5 (Lowest C): "RBMI - [Level5 ID]_NCR"
-'   Column 6 (N element): "R-[Level5 ID]"
-'
-' Row 2:
-'   Column 1 (Top C): [Mapped value from GetTopCValue function]
-'   Column 2 (Middle C): "RBMI - GIA_ALL" if STD/STEWARDSHIP, else "RBMI - GIA_ATT"
-'   Column 3 (Middle C): "GIA_RACALL" if STD/STEWARDSHIP, else "GIA_RACATT"
-'   Column 4 (Middle C): "GIA_ARACALL" if STD/STEWARDSHIP, else "GIA_ARACATT"
-'   Column 5 (Lowest C): "RBMI - [Level5 ID]_ARAC"
-'   Column 6 (N element): "I-Dummy"
-'
-' Row 3:
-'   Column 1 (Top C): [Mapped value from GetTopCValue function]
-'   Column 2 (Middle C): "RBMI - GIA_ALL" if STD/STEWARDSHIP, else "RBMI - GIA_ATT"
-'   Column 3 (Middle C): "GIA_RACALL" if STD/STEWARDSHIP, else "GIA_RACATT"
-'   Column 4 (Middle C): "GIA_SRACALL" if STD/STEWARDSHIP, else "GIA_SRACATT"
-'   Column 5 (Lowest C): "RBMI - [Level5 ID]_SRAC"
-'   Column 6 (N element): "I-Dummy"
-'
-'=================================================================================
