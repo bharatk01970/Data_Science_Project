@@ -1,8 +1,8 @@
 Sub TransformInputToOutput()
     '=================================================================================
-    ' EXCEL TRANSFORMATION MACRO - DIAGNOSTIC VERSION
+    ' EXCEL TRANSFORMATION MACRO - CORRECTED VERSION
     ' Purpose: Transform one input row into three output rows with specific rules
-    ' Includes: Debug mode to troubleshoot issues
+    ' Fixed: Level2 Name filter logic (changed from AND to OR)
     '=================================================================================
     
     Dim wsInput As Worksheet
@@ -45,22 +45,18 @@ Sub TransformInputToOutput()
     On Error Resume Next
     Set wsInput = ThisWorkbook.Sheets(INPUT_SHEET)
     If wsInput Is Nothing Then
-        MsgBox "ERROR: 'Input' sheet not found!" & vbCrLf & vbCrLf & _
-               "Please create a sheet named 'Input' or run SetupSheets macro.", _
-               vbCritical, "Sheet Not Found"
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Sheet Not Found"
         GoTo CleanExit
     End If
     
     Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
     If wsOutput Is Nothing Then
-        MsgBox "ERROR: 'Output' sheet not found!" & vbCrLf & vbCrLf & _
-               "Please create a sheet named 'Output' or run SetupSheets macro.", _
-               vbCritical, "Sheet Not Found"
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
         GoTo CleanExit
     End If
     On Error GoTo ErrorHandler
     
-    ' Clear previous output data (keep headers)
+    ' Clear previous output data
     lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
     If lastRow >= OUTPUT_START_ROW Then
         wsOutput.Range("A" & OUTPUT_START_ROW & ":F" & lastRow).ClearContents
@@ -118,7 +114,39 @@ Sub TransformInputToOutput()
         End If
         
         '=========================================================================
-        ' FILTER 2: Level1 Name must be "Alpha", "Kenamma", or "Naago"
+        ' FILTER 2: Level2 Name must be from the allowed list
+        ' CORRECTED: Using OR logic instead of AND
+        '=========================================================================
+        If shouldTransform Then
+            Dim isValidLevel2 As Boolean
+            Dim level2Upper As String
+            level2Upper = UCase(level2Name)
+            
+            ' Check if Level2 Name matches any allowed value
+            isValidLevel2 = False
+            If level2Upper = "CENTRAL MANAGED OFFICES" Then isValidLevel2 = True
+            If level2Upper = "CENTRAL MANAGED SERVICES" Then isValidLevel2 = True
+            If level2Upper = "COMM BUSINESSES & MKTS" Then isValidLevel2 = True
+            If level2Upper = "ENTERPRISE TALENT BC" Then isValidLevel2 = True
+            If level2Upper = "FINANCE FUNCTION" Then isValidLevel2 = True
+            If level2Upper = "GLOBAL SUSTAINABILITY" Then isValidLevel2 = True
+            If level2Upper = "GOVERNANCE" Then isValidLevel2 = True
+            If level2Upper = "GROUP BRAND L2" Then isValidLevel2 = True
+            If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then isValidLevel2 = True
+            If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then isValidLevel2 = True
+            If level2Upper = "INTERNAL AUDIT" Then isValidLevel2 = True
+            If level2Upper = "LEGAL" Then isValidLevel2 = True
+            If level2Upper = "PEOPLE" Then isValidLevel2 = True
+            If level2Upper = "RISK & COMPLIANCE" Then isValidLevel2 = True
+            
+            If Not isValidLevel2 Then
+                shouldTransform = False
+                skipReason = "Level2 Name not from list (value: '" & level2Name & "')"
+            End If
+        End If
+        
+        '=========================================================================
+        ' FILTER 3: Level1 Name must be "Alpha", "Kenamma", or "Naago"
         '=========================================================================
         If shouldTransform Then
             If UCase(level1Name) <> "ALPHA" And _
@@ -130,7 +158,7 @@ Sub TransformInputToOutput()
         End If
         
         '=========================================================================
-        ' FILTER 3: Exclude if Level5 Name contains "Retained", "Retd", or "Rtd"
+        ' FILTER 4: Exclude if Level5 Name contains "Retained", "Retd", or "Rtd"
         '=========================================================================
         If shouldTransform Then
             If InStr(1, UCase(level5Name), "RETAINED") > 0 Or _
@@ -238,87 +266,7 @@ CleanExit:
 ErrorHandler:
     Application.ScreenUpdating = True
     Application.Calculation = xlCalculationAutomatic
-    MsgBox "Error on row " & inputRow & ": " & Err.Description & vbCrLf & vbCrLf & _
-           "Level5 ID: " & level5ID & vbCrLf & _
-           "Level5 Name: " & level5Name & vbCrLf & _
-           "Level2 Name: " & level2Name & vbCrLf & _
-           "Level1 Name: " & level1Name & vbCrLf & _
-           "Comments: " & comments, _
-           vbCritical, "Error Details"
-End Sub
-
-
-'=================================================================================
-' DIAGNOSTIC MACRO - Run this to check your data
-'=================================================================================
-Sub DiagnoseData()
-    Dim wsInput As Worksheet
-    Dim lastRow As Long
-    Dim i As Long
-    Dim msg As String
-    
-    On Error Resume Next
-    Set wsInput = ThisWorkbook.Sheets("Input")
-    On Error GoTo 0
-    
-    If wsInput Is Nothing Then
-        MsgBox "ERROR: 'Input' sheet not found!" & vbCrLf & vbCrLf & _
-               "Please create a sheet named 'Input'.", vbCritical, "Error"
-        Exit Sub
-    End If
-    
-    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
-    
-    msg = "DATA DIAGNOSIS" & vbCrLf & String(60, "=") & vbCrLf & vbCrLf
-    msg = msg & "Sheet: Input" & vbCrLf
-    msg = msg & "Last row with data: " & lastRow & vbCrLf
-    msg = msg & "Total data rows: " & (lastRow - 1) & vbCrLf & vbCrLf
-    
-    If lastRow < 2 Then
-        msg = msg & "ERROR: No data rows found!" & vbCrLf
-        msg = msg & "Please add data starting from Row 2."
-        MsgBox msg, vbCritical, "No Data"
-        Exit Sub
-    End If
-    
-    msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
-    
-    For i = 2 To Application.Min(lastRow, 6)
-        msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
-        msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
-        msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
-        msg = msg & "  Level2 Name: " & wsInput.Cells(i, 8).Value & vbCrLf
-        msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
-        msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
-        
-        ' Check filters
-        Dim hasNew As Boolean
-        Dim validLevel1 As Boolean
-        Dim notRetained As Boolean
-        Dim level5Name As String, level1Name As String, comments As String
-        
-        level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
-        level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
-        comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
-        
-        hasNew = InStr(1, comments, "NEW") > 0
-        validLevel1 = (level1Name = "ALPHA" Or level1Name = "KENAMMA" Or level1Name = "NAAGO")
-        notRetained = InStr(1, level5Name, "RETAINED") = 0 And _
-                      InStr(1, level5Name, "RETD") = 0 And _
-                      InStr(1, level5Name, "RTD") = 0
-        
-        msg = msg & "  ✓ Has 'new': " & hasNew & vbCrLf
-        msg = msg & "  ✓ Valid Level1: " & validLevel1 & vbCrLf
-        msg = msg & "  ✓ Not Retained: " & notRetained & vbCrLf
-        
-        If hasNew And validLevel1 And notRetained Then
-            msg = msg & "  → WILL BE PROCESSED ✓" & vbCrLf
-        Else
-            msg = msg & "  → WILL BE SKIPPED ✗" & vbCrLf
-        End If
-    Next i
-    
-    MsgBox msg, vbInformation, "Data Diagnosis"
+    MsgBox "Error on row " & inputRow & ": " & Err.Description, vbCritical, "Error"
 End Sub
 
 
@@ -365,6 +313,95 @@ End Function
 
 
 '=================================================================================
+' DIAGNOSTIC MACRO
+'=================================================================================
+Sub DiagnoseData()
+    Dim wsInput As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim msg As String
+    
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Error"
+        Exit Sub
+    End If
+    
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    msg = "DATA DIAGNOSIS" & vbCrLf & String(60, "=") & vbCrLf & vbCrLf
+    msg = msg & "Last row: " & lastRow & vbCrLf
+    msg = msg & "Total data rows: " & (lastRow - 1) & vbCrLf & vbCrLf
+    
+    If lastRow < 2 Then
+        msg = msg & "ERROR: No data rows found!"
+        MsgBox msg, vbCritical, "No Data"
+        Exit Sub
+    End If
+    
+    msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
+    
+    For i = 2 To Application.Min(lastRow, 6)
+        msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
+        msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
+        msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
+        msg = msg & "  Level2 Name: " & wsInput.Cells(i, 8).Value & vbCrLf
+        msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
+        msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
+        
+        Dim hasNew, validLevel2, validLevel1, notRetained As Boolean
+        Dim level5Name, level2Name, level1Name, comments As String
+        Dim level2Upper As String
+        
+        level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
+        level2Name = Trim(CStr(wsInput.Cells(i, 8).Value))
+        level2Upper = UCase(level2Name)
+        level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
+        comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
+        
+        hasNew = InStr(1, comments, "NEW") > 0
+        
+        validLevel2 = False
+        If level2Upper = "CENTRAL MANAGED OFFICES" Then validLevel2 = True
+        If level2Upper = "CENTRAL MANAGED SERVICES" Then validLevel2 = True
+        If level2Upper = "COMM BUSINESSES & MKTS" Then validLevel2 = True
+        If level2Upper = "ENTERPRISE TALENT BC" Then validLevel2 = True
+        If level2Upper = "FINANCE FUNCTION" Then validLevel2 = True
+        If level2Upper = "GLOBAL SUSTAINABILITY" Then validLevel2 = True
+        If level2Upper = "GOVERNANCE" Then validLevel2 = True
+        If level2Upper = "GROUP BRAND L2" Then validLevel2 = True
+        If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then validLevel2 = True
+        If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then validLevel2 = True
+        If level2Upper = "INTERNAL AUDIT" Then validLevel2 = True
+        If level2Upper = "LEGAL" Then validLevel2 = True
+        If level2Upper = "PEOPLE" Then validLevel2 = True
+        If level2Upper = "RISK & COMPLIANCE" Then validLevel2 = True
+        
+        validLevel1 = (level1Name = "ALPHA" Or level1Name = "KENAMMA" Or level1Name = "NAAGO")
+        notRetained = InStr(1, level5Name, "RETAINED") = 0 And _
+                      InStr(1, level5Name, "RETD") = 0 And _
+                      InStr(1, level5Name, "RTD") = 0
+        
+        msg = msg & "  ✓ Has 'new': " & hasNew & vbCrLf
+        msg = msg & "  ✓ Valid Level2: " & validLevel2 & vbCrLf
+        msg = msg & "  ✓ Valid Level1: " & validLevel1 & vbCrLf
+        msg = msg & "  ✓ Not Retained: " & notRetained & vbCrLf
+        
+        If hasNew And validLevel2 And validLevel1 And notRetained Then
+            msg = msg & "  → WILL BE PROCESSED ✓" & vbCrLf
+        Else
+            msg = msg & "  → WILL BE SKIPPED ✗" & vbCrLf
+        End If
+    Next i
+    
+    MsgBox msg, vbInformation, "Data Diagnosis"
+End Sub
+
+
+'=================================================================================
 ' SETUP SHEETS MACRO
 '=================================================================================
 Sub SetupSheets()
@@ -396,7 +433,6 @@ Sub SetupSheets()
         wsOutput.Cells.Clear
     End If
     
-    ' Setup Input Headers
     With wsInput
         .Cells(1, 1).Value = "Level 5 ID"
         .Cells(1, 2).Value = "Level 5 Name"
@@ -415,7 +451,6 @@ Sub SetupSheets()
         .Columns("A:K").AutoFit
     End With
     
-    ' Setup Output Headers
     With wsOutput
         .Cells(1, 1).Value = "Top C"
         .Cells(1, 2).Value = "Middle C"
@@ -429,7 +464,6 @@ Sub SetupSheets()
         .Columns("A:F").AutoFit
     End With
     
-    ' Add sample data
     With wsInput
         .Cells(2, 1).Value = "XXX001"
         .Cells(2, 2).Value = "Product_1 (std)"
@@ -438,19 +472,12 @@ Sub SetupSheets()
         .Cells(2, 5).Value = "XXX001_B"
         .Cells(2, 6).Value = "Product_1"
         .Cells(2, 7).Value = "XXX001_C"
-        .Cells(2, 8).Value = "Central Managed offices"
+        .Cells(2, 8).Value = "People"
         .Cells(2, 9).Value = "XXX001_D"
         .Cells(2, 10).Value = "Alpha"
         .Cells(2, 11).Value = "New"
     End With
     
-    MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
-           "✓ Input and Output sheets created" & vbCrLf & _
-           "✓ Sample data added" & vbCrLf & vbCrLf & _
-           "Next steps:" & vbCrLf & _
-           "1. Run 'DiagnoseData' to check your data" & vbCrLf & _
-           "2. Run 'TransformInputToOutput' to transform", _
-           vbInformation, "Setup Complete"
-    
+    MsgBox "Setup Complete! Sample data will pass all filters.", vbInformation, "Setup Complete"
     wsInput.Activate
 End Sub
