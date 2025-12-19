@@ -1,8 +1,8 @@
 Sub TransformInputToOutput()
     '=================================================================================
-    ' EXCEL TRANSFORMATION MACRO - CORRECTED VERSION
+    ' EXCEL TRANSFORMATION MACRO - FINAL VERSION WITH L2X MAPPING
     ' Purpose: Transform one input row into three output rows with specific rules
-    ' Fixed: Level2 Name filter logic (changed from AND to OR)
+    ' Updated: Middle C columns now use L2X mapping dynamically
     '=================================================================================
     
     Dim wsInput As Worksheet
@@ -22,6 +22,7 @@ Sub TransformInputToOutput()
     Dim level1Name As String
     Dim comments As String
     Dim topC As String
+    Dim l2x As String
     Dim middleCStatus As String
     Dim isStandard As Boolean
     Dim allAltSuffix As String
@@ -115,7 +116,6 @@ Sub TransformInputToOutput()
         
         '=========================================================================
         ' FILTER 2: Level2 Name must be from the allowed list
-        ' CORRECTED: Using OR logic instead of AND
         '=========================================================================
         If shouldTransform Then
             Dim isValidLevel2 As Boolean
@@ -182,10 +182,11 @@ Sub TransformInputToOutput()
         ' ROW PASSED ALL FILTERS - PROCEED WITH TRANSFORMATION
         '=========================================================================
         
-        ' Calculate Top C using mapping function
+        ' Get Top C and L2X values using mapping functions
         topC = GetTopCValue(level2Name)
+        l2x = GetL2XValue(level2Name)
         
-        ' Calculate Middle C Status
+        ' Calculate STD/STEWARDSHIP and ALL/ATT suffix
         isStandard = False
         If InStr(1, UCase(level5Name), "(STD)") > 0 Or _
            InStr(1, UCase(level5Name), "(STEWARDSHIP)") > 0 Then
@@ -193,44 +194,45 @@ Sub TransformInputToOutput()
         End If
         
         If isStandard Then
-            middleCStatus = "RBMI - GIA_ALL"
             allAltSuffix = "ALL"
         Else
-            middleCStatus = "RBMI - GIA_ATT"
             allAltSuffix = "ATT"
         End If
+        
+        ' Build Middle C Status dynamically using L2X
+        middleCStatus = "RBMI - " & l2x & "_" & allAltSuffix
         
         '=========================================================================
         ' OUTPUT ROW 1
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus
-        wsOutput.Cells(outputRow, 3).Value = "GIA_NCR" & allAltSuffix
-        wsOutput.Cells(outputRow, 4).Value = "."
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"
-        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_NCR" & allAltSuffix            ' Column 3: Middle C (L2X_NCR + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = "."                                     ' Column 4: Middle C (.)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"          ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID                         ' Column 6: N element (R-)
         outputRow = outputRow + 1
         
         '=========================================================================
         ' OUTPUT ROW 2
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus
-        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix
-        wsOutput.Cells(outputRow, 4).Value = "GIA_ARAC" & allAltSuffix
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"
-        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_ARAC" & allAltSuffix           ' Column 4: Middle C (L2X_ARAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
         outputRow = outputRow + 1
         
         '=========================================================================
         ' OUTPUT ROW 3
         '=========================================================================
-        wsOutput.Cells(outputRow, 1).Value = topC
-        wsOutput.Cells(outputRow, 2).Value = middleCStatus
-        wsOutput.Cells(outputRow, 3).Value = "GIA_RAC" & allAltSuffix
-        wsOutput.Cells(outputRow, 4).Value = "GIA_SRAC" & allAltSuffix
-        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"
-        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_SRAC" & allAltSuffix           ' Column 4: Middle C (L2X_SRAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
         outputRow = outputRow + 1
         
 NextInputRow:
@@ -313,6 +315,88 @@ End Function
 
 
 '=================================================================================
+' CONFIGURABLE L2X MAPPING FUNCTION
+' This function maps Level 2 Name to L2X code for Middle C columns
+' To add/modify mappings, simply edit the entries in this function
+'=================================================================================
+Function GetL2XValue(level2Name As String) As String
+    '-------------------------------------------------------------------------
+    ' CONFIGURATION: Add or modify L2X mappings below
+    ' Format: Case "[Level 2 Name]": GetL2XValue = "[L2X Code]"
+    '-------------------------------------------------------------------------
+    
+    Dim cleanName As String
+    cleanName = UCase(Trim(level2Name))
+    
+    Select Case cleanName
+        ' Central & Core Services
+        Case "CENTRAL MANAGED OFFICES"
+            GetL2XValue = "CMO"
+        
+        Case "CENTRAL MANAGED SERVICES"
+            GetL2XValue = "CMO"
+        
+        ' Communications & Brand
+        Case "COMM BUSINESSES & MKTS"
+            GetL2XValue = "CPA"
+        
+        Case "GROUP BRAND L2"
+            GetL2XValue = "GBD"
+        
+        Case "GROUP EXTERNAL COMMUNICATION"
+            GetL2XValue = "GEC"
+        
+        ' Governance & Compliance
+        Case "ENTERPRISE TALENT BC"
+            GetL2XValue = "EPT"
+        
+        Case "GOVERNANCE"
+            GetL2XValue = "SCY"
+        
+        Case "GRP CHIEF CNTRL OVERSIGHT OFF"
+            GetL2XValue = "GCC"
+        
+        Case "INTERNAL AUDIT"
+            GetL2XValue = "GIA"
+        
+        Case "LEGAL"
+            GetL2XValue = "LEG"
+        
+        Case "RISK & COMPLIANCE"
+            GetL2XValue = "RIS"
+        
+        ' Finance & Support Functions
+        Case "FINANCE FUNCTION"
+            GetL2XValue = "FIN"
+        
+        Case "GLOBAL SUSTAINABILITY"
+            GetL2XValue = "CSR"
+        
+        Case "PEOPLE"
+            GetL2XValue = "HR_"
+        
+        '---------------------------------------------------------------------
+        ' ADD MORE L2X MAPPINGS HERE AS NEEDED
+        ' Simply copy the pattern above and add new cases
+        '---------------------------------------------------------------------
+        ' Example:
+        ' Case "NEW DEPARTMENT NAME"
+        '     GetL2XValue = "XXX"
+        '---------------------------------------------------------------------
+        
+        ' Default case: If no match found, use first 3 characters
+        Case Else
+            If Len(level2Name) >= 3 Then
+                GetL2XValue = UCase(Left(level2Name, 3))
+            Else
+                GetL2XValue = UCase(level2Name)
+            End If
+    
+    End Select
+End Function
+
+
+'=================================================================================
 ' DIAGNOSTIC MACRO
 '=================================================================================
 Sub DiagnoseData()
@@ -345,19 +429,22 @@ Sub DiagnoseData()
     msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
     
     For i = 2 To Application.Min(lastRow, 6)
+        Dim level2Name As String
+        level2Name = Trim(CStr(wsInput.Cells(i, 8).Value))
+        
         msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
         msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
         msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
-        msg = msg & "  Level2 Name: " & wsInput.Cells(i, 8).Value & vbCrLf
+        msg = msg & "  Level2 Name: " & level2Name & vbCrLf
+        msg = msg & "  L2X Mapping: " & GetL2XValue(level2Name) & vbCrLf
         msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
         msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
         
         Dim hasNew, validLevel2, validLevel1, notRetained As Boolean
-        Dim level5Name, level2Name, level1Name, comments As String
+        Dim level5Name, level1Name, comments As String
         Dim level2Upper As String
         
         level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
-        level2Name = Trim(CStr(wsInput.Cells(i, 8).Value))
         level2Upper = UCase(level2Name)
         level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
         comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
@@ -398,6 +485,36 @@ Sub DiagnoseData()
     Next i
     
     MsgBox msg, vbInformation, "Data Diagnosis"
+End Sub
+
+
+'=================================================================================
+' UTILITY: View Current L2X Mappings
+'=================================================================================
+Sub ViewL2XMappings()
+    Dim msg As String
+    
+    msg = "CURRENT L2X MAPPINGS" & vbCrLf & String(50, "=") & vbCrLf & vbCrLf
+    msg = msg & "Level 2 Name → L2X Code" & vbCrLf & vbCrLf
+    
+    msg = msg & "Central Managed offices → CMO" & vbCrLf
+    msg = msg & "Central Managed Services → CMO" & vbCrLf
+    msg = msg & "Comm Businesses & Mkts → CPA" & vbCrLf
+    msg = msg & "Group Brand L2 → GBD" & vbCrLf
+    msg = msg & "Group External Communication → GEC" & vbCrLf
+    msg = msg & "Enterprise Talent BC → EPT" & vbCrLf
+    msg = msg & "Governance → SCY" & vbCrLf
+    msg = msg & "Grp Chief Cntrl Oversight Off → GCC" & vbCrLf
+    msg = msg & "Internal Audit → GIA" & vbCrLf
+    msg = msg & "Legal → LEG" & vbCrLf
+    msg = msg & "Risk & Compliance → RIS" & vbCrLf
+    msg = msg & "Finance Function → FIN" & vbCrLf
+    msg = msg & "Global Sustainability → CSR" & vbCrLf
+    msg = msg & "People → HR_" & vbCrLf
+    msg = msg & vbCrLf & "Any unmapped name → First 3 chars" & vbCrLf & vbCrLf
+    msg = msg & "To add/modify mappings, edit the GetL2XValue function."
+    
+    MsgBox msg, vbInformation, "L2X Mappings"
 End Sub
 
 
@@ -478,6 +595,9 @@ Sub SetupSheets()
         .Cells(2, 11).Value = "New"
     End With
     
-    MsgBox "Setup Complete! Sample data will pass all filters.", vbInformation, "Setup Complete"
+    MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
+           "Sample output will use L2X mapping:" & vbCrLf & _
+           "People → HR_ (used in Middle C columns)", _
+           vbInformation, "Setup Complete"
     wsInput.Activate
 End Sub
