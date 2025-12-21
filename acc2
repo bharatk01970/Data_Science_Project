@@ -519,6 +519,145 @@ End Sub
 
 
 '=================================================================================
+' SORT OUTPUT DATA - Separate Macro for Sorting
+' Sorts the output data by Lowest C column in the order: 
+' ALL NCR rows first, then ALL SRAC rows, then ALL ARAC rows
+'=================================================================================
+Sub SortOutputData()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim dataRange As Range
+    Dim i As Long
+    Dim lowestCValue As String
+    Dim sortKey As Long
+    
+    ' Configuration
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set worksheet reference
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    ' Find last row with data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "E").End(xlUp).Row
+    
+    ' Check if there's data to sort
+    If lastRow < OUTPUT_START_ROW Then
+        MsgBox "No output data found to sort.", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Add a temporary helper column for custom sort order
+    Dim helperCol As Long
+    helperCol = 7  ' Column G (after N element in column F)
+    
+    ' Add header for helper column
+    wsOutput.Cells(1, helperCol).Value = "Sort_Key"
+    
+    ' Assign sort keys based on NCR, SRAC, ARAC pattern
+    ' This ensures: ALL NCR first, then ALL SRAC, then ALL ARAC
+    For i = OUTPUT_START_ROW To lastRow
+        lowestCValue = UCase(Trim(wsOutput.Cells(i, 5).Value))  ' Column E - Lowest C
+        
+        ' Determine sort key based on suffix ONLY (ignore Level5 ID)
+        If InStr(lowestCValue, "_NCR") > 0 Then
+            sortKey = 1  ' ALL NCR rows come first
+        ElseIf InStr(lowestCValue, "_SRAC") > 0 Then
+            sortKey = 2  ' ALL SRAC rows come second
+        ElseIf InStr(lowestCValue, "_ARAC") > 0 Then
+            sortKey = 3  ' ALL ARAC rows come third
+        Else
+            sortKey = 4  ' Unknown pattern goes last
+        End If
+        
+        wsOutput.Cells(i, helperCol).Value = sortKey
+    Next i
+    
+    ' Define the data range including helper column
+    Set dataRange = wsOutput.Range("A" & OUTPUT_START_ROW & ":G" & lastRow)
+    
+    ' Perform the sort with ONLY ONE sort key (Sort_Key column)
+    ' This groups all NCR together, all SRAC together, all ARAC together
+    With wsOutput.Sort
+        .SortFields.Clear
+        
+        ' Sort ONLY by helper column (Sort_Key)
+        ' This ensures ALL NCR first, ALL SRAC second, ALL ARAC third
+        .SortFields.Add Key:=wsOutput.Range("G" & OUTPUT_START_ROW & ":G" & lastRow), _
+                       SortOn:=xlSortOnValues, _
+                       Order:=xlAscending, _
+                       DataOption:=xlSortNormal
+        
+        .SetRange dataRange
+        .Header = xlNo
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+    ' Delete the helper column
+    wsOutput.Columns(helperCol).Delete
+    
+    ' Auto-fit columns
+    wsOutput.Columns("A:F").AutoFit
+    
+    ' Count rows in each category for the message
+    Dim ncrCount, sracCount, aracCount As Long
+    ncrCount = 0: sracCount = 0: aracCount = 0
+    
+    For i = OUTPUT_START_ROW To lastRow
+        lowestCValue = UCase(Trim(wsOutput.Cells(i, 5).Value))
+        If InStr(lowestCValue, "_NCR") > 0 Then
+            ncrCount = ncrCount + 1
+        ElseIf InStr(lowestCValue, "_SRAC") > 0 Then
+            sracCount = sracCount + 1
+        ElseIf InStr(lowestCValue, "_ARAC") > 0 Then
+            aracCount = aracCount + 1
+        End If
+    Next i
+    
+    MsgBox "Output data sorted successfully!" & vbCrLf & vbCrLf & _
+           "Sort order:" & vbCrLf & _
+           "1. ALL NCR rows (" & ncrCount & " rows)" & vbCrLf & _
+           "2. ALL SRAC rows (" & sracCount & " rows)" & vbCrLf & _
+           "3. ALL ARAC rows (" & aracCount & " rows)" & vbCrLf & vbCrLf & _
+           "Total rows sorted: " & (lastRow - OUTPUT_START_ROW + 1), _
+           vbInformation, "Sort Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error sorting data: " & Err.Description, vbCritical, "Sort Error"
+End Sub
+
+
+'=================================================================================
+' COMBINED MACRO - Transform and Sort
+' Runs transformation followed by automatic sorting
+'=================================================================================
+Sub TransformAndSort()
+    ' Run the transformation
+    Call TransformInputToOutput
+    
+    ' Wait a moment for the transformation to complete
+    DoEvents
+    
+    ' Run the sort
+    Call SortOutputData
+End Sub
+
+
+'=================================================================================
 ' SETUP SHEETS MACRO
 '=================================================================================
 Sub SetupSheets()
