@@ -642,8 +642,87 @@ End Sub
 
 
 '=================================================================================
-' COMBINED MACRO - Transform and Sort
-' Runs transformation followed by automatic sorting
+' HIGHLIGHT CHANGES IN MIDDLE C COLUMNS
+' Highlights cells in columns 2, 3, 4 where values change from previous row
+' Applies light green color to changed cells
+'=================================================================================
+Sub HighlightMiddleCChanges()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim currentRow As Long
+    Dim col As Long
+    Dim currentValue As String
+    Dim previousValue As String
+    Dim changesCount As Long
+    
+    ' Configuration
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    Const LIGHT_GREEN = 5296274  ' RGB(226, 239, 218) - Light green color
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set worksheet reference
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    ' Find last row with data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to highlight
+    If lastRow < OUTPUT_START_ROW + 1 Then
+        MsgBox "Not enough data to compare (need at least 2 rows).", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Clear any existing highlighting in columns 2, 3, 4
+    wsOutput.Range("B" & OUTPUT_START_ROW & ":D" & lastRow).Interior.ColorIndex = xlNone
+    
+    changesCount = 0
+    
+    ' Loop through each row starting from the second data row
+    For currentRow = OUTPUT_START_ROW + 1 To lastRow
+        
+        ' Check columns 2, 3, 4 (B, C, D) - the Middle C columns
+        For col = 2 To 4
+            currentValue = Trim(UCase(wsOutput.Cells(currentRow, col).Value))
+            previousValue = Trim(UCase(wsOutput.Cells(currentRow - 1, col).Value))
+            
+            ' Compare current value with previous row
+            If currentValue <> previousValue And currentValue <> "" Then
+                ' Highlight the cell with light green
+                wsOutput.Cells(currentRow, col).Interior.Color = LIGHT_GREEN
+                changesCount = changesCount + 1
+            End If
+        Next col
+        
+    Next currentRow
+    
+    MsgBox "Highlighting complete!" & vbCrLf & vbCrLf & _
+           "Total cells highlighted: " & changesCount & vbCrLf & _
+           "Color: Light Green" & vbCrLf & vbCrLf & _
+           "Changes highlighted in columns:" & vbCrLf & _
+           "- Column 2 (Middle C - Status)" & vbCrLf & _
+           "- Column 3 (Middle C - Code 1)" & vbCrLf & _
+           "- Column 4 (Middle C - Code 2)", _
+           vbInformation, "Highlighting Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error highlighting changes: " & Err.Description, vbCritical, "Error"
+End Sub
+
+
+'=================================================================================
+' COMBINED MACRO - Transform, Sort, and Highlight
+' Runs transformation, sorting, and highlighting automatically
 '=================================================================================
 Sub TransformAndSort()
     ' Run the transformation
@@ -654,6 +733,37 @@ Sub TransformAndSort()
     
     ' Run the sort
     Call SortOutputData
+    
+    ' Wait a moment for the sort to complete
+    DoEvents
+    
+    ' Run the highlighting
+    Call HighlightMiddleCChanges
+End Sub
+
+
+'=================================================================================
+' CLEAR HIGHLIGHTING - Remove all highlighting from Middle C columns
+'=================================================================================
+Sub ClearHighlighting()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets("Output")
+    On Error GoTo 0
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow >= 2 Then
+        wsOutput.Range("B2:D" & lastRow).Interior.ColorIndex = xlNone
+        MsgBox "All highlighting cleared from Middle C columns.", vbInformation, "Clear Complete"
+    End If
 End Sub
 
 
