@@ -522,16 +522,17 @@ End Sub
 
 
 '=================================================================================
-' ENHANCED SORT OUTPUT DATA WITH ALL/ATT ORDERING
-' Sorts by: TopC → ALL/ATT → NCR/SRAC/ARAC → Hierarchical Middle C
+' ENHANCED SORT OUTPUT DATA - MIDDLE C HIERARCHY ONLY
+' Sorts by: TopC → ALL/ATT (Col 2) → Middle C Hierarchy (Cols 3,4)
+' Does NOT sort by Lowest C (NCR/SRAC/ARAC)
 '=================================================================================
 Sub SortOutputData()
     Dim wsOutput As Worksheet
     Dim lastRow As Long
     Dim dataRange As Range
     Dim i As Long
-    Dim middleCValue As String
-    Dim sortKey1, sortKey2, sortKey3 As Long
+    Dim col2Value, col3Value, col4Value As String
+    Dim sortKey1, sortKey2, sortKey3, sortKey4 As String
     
     Const OUTPUT_SHEET = "Output"
     Const OUTPUT_START_ROW = 2
@@ -547,67 +548,85 @@ Sub SortOutputData()
         Exit Sub
     End If
     
-    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "E").End(xlUp).Row
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
     
     If lastRow < OUTPUT_START_ROW Then
         MsgBox "No output data found to sort.", vbInformation, "No Data"
         Exit Sub
     End If
     
-    ' Add helper columns H, I, J for multi-level sorting
+    ' Add helper columns for sorting (H, I, J, K)
     wsOutput.Cells(1, 8).Value = "Sort_TopC"
     wsOutput.Cells(1, 9).Value = "Sort_ALL_ATT"
-    wsOutput.Cells(1, 10).Value = "Sort_NCR_Type"
+    wsOutput.Cells(1, 10).Value = "Sort_Col3"
+    wsOutput.Cells(1, 11).Value = "Sort_Col4"
     
-    ' Assign sort keys
+    ' Assign sort keys based on Middle C columns only
     For i = OUTPUT_START_ROW To lastRow
-        Dim topCValue, lowestCValue As String
-        topCValue = UCase(Trim(wsOutput.Cells(i, 1).Value))
-        middleCValue = UCase(Trim(wsOutput.Cells(i, 2).Value))
-        lowestCValue = UCase(Trim(wsOutput.Cells(i, 5).Value))
+        Dim topCValue As String
+        topCValue = Trim(wsOutput.Cells(i, 1).Value)
+        col2Value = UCase(Trim(wsOutput.Cells(i, 2).Value))
+        col3Value = UCase(Trim(wsOutput.Cells(i, 3).Value))
+        col4Value = UCase(Trim(wsOutput.Cells(i, 4).Value))
         
-        ' Sort Key 1: TopC value (alphabetical)
+        ' Sort Key 1: TopC (alphabetical)
         wsOutput.Cells(i, 8).Value = topCValue
         
-        ' Sort Key 2: ALL before ATT (1=ALL, 2=ATT)
-        If InStr(middleCValue, "_ALL") > 0 Then
-            sortKey2 = 1  ' ALL rows first
+        ' Sort Key 2: ALL before ATT (based on Column 2)
+        If InStr(col2Value, "_ALL") > 0 Or col2Value = "ALL*" Then
+            sortKey2 = "1_ALL"
         Else
-            sortKey2 = 2  ' ATT rows second
+            sortKey2 = "2_ATT"
         End If
         wsOutput.Cells(i, 9).Value = sortKey2
         
-        ' Sort Key 3: NCR, SRAC, ARAC order
-        If InStr(lowestCValue, "_NCR") > 0 Then
-            sortKey3 = 1
-        ElseIf InStr(lowestCValue, "_SRAC") > 0 Then
-            sortKey3 = 2
-        ElseIf InStr(lowestCValue, "_ARAC") > 0 Then
-            sortKey3 = 3
+        ' Sort Key 3: Column 3 hierarchy (NCR before RAC)
+        If InStr(col3Value, "NCR") > 0 Then
+            sortKey3 = "1_NCR"
+        ElseIf InStr(col3Value, "RAC") > 0 Then
+            sortKey3 = "2_RAC"
+        ElseIf col3Value = "." Then
+            sortKey3 = "0_DOT"
         Else
-            sortKey3 = 4
+            sortKey3 = "9_" & col3Value
         End If
         wsOutput.Cells(i, 10).Value = sortKey3
+        
+        ' Sort Key 4: Column 4 hierarchy (. before ARAC before SRAC)
+        If col4Value = "." Then
+            sortKey4 = "1_DOT"
+        ElseIf InStr(col4Value, "ARAC") > 0 Then
+            sortKey4 = "2_ARAC"
+        ElseIf InStr(col4Value, "SRAC") > 0 Then
+            sortKey4 = "3_SRAC"
+        Else
+            sortKey4 = "9_" & col4Value
+        End If
+        wsOutput.Cells(i, 11).Value = sortKey4
         
     Next i
     
     ' Define data range including helper columns
-    Set dataRange = wsOutput.Range("A" & OUTPUT_START_ROW & ":J" & lastRow)
+    Set dataRange = wsOutput.Range("A" & OUTPUT_START_ROW & ":K" & lastRow)
     
-    ' Perform multi-level sort
+    ' Perform multi-level sort based on Middle C hierarchy
     With wsOutput.Sort
         .SortFields.Clear
         
-        ' Primary: Sort by TopC (alphabetical)
+        ' 1st: Sort by TopC (alphabetical)
         .SortFields.Add Key:=wsOutput.Range("H" & OUTPUT_START_ROW & ":H" & lastRow), _
                        SortOn:=xlSortOnValues, Order:=xlAscending
         
-        ' Secondary: Sort by ALL/ATT (ALL first)
+        ' 2nd: Sort by ALL/ATT (ALL first)
         .SortFields.Add Key:=wsOutput.Range("I" & OUTPUT_START_ROW & ":I" & lastRow), _
                        SortOn:=xlSortOnValues, Order:=xlAscending
         
-        ' Tertiary: Sort by NCR/SRAC/ARAC
+        ' 3rd: Sort by Column 3 (NCR before RAC)
         .SortFields.Add Key:=wsOutput.Range("J" & OUTPUT_START_ROW & ":J" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' 4th: Sort by Column 4 (. before ARAC before SRAC)
+        .SortFields.Add Key:=wsOutput.Range("K" & OUTPUT_START_ROW & ":K" & lastRow), _
                        SortOn:=xlSortOnValues, Order:=xlAscending
         
         .SetRange dataRange
@@ -618,20 +637,26 @@ Sub SortOutputData()
     End With
     
     ' Delete helper columns
-    wsOutput.Columns("H:J").Delete
+    wsOutput.Columns("H:K").Delete
     
     wsOutput.Columns("A:G").AutoFit
     
     MsgBox "Sort complete!" & vbCrLf & vbCrLf & _
-           "Sort hierarchy:" & vbCrLf & _
+           "Sort hierarchy (Middle C only):" & vbCrLf & _
            "1. TopC (alphabetical)" & vbCrLf & _
-           "2. ALL before ATT" & vbCrLf & _
-           "3. NCR → SRAC → ARAC", _
+           "2. ALL before ATT (Column 2)" & vbCrLf & _
+           "3. NCR before RAC (Column 3)" & vbCrLf & _
+           "4. . before ARAC before SRAC (Column 4)" & vbCrLf & vbCrLf & _
+           "Result: A1-ALL, A1-ATT, A2-ALL, A2-ATT pattern", _
            vbInformation, "Sort Complete"
     
     Exit Sub
     
 ErrorHandler:
+    ' Clean up helper columns if they exist
+    On Error Resume Next
+    wsOutput.Columns("H:K").Delete
+    On Error GoTo 0
     MsgBox "Error sorting: " & Err.Description, vbCritical, "Sort Error"
 End Sub
 
