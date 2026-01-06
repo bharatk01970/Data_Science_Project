@@ -1,616 +1,847 @@
-"""
-Citrix Application Function Automation Tester - Core Logic Module
-This module contains all core testing functionality independent of any GUI framework.
-Can be used standalone via CLI or imported by GUI/automation tools.
-"""
-
-import pyautogui
-import time
-import csv
-import os
-from datetime import datetime
-from pathlib import Path
-import logging
-from typing import Dict, List, Tuple, Optional, Callable
-from dataclasses import dataclass, field
-from enum import Enum
-
-
-# ============================================================================
-# DATA STRUCTURES
-# ============================================================================
-
-class TestStatus(Enum):
-    """Enumeration for test result statuses."""
-    SUCCESS = "SUCCESS"
-    FAILURE = "FAILURE"
-    SKIPPED = "SKIPPED"
-    ERROR = "ERROR"
-
-
-@dataclass
-class FunctionConfig:
-    """Configuration for a single function test."""
-    name: str
-    click_target: str
-    success_indicator: str
-    close_button: str
-    enabled: bool = True
-
-
-@dataclass
-class TestResult:
-    """Result of a single function test."""
-    function_name: str
-    status: TestStatus
-    timestamp: str
-    screenshots: List[str] = field(default_factory=list)
-    error_message: str = ""
-    duration_seconds: float = 0.0
-
-
-@dataclass
-class TestConfig:
-    """Global test configuration."""
-    screenshot_dir: str = "test_screenshots"
-    report_dir: str = "test_reports"
-    timeout: int = 30
-    retry_interval: int = 2
-    max_retries: int = 3
-    image_confidence: float = 0.8
-    click_delay: float = 1.0
-    inter_test_delay: float = 3.0
-
-
-# ============================================================================
-# CORE ENGINE CLASS
-# ============================================================================
-
-class CitrixTestEngine:
-    """
-    Core testing engine that handles all automation logic.
-    Completely independent of any GUI framework.
-    """
+Sub TransformInputToOutput()
+    '=================================================================================
+    ' EXCEL TRANSFORMATION MACRO - ENHANCED VERSION
+    ' Purpose: Transform one input row into three output rows with specific rules
+    ' Enhanced: Added "New code" column, ALL/ATT sorting, hierarchical Middle C sorting
+    '=================================================================================
     
-    def __init__(self, config: TestConfig, progress_callback: Optional[Callable] = None):
-        """
-        Initialize the test engine.
-        
-        Args:
-            config: Test configuration object
-            progress_callback: Optional callback function for progress updates
-                              Signature: callback(message: str, progress: int)
-        """
-        self.config = config
-        self.progress_callback = progress_callback
-        self.logger = self._setup_logging()
-        self._setup_directories()
-        
-    def _setup_logging(self) -> logging.Logger:
-        """Configure logging to both file and console."""
-        logger = logging.getLogger('CitrixTestEngine')
-        logger.setLevel(logging.INFO)
-        
-        # Remove existing handlers to avoid duplicates
-        logger.handlers.clear()
-        
-        # Create formatters
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
-        return logger
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim inputRow As Long
+    Dim outputRow As Long
+    Dim level5ID As String
+    Dim level5Name As String
+    Dim level4ID As String
+    Dim level4Name As String
+    Dim level3ID As String
+    Dim level3Name As String
+    Dim level2ID As String
+    Dim level2Name As String
+    Dim level1ID As String
+    Dim level1Name As String
+    Dim comments As String
+    Dim topC As String
+    Dim l2x As String
+    Dim middleCStatus As String
+    Dim isStandard As Boolean
+    Dim allAltSuffix As String
+    Dim shouldTransform As Boolean
+    Dim skippedCount As Long
+    Dim skipReason As String
     
-    def _add_file_logging(self):
-        """Add file logging handler (called when test starts)."""
-        log_filename = os.path.join(
-            self.config.report_dir,
-            f"test_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        )
-        file_handler = logging.FileHandler(log_filename)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(file_handler)
-        self.logger.info(f"Logging to file: {log_filename}")
+    ' Configuration
+    Const INPUT_SHEET = "Input"
+    Const OUTPUT_SHEET = "Output"
+    Const INPUT_START_ROW = 2
+    Const OUTPUT_START_ROW = 2
     
-    def _setup_directories(self):
-        """Create necessary directories for screenshots and reports."""
-        Path(self.config.screenshot_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.config.report_dir).mkdir(parents=True, exist_ok=True)
-        self.logger.info(f"Directories verified: {self.config.screenshot_dir}, {self.config.report_dir}")
+    ' Turn off screen updating for faster processing
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
     
-    def _notify_progress(self, message: str, progress: int = 0):
-        """
-        Send progress notification to callback if available.
-        
-        Args:
-            message: Progress message
-            progress: Progress percentage (0-100)
-        """
-        if self.progress_callback:
-            self.progress_callback(message, progress)
+    On Error GoTo ErrorHandler
     
-    def capture_screenshot(self, step_name: str, function_name: str = "") -> str:
-        """
-        Capture a screenshot and save it with a descriptive filename.
-        
-        Args:
-            step_name: Description of the current step
-            function_name: Name of the function being tested
-        
-        Returns:
-            Path to the saved screenshot
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-        filename = f"{function_name}_{step_name}_{timestamp}.png".replace(" ", "_")
-        filepath = os.path.join(self.config.screenshot_dir, filename)
-        
-        screenshot = pyautogui.screenshot()
-        screenshot.save(filepath)
-        
-        self.logger.info(f"Screenshot captured: {filepath}")
-        return filepath
+    ' Set worksheet references
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets(INPUT_SHEET)
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Sheet Not Found"
+        GoTo CleanExit
+    End If
     
-    def wait_for_image(self, image_path: str, timeout: Optional[int] = None,
-                       confidence: Optional[float] = None) -> Tuple[bool, Optional[Tuple]]:
-        """
-        Wait for an image to appear on screen with retry mechanism.
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        GoTo CleanExit
+    End If
+    On Error GoTo ErrorHandler
+    
+    ' Clear previous output data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    If lastRow >= OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":G" & lastRow).ClearContents
+    End If
+    
+    ' Find last row with data in input sheet
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to process
+    If lastRow < INPUT_START_ROW Then
+        MsgBox "No input data found. Please add data starting from row " & INPUT_START_ROW, vbExclamation, "No Data"
+        GoTo CleanExit
+    End If
+    
+    ' Initialize counters
+    outputRow = OUTPUT_START_ROW
+    skippedCount = 0
+    
+    ' Create debug message
+    Dim debugMsg As String
+    debugMsg = "PROCESSING ROWS:" & vbCrLf & String(60, "=") & vbCrLf
+    
+    ' Loop through each input row
+    For inputRow = INPUT_START_ROW To lastRow
         
-        Args:
-            image_path: Path to the target image file
-            timeout: Maximum time to wait in seconds (uses config if None)
-            confidence: Confidence level for image matching (uses config if None)
+        ' Read input data (Columns A to K)
+        level5ID = Trim(CStr(wsInput.Cells(inputRow, 1).Value))
+        level5Name = Trim(CStr(wsInput.Cells(inputRow, 2).Value))
+        level4ID = Trim(CStr(wsInput.Cells(inputRow, 3).Value))
+        level4Name = Trim(CStr(wsInput.Cells(inputRow, 4).Value))
+        level3ID = Trim(CStr(wsInput.Cells(inputRow, 5).Value))
+        level3Name = Trim(CStr(wsInput.Cells(inputRow, 6).Value))
+        level2ID = Trim(CStr(wsInput.Cells(inputRow, 7).Value))
+        level2Name = Trim(CStr(wsInput.Cells(inputRow, 8).Value))
+        level1ID = Trim(CStr(wsInput.Cells(inputRow, 9).Value))
+        level1Name = Trim(CStr(wsInput.Cells(inputRow, 10).Value))
+        comments = Trim(CStr(wsInput.Cells(inputRow, 11).Value))
         
-        Returns:
-            Tuple of (success: bool, location: tuple or None)
-        """
-        timeout = timeout or self.config.timeout
-        confidence = confidence or self.config.image_confidence
+        ' Skip empty rows
+        If level5ID = "" Then
+            debugMsg = debugMsg & "Row " & inputRow & ": EMPTY - Skipped" & vbCrLf
+            GoTo NextInputRow
+        End If
         
-        start_time = time.time()
-        attempts = 0
+        ' Initialize transformation flag
+        shouldTransform = True
+        skipReason = ""
         
-        self.logger.info(f"Waiting for image: {image_path}")
+        '=========================================================================
+        ' FILTER 1: Comments must contain "new"
+        '=========================================================================
+        If InStr(1, UCase(comments), "NEW") = 0 Then
+            shouldTransform = False
+            skipReason = "Comments doesn't contain 'new' (value: '" & comments & "')"
+        End If
         
-        while (time.time() - start_time) < timeout:
-            try:
-                location = pyautogui.locateOnScreen(image_path, confidence=confidence)
-                if location:
-                    self.logger.info(f"Image found at location: {location}")
-                    return True, location
-            except pyautogui.ImageNotFoundException:
-                pass
-            except Exception as e:
-                self.logger.error(f"Error while searching for image: {e}")
+        '=========================================================================
+        ' FILTER 2: Level2 Name must be from the allowed list
+        '=========================================================================
+        If shouldTransform Then
+            Dim isValidLevel2 As Boolean
+            Dim level2Upper As String
+            level2Upper = UCase(level2Name)
             
-            attempts += 1
-            time.sleep(self.config.retry_interval)
+            ' Check if Level2 Name matches any allowed value
+            isValidLevel2 = False
+            If level2Upper = "CENTRAL MANAGED OFFICES" Then isValidLevel2 = True
+            If level2Upper = "CENTRAL MANAGED SERVICES" Then isValidLevel2 = True
+            If level2Upper = "COMM BUSINESSES & MKTS" Then isValidLevel2 = True
+            If level2Upper = "ENTERPRISE TALENT BC" Then isValidLevel2 = True
+            If level2Upper = "FINANCE FUNCTION" Then isValidLevel2 = True
+            If level2Upper = "GLOBAL SUSTAINABILITY" Then isValidLevel2 = True
+            If level2Upper = "GOVERNANCE" Then isValidLevel2 = True
+            If level2Upper = "GROUP BRAND L2" Then isValidLevel2 = True
+            If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then isValidLevel2 = True
+            If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then isValidLevel2 = True
+            If level2Upper = "INTERNAL AUDIT" Then isValidLevel2 = True
+            If level2Upper = "LEGAL" Then isValidLevel2 = True
+            If level2Upper = "PEOPLE" Then isValidLevel2 = True
+            If level2Upper = "RISK & COMPLIANCE" Then isValidLevel2 = True
+            
+            If Not isValidLevel2 Then
+                shouldTransform = False
+                skipReason = "Level2 Name not from list (value: '" & level2Name & "')"
+            End If
+        End If
         
-        self.logger.warning(f"Image not found after {timeout} seconds and {attempts} attempts")
-        return False, None
+        '=========================================================================
+        ' FILTER 3: Level1 Name must be "Alpha", "Kenamma", or "Naago"
+        '=========================================================================
+        If shouldTransform Then
+            If UCase(level1Name) <> "ALPHA" And _
+               UCase(level1Name) <> "KENAMMA" And _
+               UCase(level1Name) <> "NAAGO" Then
+                shouldTransform = False
+                skipReason = "Level1 Name not Alpha/Kenamma/Naago (value: '" & level1Name & "')"
+            End If
+        End If
+        
+        '=========================================================================
+        ' FILTER 4: Exclude if Level5 Name contains "Retained", "Retd", or "Rtd"
+        '=========================================================================
+        If shouldTransform Then
+            If InStr(1, UCase(level5Name), "RETAINED") > 0 Or _
+               InStr(1, UCase(level5Name), "RETD") > 0 Or _
+               InStr(1, UCase(level5Name), "RTD") > 0 Then
+                shouldTransform = False
+                skipReason = "Level5 Name contains Retained/Retd/Rtd (value: '" & level5Name & "')"
+            End If
+        End If
+        
+        ' Add to debug message
+        If shouldTransform Then
+            debugMsg = debugMsg & "Row " & inputRow & ": PROCESSING ✓ (ID: " & level5ID & ")" & vbCrLf
+        Else
+            debugMsg = debugMsg & "Row " & inputRow & ": SKIPPED - " & skipReason & vbCrLf
+            skippedCount = skippedCount + 1
+            GoTo NextInputRow
+        End If
+        
+        '=========================================================================
+        ' ROW PASSED ALL FILTERS - PROCEED WITH TRANSFORMATION
+        '=========================================================================
+        
+        ' Get Top C and L2X values using mapping functions
+        topC = GetTopCValue(level2Name)
+        l2x = GetL2XValue(level2Name)
+        
+        ' Calculate STD/STEWARDSHIP and ALL/ATT suffix
+        isStandard = False
+        If InStr(1, UCase(level5Name), "(STD)") > 0 Or _
+           InStr(1, UCase(level5Name), "(STEWARDSHIP)") > 0 Then
+            isStandard = True
+        End If
+        
+        If isStandard Then
+            allAltSuffix = "ALL"
+        Else
+            allAltSuffix = "ATT"
+        End If
+        
+        ' Build Middle C Status dynamically using L2X
+        middleCStatus = "RBMI - " & l2x & "_" & allAltSuffix
+        
+        '=========================================================================
+        ' OUTPUT ROW 1
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_NCR" & allAltSuffix            ' Column 3: Middle C (L2X_NCR + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = "."                                     ' Column 4: Middle C (.)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"          ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID                         ' Column 6: N element (R-)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 2
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_ARAC" & allAltSuffix           ' Column 4: Middle C (L2X_ARAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 3
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_SRAC" & allAltSuffix           ' Column 4: Middle C (L2X_SRAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+NextInputRow:
+    Next inputRow
     
-    def click_image(self, image_path: str, confidence: Optional[float] = None) -> bool:
-        """
-        Find and click on an image on the screen.
-        
-        Args:
-            image_path: Path to the image to click
-            confidence: Confidence level for image matching (uses config if None)
-        
-        Returns:
-            True if click was successful, False otherwise
-        """
-        confidence = confidence or self.config.image_confidence
-        
-        try:
-            location = pyautogui.locateOnScreen(image_path, confidence=confidence)
-            if location:
-                click_point = pyautogui.center(location)
-                pyautogui.click(click_point)
-                self.logger.info(f"Clicked on image: {image_path} at {click_point}")
-                time.sleep(self.config.click_delay)
-                return True
-            else:
-                self.logger.warning(f"Could not find image to click: {image_path}")
-                return False
-        except Exception as e:
-            self.logger.error(f"Error clicking image {image_path}: {e}")
-            return False
+    ' Format output
+    If outputRow > OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":G" & (outputRow - 1)).Font.Name = "Calibri"
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":G" & (outputRow - 1)).Font.Size = 11
+        wsOutput.Columns("A:G").AutoFit
+    End If
     
-    def close_function(self, close_button_path: str, function_name: str) -> bool:
-        """
-        Close the current function window/tab.
-        
-        Args:
-            close_button_path: Path to the close button image
-            function_name: Name of the function being closed
-        
-        Returns:
-            True if successfully closed, False otherwise
-        """
-        self.logger.info(f"Attempting to close function: {function_name}")
-        
-        # Capture screenshot before closing
-        self.capture_screenshot("before_close", function_name)
-        
-        # Try clicking the close button
-        if self.click_image(close_button_path):
-            time.sleep(1)
-            self.capture_screenshot("after_close", function_name)
-            self.logger.info(f"Function closed: {function_name}")
-            return True
-        else:
-            # Fallback: try ESC key
-            self.logger.warning("Close button not found, trying ESC key")
-            pyautogui.press('esc')
-            time.sleep(1)
-            self.capture_screenshot("after_close_keyboard", function_name)
-            return False
+    ' Show detailed results
+    Dim totalRows As Long
+    Dim processedCount As Long
+    totalRows = lastRow - INPUT_START_ROW + 1
+    processedCount = totalRows - skippedCount
     
-    def test_function(self, function_config: FunctionConfig) -> TestResult:
-        """
-        Test a single function within the application.
-        
-        Args:
-            function_config: Configuration for the function to test
-        
-        Returns:
-            TestResult object with test outcome
-        """
-        function_name = function_config.name
-        start_time = time.time()
-        
-        self.logger.info(f"\n{'='*60}")
-        self.logger.info(f"Testing function: {function_name}")
-        self.logger.info(f"{'='*60}")
-        
-        self._notify_progress(f"Testing: {function_name}", 0)
-        
-        result = TestResult(
-            function_name=function_name,
-            status=TestStatus.FAILURE,
-            timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        )
-        
-        try:
-            # Step 1: Capture initial state
-            initial_screenshot = self.capture_screenshot("initial_state", function_name)
-            result.screenshots.append(initial_screenshot)
-            
-            # Step 2: Click on the function button/menu
-            self.logger.info(f"Step 1: Clicking function button for {function_name}")
-            self._notify_progress(f"Clicking {function_name}...", 20)
-            
-            click_screenshot = self.capture_screenshot("before_click", function_name)
-            result.screenshots.append(click_screenshot)
-            
-            if not self.click_image(function_config.click_target):
-                result.error_message = "Failed to find or click function button"
-                error_screenshot = self.capture_screenshot("click_failed", function_name)
-                result.screenshots.append(error_screenshot)
-                return result
-            
-            after_click_screenshot = self.capture_screenshot("after_click", function_name)
-            result.screenshots.append(after_click_screenshot)
-            
-            # Step 3: Wait for function to load
-            self.logger.info(f"Step 2: Waiting for {function_name} to load")
-            self._notify_progress(f"Waiting for {function_name} to load...", 40)
-            
-            success = False
-            for retry in range(self.config.max_retries):
-                self.logger.info(f"Attempt {retry + 1} of {self.config.max_retries}")
-                
-                found, location = self.wait_for_image(
-                    function_config.success_indicator,
-                    timeout=self.config.timeout // self.config.max_retries
-                )
-                
-                if found:
-                    success = True
-                    break
-                else:
-                    retry_screenshot = self.capture_screenshot(f"retry_{retry + 1}", function_name)
-                    result.screenshots.append(retry_screenshot)
-            
-            # Step 4: Capture result
-            self._notify_progress(f"Capturing result for {function_name}...", 70)
-            
-            if success:
-                result.status = TestStatus.SUCCESS
-                self.logger.info(f"✓ Function {function_name} loaded successfully")
-                success_screenshot = self.capture_screenshot("success", function_name)
-                result.screenshots.append(success_screenshot)
-            else:
-                result.status = TestStatus.FAILURE
-                result.error_message = "Function did not load within timeout period"
-                self.logger.error(f"✗ Function {function_name} failed to load")
-                failure_screenshot = self.capture_screenshot("failure", function_name)
-                result.screenshots.append(failure_screenshot)
-            
-            # Step 5: Close the function
-            self.logger.info(f"Step 3: Closing {function_name}")
-            self._notify_progress(f"Closing {function_name}...", 90)
-            self.close_function(function_config.close_button, function_name)
-            
-        except Exception as e:
-            result.status = TestStatus.ERROR
-            result.error_message = f"Unexpected error: {str(e)}"
-            self.logger.error(f"Error testing {function_name}: {e}")
-            error_screenshot = self.capture_screenshot("error", function_name)
-            result.screenshots.append(error_screenshot)
-        
-        finally:
-            result.duration_seconds = time.time() - start_time
-            self._notify_progress(f"Completed: {function_name}", 100)
-        
-        return result
+    debugMsg = debugMsg & vbCrLf & String(60, "=") & vbCrLf
+    debugMsg = debugMsg & "SUMMARY:" & vbCrLf
+    debugMsg = debugMsg & "Total Input Rows: " & totalRows & vbCrLf
+    debugMsg = debugMsg & "Rows Processed: " & processedCount & vbCrLf
+    debugMsg = debugMsg & "Rows Skipped: " & skippedCount & vbCrLf
+    debugMsg = debugMsg & "Output Rows Generated: " & (outputRow - OUTPUT_START_ROW)
     
-    def run_all_tests(self, functions: List[FunctionConfig]) -> List[TestResult]:
-        """
-        Execute tests for all configured functions.
-        
-        Args:
-            functions: List of function configurations to test
-        
-        Returns:
-            List of test results for all functions
-        """
-        self.logger.info("\n" + "="*60)
-        self.logger.info("STARTING AUTOMATED FUNCTION TESTS")
-        self.logger.info("="*60 + "\n")
-        
-        # Add file logging now that test is starting
-        self._add_file_logging()
-        
-        results = []
-        enabled_functions = [f for f in functions if f.enabled]
-        total = len(enabled_functions)
-        
-        for idx, function_config in enumerate(enabled_functions, 1):
-            overall_progress = int((idx - 1) / total * 100)
-            self._notify_progress(
-                f"Testing {idx}/{total}: {function_config.name}",
-                overall_progress
-            )
-            
-            result = self.test_function(function_config)
-            results.append(result)
-            
-            # Brief pause between tests
-            if idx < total:
-                time.sleep(self.config.inter_test_delay)
-        
-        self._notify_progress("All tests completed!", 100)
-        return results
+    MsgBox debugMsg, vbInformation, "Transformation Complete"
+    
+CleanExit:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Exit Sub
+    
+ErrorHandler:
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    MsgBox "Error on row " & inputRow & ": " & Err.Description, vbCritical, "Error"
+End Sub
 
 
-# ============================================================================
-# REPORTING MODULE
-# ============================================================================
+'=================================================================================
+' CONFIGURABLE TOP C MAPPING FUNCTION
+'=================================================================================
+Function GetTopCValue(level2Name As String) As String
+    Dim cleanName As String
+    cleanName = UCase(Trim(level2Name))
+    
+    Select Case cleanName
+        Case "CENTRAL MANAGED OFFICES"
+            GetTopCValue = "RBMI - MISC"
+        Case "CENTRAL MANAGED SERVICES"
+            GetTopCValue = "RBMI - MISC"
+        Case "COMM BUSINESSES & MKTS"
+            GetTopCValue = "RBMI - Group Communications & Brand (L3)"
+        Case "GROUP BRAND L2"
+            GetTopCValue = "RBMI - Group Brand L2"
+        Case "GROUP EXTERNAL COMMUNICATION"
+            GetTopCValue = "RBMI - Group External Communication"
+        Case "ENTERPRISE TALENT BC"
+            GetTopCValue = "RBMI - Enterprise Talent BC"
+        Case "GOVERNANCE"
+            GetTopCValue = "RBMI - Governance"
+        Case "GRP CHIEF CNTRL OVERSIGHT OFF"
+            GetTopCValue = "RBMI - Grp Chief Cntrl Oversight Off"
+        Case "INTERNAL AUDIT"
+            GetTopCValue = "RBMI - Internal Audit (L2)"
+        Case "LEGAL"
+            GetTopCValue = "RBMI - Legal (L2)"
+        Case "RISK & COMPLIANCE"
+            GetTopCValue = "RBMI - Risk & Compliance (L2)"
+        Case "FINANCE FUNCTION"
+            GetTopCValue = "RBMI - Finance Function"
+        Case "GLOBAL SUSTAINABILITY"
+            GetTopCValue = "RBMI - Global Sustainability"
+        Case "PEOPLE"
+            GetTopCValue = "RBMI - HR"
+        Case Else
+            GetTopCValue = "RBMI - " & level2Name & " (L2)"
+    End Select
+End Function
 
-class ReportGenerator:
-    """Generates various report formats from test results."""
+
+'=================================================================================
+' CONFIGURABLE L2X MAPPING FUNCTION
+' This function maps Level 2 Name to L2X code for Middle C columns
+' To add/modify mappings, simply edit the entries in this function
+'=================================================================================
+Function GetL2XValue(level2Name As String) As String
+    '-------------------------------------------------------------------------
+    ' CONFIGURATION: Add or modify L2X mappings below
+    ' Format: Case "[Level 2 Name]": GetL2XValue = "[L2X Code]"
+    '-------------------------------------------------------------------------
     
-    def __init__(self, report_dir: str):
-        """
-        Initialize report generator.
-        
-        Args:
-            report_dir: Directory to save reports
-        """
-        self.report_dir = report_dir
+    Dim cleanName As String
+    cleanName = UCase(Trim(level2Name))
     
-    def generate_console_report(self, results: List[TestResult]) -> str:
-        """
-        Generate a formatted summary report for console output.
+    Select Case cleanName
+        ' Central & Core Services
+        Case "CENTRAL MANAGED OFFICES"
+            GetL2XValue = "CMO"
         
-        Args:
-            results: List of test results
+        Case "CENTRAL MANAGED SERVICES"
+            GetL2XValue = "CMO"
         
-        Returns:
-            Formatted report string
-        """
-        total = len(results)
-        passed = sum(1 for r in results if r.status == TestStatus.SUCCESS)
-        failed = total - passed
+        ' Communications & Brand
+        Case "COMM BUSINESSES & MKTS"
+            GetL2XValue = "CPA"
         
-        report_lines = [
-            "",
-            "="*60,
-            "TEST EXECUTION SUMMARY",
-            "="*60,
-            f"Total Functions Tested: {total}",
-            f"Passed: {passed}",
-            f"Failed: {failed}",
-            f"Success Rate: {(passed/total)*100:.1f}%" if total > 0 else "Success Rate: 0.0%",
-            "="*60,
-            "",
-            "DETAILED RESULTS:",
-            "-"*60,
-            ""
-        ]
+        Case "GROUP BRAND L2"
+            GetL2XValue = "GBD"
         
-        for result in results:
-            status_symbol = "✓" if result.status == TestStatus.SUCCESS else "✗"
-            report_lines.extend([
-                f"{status_symbol} {result.function_name}",
-                f"  Status: {result.status.value}",
-                f"  Timestamp: {result.timestamp}",
-                f"  Duration: {result.duration_seconds:.2f}s",
-                f"  Screenshots: {len(result.screenshots)} captured"
-            ])
-            if result.error_message:
-                report_lines.append(f"  Error: {result.error_message}")
-            report_lines.append("")
+        Case "GROUP EXTERNAL COMMUNICATION"
+            GetL2XValue = "GEC"
         
-        report_lines.extend(["="*60, ""])
+        ' Governance & Compliance
+        Case "ENTERPRISE TALENT BC"
+            GetL2XValue = "EPT"
         
-        return "\n".join(report_lines)
+        Case "GOVERNANCE"
+            GetL2XValue = "SCY"
+        
+        Case "GRP CHIEF CNTRL OVERSIGHT OFF"
+            GetL2XValue = "GCC"
+        
+        Case "INTERNAL AUDIT"
+            GetL2XValue = "GIA"
+        
+        Case "LEGAL"
+            GetL2XValue = "LEG"
+        
+        Case "RISK & COMPLIANCE"
+            GetL2XValue = "RIS"
+        
+        ' Finance & Support Functions
+        Case "FINANCE FUNCTION"
+            GetL2XValue = "FIN"
+        
+        Case "GLOBAL SUSTAINABILITY"
+            GetL2XValue = "CSR"
+        
+        Case "PEOPLE"
+            GetL2XValue = "HR_"
+        
+        '---------------------------------------------------------------------
+        ' ADD MORE L2X MAPPINGS HERE AS NEEDED
+        ' Simply copy the pattern above and add new cases
+        '---------------------------------------------------------------------
+        ' Example:
+        ' Case "NEW DEPARTMENT NAME"
+        '     GetL2XValue = "XXX"
+        '---------------------------------------------------------------------
+        
+        ' Default case: If no match found, use first 3 characters
+        Case Else
+            If Len(level2Name) >= 3 Then
+                GetL2XValue = UCase(Left(level2Name, 3))
+            Else
+                GetL2XValue = UCase(level2Name)
+            End If
     
-    def generate_csv_report(self, results: List[TestResult]) -> str:
-        """
-        Write test results to a CSV file.
+    End Select
+End Function
+
+
+'=================================================================================
+' DIAGNOSTIC MACRO
+'=================================================================================
+Sub DiagnoseData()
+    Dim wsInput As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim msg As String
+    
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Error"
+        Exit Sub
+    End If
+    
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    msg = "DATA DIAGNOSIS" & vbCrLf & String(60, "=") & vbCrLf & vbCrLf
+    msg = msg & "Last row: " & lastRow & vbCrLf
+    msg = msg & "Total data rows: " & (lastRow - 1) & vbCrLf & vbCrLf
+    
+    If lastRow < 2 Then
+        msg = msg & "ERROR: No data rows found!"
+        MsgBox msg, vbCritical, "No Data"
+        Exit Sub
+    End If
+    
+    msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
+    
+    For i = 2 To Application.Min(lastRow, 6)
+        Dim level2Name As String
+        level2Name = Trim(CStr(wsInput.Cells(i, 8).Value))
         
-        Args:
-            results: List of test results
+        msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
+        msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
+        msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
+        msg = msg & "  Level2 Name: " & level2Name & vbCrLf
+        msg = msg & "  L2X Mapping: " & GetL2XValue(level2Name) & vbCrLf
+        msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
+        msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
         
-        Returns:
-            Path to the generated CSV file
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_filename = os.path.join(self.report_dir, f"test_report_{timestamp}.csv")
+        Dim hasNew, validLevel2, validLevel1, notRetained As Boolean
+        Dim level5Name, level1Name, comments As String
+        Dim level2Upper As String
         
-        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = [
-                'Function Name', 'Status', 'Timestamp', 'Duration (s)',
-                'Error Message', 'Screenshot Count', 'Screenshot Paths'
-            ]
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
+        level2Upper = UCase(level2Name)
+        level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
+        comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
+        
+        hasNew = InStr(1, comments, "NEW") > 0
+        
+        validLevel2 = False
+        If level2Upper = "CENTRAL MANAGED OFFICES" Then validLevel2 = True
+        If level2Upper = "CENTRAL MANAGED SERVICES" Then validLevel2 = True
+        If level2Upper = "COMM BUSINESSES & MKTS" Then validLevel2 = True
+        If level2Upper = "ENTERPRISE TALENT BC" Then validLevel2 = True
+        If level2Upper = "FINANCE FUNCTION" Then validLevel2 = True
+        If level2Upper = "GLOBAL SUSTAINABILITY" Then validLevel2 = True
+        If level2Upper = "GOVERNANCE" Then validLevel2 = True
+        If level2Upper = "GROUP BRAND L2" Then validLevel2 = True
+        If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then validLevel2 = True
+        If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then validLevel2 = True
+        If level2Upper = "INTERNAL AUDIT" Then validLevel2 = True
+        If level2Upper = "LEGAL" Then validLevel2 = True
+        If level2Upper = "PEOPLE" Then validLevel2 = True
+        If level2Upper = "RISK & COMPLIANCE" Then validLevel2 = True
+        
+        validLevel1 = (level1Name = "ALPHA" Or level1Name = "KENAMMA" Or level1Name = "NAAGO")
+        notRetained = InStr(1, level5Name, "RETAINED") = 0 And _
+                      InStr(1, level5Name, "RETD") = 0 And _
+                      InStr(1, level5Name, "RTD") = 0
+        
+        msg = msg & "  ✓ Has 'new': " & hasNew & vbCrLf
+        msg = msg & "  ✓ Valid Level2: " & validLevel2 & vbCrLf
+        msg = msg & "  ✓ Valid Level1: " & validLevel1 & vbCrLf
+        msg = msg & "  ✓ Not Retained: " & notRetained & vbCrLf
+        
+        If hasNew And validLevel2 And validLevel1 And notRetained Then
+            msg = msg & "  → WILL BE PROCESSED ✓" & vbCrLf
+        Else
+            msg = msg & "  → WILL BE SKIPPED ✗" & vbCrLf
+        End If
+    Next i
+    
+    MsgBox msg, vbInformation, "Data Diagnosis"
+End Sub
+
+
+'=================================================================================
+' UTILITY: View Current L2X Mappings
+'=================================================================================
+Sub ViewL2XMappings()
+    Dim msg As String
+    
+    msg = "CURRENT L2X MAPPINGS" & vbCrLf & String(50, "=") & vbCrLf & vbCrLf
+    msg = msg & "Level 2 Name → L2X Code" & vbCrLf & vbCrLf
+    
+    msg = msg & "Central Managed offices → CMO" & vbCrLf
+    msg = msg & "Central Managed Services → CMO" & vbCrLf
+    msg = msg & "Comm Businesses & Mkts → CPA" & vbCrLf
+    msg = msg & "Group Brand L2 → GBD" & vbCrLf
+    msg = msg & "Group External Communication → GEC" & vbCrLf
+    msg = msg & "Enterprise Talent BC → EPT" & vbCrLf
+    msg = msg & "Governance → SCY" & vbCrLf
+    msg = msg & "Grp Chief Cntrl Oversight Off → GCC" & vbCrLf
+    msg = msg & "Internal Audit → GIA" & vbCrLf
+    msg = msg & "Legal → LEG" & vbCrLf
+    msg = msg & "Risk & Compliance → RIS" & vbCrLf
+    msg = msg & "Finance Function → FIN" & vbCrLf
+    msg = msg & "Global Sustainability → CSR" & vbCrLf
+    msg = msg & "People → HR_" & vbCrLf
+    msg = msg & vbCrLf & "Any unmapped name → First 3 chars" & vbCrLf & vbCrLf
+    msg = msg & "To add/modify mappings, edit the GetL2XValue function."
+    
+    MsgBox msg, vbInformation, "L2X Mappings"
+End Sub
+
+
+'=================================================================================
+' ENHANCED SORT OUTPUT DATA WITH ALL/ATT ORDERING
+' Sorts by: TopC → ALL/ATT → NCR/SRAC/ARAC → Hierarchical Middle C
+'=================================================================================
+Sub SortOutputData()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim dataRange As Range
+    Dim i As Long
+    Dim middleCValue As String
+    Dim sortKey1, sortKey2, sortKey3 As Long
+    
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    
+    On Error GoTo ErrorHandler
+    
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "E").End(xlUp).Row
+    
+    If lastRow < OUTPUT_START_ROW Then
+        MsgBox "No output data found to sort.", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Add helper columns H, I, J for multi-level sorting
+    wsOutput.Cells(1, 8).Value = "Sort_TopC"
+    wsOutput.Cells(1, 9).Value = "Sort_ALL_ATT"
+    wsOutput.Cells(1, 10).Value = "Sort_NCR_Type"
+    
+    ' Assign sort keys
+    For i = OUTPUT_START_ROW To lastRow
+        Dim topCValue, lowestCValue As String
+        topCValue = UCase(Trim(wsOutput.Cells(i, 1).Value))
+        middleCValue = UCase(Trim(wsOutput.Cells(i, 2).Value))
+        lowestCValue = UCase(Trim(wsOutput.Cells(i, 5).Value))
+        
+        ' Sort Key 1: TopC value (alphabetical)
+        wsOutput.Cells(i, 8).Value = topCValue
+        
+        ' Sort Key 2: ALL before ATT (1=ALL, 2=ATT)
+        If InStr(middleCValue, "_ALL") > 0 Then
+            sortKey2 = 1  ' ALL rows first
+        Else
+            sortKey2 = 2  ' ATT rows second
+        End If
+        wsOutput.Cells(i, 9).Value = sortKey2
+        
+        ' Sort Key 3: NCR, SRAC, ARAC order
+        If InStr(lowestCValue, "_NCR") > 0 Then
+            sortKey3 = 1
+        ElseIf InStr(lowestCValue, "_SRAC") > 0 Then
+            sortKey3 = 2
+        ElseIf InStr(lowestCValue, "_ARAC") > 0 Then
+            sortKey3 = 3
+        Else
+            sortKey3 = 4
+        End If
+        wsOutput.Cells(i, 10).Value = sortKey3
+        
+    Next i
+    
+    ' Define data range including helper columns
+    Set dataRange = wsOutput.Range("A" & OUTPUT_START_ROW & ":J" & lastRow)
+    
+    ' Perform multi-level sort
+    With wsOutput.Sort
+        .SortFields.Clear
+        
+        ' Primary: Sort by TopC (alphabetical)
+        .SortFields.Add Key:=wsOutput.Range("H" & OUTPUT_START_ROW & ":H" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' Secondary: Sort by ALL/ATT (ALL first)
+        .SortFields.Add Key:=wsOutput.Range("I" & OUTPUT_START_ROW & ":I" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' Tertiary: Sort by NCR/SRAC/ARAC
+        .SortFields.Add Key:=wsOutput.Range("J" & OUTPUT_START_ROW & ":J" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        .SetRange dataRange
+        .Header = xlNo
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .Apply
+    End With
+    
+    ' Delete helper columns
+    wsOutput.Columns("H:J").Delete
+    
+    wsOutput.Columns("A:G").AutoFit
+    
+    MsgBox "Sort complete!" & vbCrLf & vbCrLf & _
+           "Sort hierarchy:" & vbCrLf & _
+           "1. TopC (alphabetical)" & vbCrLf & _
+           "2. ALL before ATT" & vbCrLf & _
+           "3. NCR → SRAC → ARAC", _
+           vbInformation, "Sort Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error sorting: " & Err.Description, vbCritical, "Sort Error"
+End Sub
+
+
+'=================================================================================
+' HIGHLIGHT CHANGES IN MIDDLE C COLUMNS
+' Highlights cells in columns 2, 3, 4 where values change from previous row
+' Applies light green color to changed cells
+'=================================================================================
+Sub HighlightMiddleCChanges()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim currentRow As Long
+    Dim col As Long
+    Dim currentValue As String
+    Dim previousValue As String
+    Dim changesCount As Long
+    
+    ' Configuration
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    Const LIGHT_GREEN = 5296274  ' RGB(226, 239, 218) - Light green color
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set worksheet reference
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    ' Find last row with data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to highlight
+    If lastRow < OUTPUT_START_ROW + 1 Then
+        MsgBox "Not enough data to compare (need at least 2 rows).", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Clear any existing highlighting in columns 2, 3, 4
+    wsOutput.Range("B" & OUTPUT_START_ROW & ":D" & lastRow).Interior.ColorIndex = xlNone
+    
+    changesCount = 0
+    
+    ' Loop through each row starting from the second data row
+    For currentRow = OUTPUT_START_ROW + 1 To lastRow
+        
+        ' Check columns 2, 3, 4 (B, C, D) - the Middle C columns
+        For col = 2 To 4
+            currentValue = Trim(UCase(wsOutput.Cells(currentRow, col).Value))
+            previousValue = Trim(UCase(wsOutput.Cells(currentRow - 1, col).Value))
             
-            writer.writeheader()
-            for result in results:
-                writer.writerow({
-                    'Function Name': result.function_name,
-                    'Status': result.status.value,
-                    'Timestamp': result.timestamp,
-                    'Duration (s)': f"{result.duration_seconds:.2f}",
-                    'Error Message': result.error_message,
-                    'Screenshot Count': len(result.screenshots),
-                    'Screenshot Paths': '; '.join(result.screenshots)
-                })
+            ' Compare current value with previous row
+            If currentValue <> previousValue And currentValue <> "" Then
+                ' Highlight the cell with light green
+                wsOutput.Cells(currentRow, col).Interior.Color = LIGHT_GREEN
+                changesCount = changesCount + 1
+            End If
+        Next col
         
-        return csv_filename
+    Next currentRow
     
-    def generate_text_report(self, results: List[TestResult]) -> str:
-        """
-        Write test results to a formatted text file.
-        
-        Args:
-            results: List of test results
-        
-        Returns:
-            Path to the generated text file
-        """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        txt_filename = os.path.join(self.report_dir, f"test_report_{timestamp}.txt")
-        
-        with open(txt_filename, 'w', encoding='utf-8') as txtfile:
-            total = len(results)
-            passed = sum(1 for r in results if r.status == TestStatus.SUCCESS)
-            failed = total - passed
-            
-            txtfile.write("="*60 + "\n")
-            txtfile.write("CITRIX APPLICATION FUNCTION TEST REPORT\n")
-            txtfile.write("="*60 + "\n\n")
-            txtfile.write(f"Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            txtfile.write(f"Total Functions Tested: {total}\n")
-            txtfile.write(f"Passed: {passed}\n")
-            txtfile.write(f"Failed: {failed}\n")
-            txtfile.write(f"Success Rate: {(passed/total)*100:.1f}%\n" if total > 0 else "Success Rate: 0.0%\n")
-            txtfile.write("\n" + "="*60 + "\n\n")
-            
-            txtfile.write("DETAILED RESULTS:\n")
-            txtfile.write("-"*60 + "\n\n")
-            
-            for result in results:
-                txtfile.write(f"Function: {result.function_name}\n")
-                txtfile.write(f"Status: {result.status.value}\n")
-                txtfile.write(f"Timestamp: {result.timestamp}\n")
-                txtfile.write(f"Duration: {result.duration_seconds:.2f}s\n")
-                if result.error_message:
-                    txtfile.write(f"Error: {result.error_message}\n")
-                txtfile.write(f"Screenshots Captured: {len(result.screenshots)}\n")
-                txtfile.write("Screenshot Paths:\n")
-                for screenshot in result.screenshots:
-                    txtfile.write(f"  - {screenshot}\n")
-                txtfile.write("\n" + "-"*60 + "\n\n")
-        
-        return txt_filename
+    MsgBox "Highlighting complete!" & vbCrLf & vbCrLf & _
+           "Total cells highlighted: " & changesCount & vbCrLf & _
+           "Color: Light Green" & vbCrLf & vbCrLf & _
+           "Changes highlighted in columns:" & vbCrLf & _
+           "- Column 2 (Middle C - Status)" & vbCrLf & _
+           "- Column 3 (Middle C - Code 1)" & vbCrLf & _
+           "- Column 4 (Middle C - Code 2)", _
+           vbInformation, "Highlighting Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error highlighting changes: " & Err.Description, vbCritical, "Error"
+End Sub
 
 
-# ============================================================================
-# CLI INTERFACE (for standalone execution)
-# ============================================================================
-
-def run_cli_mode():
-    """
-    Command-line interface for running tests without GUI.
-    This function demonstrates standalone execution.
-    """
-    print("\n" + "="*60)
-    print("CITRIX APPLICATION FUNCTION TESTER - CLI MODE")
-    print("="*60 + "\n")
+'=================================================================================
+' COMBINED MACRO - Transform, Sort, and Highlight
+' Runs transformation, sorting, and highlighting automatically
+'=================================================================================
+Sub TransformAndSort()
+    ' Run the transformation
+    Call TransformInputToOutput
     
-    # Define test functions (in real use, load from config file)
-    functions = [
-        FunctionConfig(
-            name="Dashboard",
-            click_target="images/dashboard_button.png",
-            success_indicator="images/dashboard_loaded.png",
-            close_button="images/close_button.png"
-        ),
-        FunctionConfig(
-            name="Reports",
-            click_target="images/reports_button.png",
-            success_indicator="images/reports_loaded.png",
-            close_button="images/close_button.png"
-        ),
-        FunctionConfig(
-            name="Settings",
-            click_target="images/settings_button.png",
-            success_indicator="images/settings_loaded.png",
-            close_button="images/close_button.png"
-        )
-    ]
+    ' Wait a moment for the transformation to complete
+    DoEvents
     
-    # Create configuration
-    config = TestConfig(
-        screenshot_dir="test_screenshots",
-        report_dir="test_reports",
-        timeout=30,
-        max_retries=3,
-        image_confidence=0.8
-    )
+    ' Run the sort
+    Call SortOutputData
     
-    # Create engine
-    engine = CitrixTestEngine(config)
+    ' Wait a moment for the sort to complete
+    DoEvents
     
-    # Countdown
-    print("Please ensure the Citrix application is open and visible.")
-    print("The automated test will begin in 5 seconds...")
-    for i in range(5, 0, -1):
-        print(f"{i}...")
-        time.sleep(1)
-    print("Starting tests!\n")
-    
-    # Run tests
-    try:
-        results = engine.run_all_tests(functions)
-        
-        # Generate reports
-        report_gen = ReportGenerator(config.report_dir)
-        
-        console_report = report_gen.generate_console_report(results)
-        print(console_report)
-        
-        csv_file = report_gen.generate_csv_report(results)
-        txt_file = report_gen.generate_text_report(results)
-        
-        print(f"\nReports generated:")
-        print(f"  - CSV: {csv_file}")
-        print(f"  - Text: {txt_file}")
-        print(f"  - Screenshots: {config.screenshot_dir}/")
-        print(f"  - Log file: {config.report_dir}/")
-        
-    except Exception as e:
-        print(f"\nERROR: Test execution failed: {e}")
-        raise
-    
-    print("\nTest execution completed!")
+    ' Run the highlighting
+    Call HighlightMiddleCChanges
+End Sub
 
 
-if __name__ == "__main__":
-    run_cli_mode()
+'=================================================================================
+' CLEAR HIGHLIGHTING - Remove all highlighting from Middle C columns
+'=================================================================================
+Sub ClearHighlighting()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets("Output")
+    On Error GoTo 0
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow >= 2 Then
+        wsOutput.Range("B2:D" & lastRow).Interior.ColorIndex = xlNone
+        MsgBox "All highlighting cleared from Middle C columns.", vbInformation, "Clear Complete"
+    End If
+End Sub
+
+
+'=================================================================================
+' SETUP SHEETS MACRO
+'=================================================================================
+Sub SetupSheets()
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim wb As Workbook
+    
+    Set wb = ThisWorkbook
+    
+    On Error Resume Next
+    Set wsInput = wb.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        Set wsInput = wb.Sheets.Add
+        wsInput.Name = "Input"
+    Else
+        wsInput.Cells.Clear
+    End If
+    
+    On Error Resume Next
+    Set wsOutput = wb.Sheets("Output")
+    On Error GoTo 0
+    
+    If wsOutput Is Nothing Then
+        Set wsOutput = wb.Sheets.Add
+        wsOutput.Name = "Output"
+    Else
+        wsOutput.Cells.Clear
+    End If
+    
+    With wsInput
+        .Cells(1, 1).Value = "Level 5 ID"
+        .Cells(1, 2).Value = "Level 5 Name"
+        .Cells(1, 3).Value = "Level 4 ID"
+        .Cells(1, 4).Value = "Level 4 Name"
+        .Cells(1, 5).Value = "Level 3 ID"
+        .Cells(1, 6).Value = "Level 3 Name"
+        .Cells(1, 7).Value = "Level 2 ID"
+        .Cells(1, 8).Value = "Level 2 Name"
+        .Cells(1, 9).Value = "Level 1 ID"
+        .Cells(1, 10).Value = "Level 1 Name"
+        .Cells(1, 11).Value = "Comments"
+        
+        .Range("A1:K1").Font.Bold = True
+        .Range("A1:K1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:K").AutoFit
+    End With
+    
+    With wsOutput
+        .Cells(1, 1).Value = "Top C"
+        .Cells(1, 2).Value = "Middle C"
+        .Cells(1, 3).Value = "Middle C"
+        .Cells(1, 4).Value = "Middle C"
+        .Cells(1, 5).Value = "Lowest C"
+        .Cells(1, 6).Value = "N element"
+        
+        .Range("A1:F1").Font.Bold = True
+        .Range("A1:F1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:F").AutoFit
+    End With
+    
+    With wsInput
+        .Cells(2, 1).Value = "XXX001"
+        .Cells(2, 2).Value = "Product_1 (std)"
+        .Cells(2, 3).Value = "XXX001_A"
+        .Cells(2, 4).Value = "Product_1"
+        .Cells(2, 5).Value = "XXX001_B"
+        .Cells(2, 6).Value = "Product_1"
+        .Cells(2, 7).Value = "XXX001_C"
+        .Cells(2, 8).Value = "People"
+        .Cells(2, 9).Value = "XXX001_D"
+        .Cells(2, 10).Value = "Alpha"
+        .Cells(2, 11).Value = "New"
+    End With
+    
+    MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
+           "Sample output will use L2X mapping:" & vbCrLf & _
+           "People → HR_ (used in Middle C columns)", _
+           vbInformation, "Setup Complete"
+    wsInput.Activate
+End Sub
