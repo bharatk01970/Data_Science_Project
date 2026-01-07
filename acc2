@@ -1,58 +1,42 @@
 Option Explicit
 
 ' ===================================================================
-' TM1 Instance Health Check Validator - Windows Automation Method
-' Purpose: Automate validation of TM1 instances in Citrix environment
-' Method: Uses Windows Shell and UI automation instead of TM1 API
+' TM1 Instance Health Check Validator - Excel Formula Method
+' Purpose: Validate TM1 instances using native Excel TM1 functions
+' Method: Uses DBRW/SUBNM functions to test connectivity
 ' ===================================================================
 
 ' Configuration Constants
-Const TIMEOUT_SECONDS As Long = 45
 Const LOG_SHEET_NAME As String = "TM1_ValidationLog"
 Const CONFIG_SHEET_NAME As String = "TM1_Instances"
-Const LAUNCH_WAIT_SECONDS As Long = 10
-
-' Windows Shell Object
-Dim wshShell As Object
+Const TEST_SHEET_NAME As String = "TM1_ConnectionTest"
 
 Sub ValidateAllTM1Instances()
-    ' Main procedure to validate all configured TM1 instances
+    ' Main procedure to validate all configured TM1 instances using Excel formulas
     
     Dim wsConfig As Worksheet
     Dim wsLog As Worksheet
+    Dim wsTest As Worksheet
     Dim lastRow As Long
     Dim i As Long
     Dim instanceName As String
     Dim serverAddress As String
-    Dim instancePath As String
-    Dim startTime As Double
-    Dim validationResult As String
-    Dim errorMessage As String
+    Dim testCell As Range
+    Dim formulaResult As Variant
     Dim isHealthy As Boolean
-    Dim useHardcodedList As Boolean
+    Dim errorMessage As String
+    Dim attempts As Integer
     
     On Error GoTo ErrorHandler
-    
-    ' *** CONFIGURATION: Set to True to use hardcoded list below ***
-    useHardcodedList = False
     
     ' Initialize worksheets
     Set wsConfig = GetOrCreateSheet(CONFIG_SHEET_NAME)
     Set wsLog = GetOrCreateSheet(LOG_SHEET_NAME)
+    Set wsTest = GetOrCreateSheet(TEST_SHEET_NAME)
     
-    ' Setup log sheet headers if needed
+    ' Setup sheets
     Call InitializeLogSheet(wsLog)
-    
-    ' If using hardcoded list, populate the config sheet
-    If useHardcodedList Then
-        Call PopulateHardcodedInstances(wsConfig)
-    End If
-    
-    ' Validate configuration sheet structure
-    If Not ValidateConfigSheet(wsConfig) Then
-        MsgBox "Configuration sheet is invalid. Please ensure columns: Instance Name, Server Address, Instance Path", vbCritical
-        Exit Sub
-    End If
+    Call InitializeConfigSheet(wsConfig)
     
     ' Get last row of instance list
     lastRow = wsConfig.Cells(wsConfig.Rows.Count, 1).End(xlUp).Row
@@ -64,39 +48,40 @@ Sub ValidateAllTM1Instances()
     
     ' Display progress
     Application.ScreenUpdating = False
-    Application.StatusBar = "Starting TM1 instance validation..."
+    Application.DisplayAlerts = False
+    Application.StatusBar = "Starting TM1 instance validation using Excel formulas..."
+    Application.Calculation = xlCalculationManual
     
-    ' Initialize Windows Shell
-    Set wshShell = CreateObject("WScript.Shell")
+    ' Clear test sheet
+    wsTest.Cells.Clear
+    wsTest.Cells(1, 1).Value = "Test Area - Do Not Delete"
     
     ' Iterate through all instances
     For i = 2 To lastRow
         instanceName = Trim(wsConfig.Cells(i, 1).Value)
         serverAddress = Trim(wsConfig.Cells(i, 2).Value)
-        instancePath = Trim(wsConfig.Cells(i, 3).Value)
         
         If instanceName <> "" And serverAddress <> "" Then
-            Application.StatusBar = "Validating instance " & i - 1 & " of " & lastRow - 1 & ": " & instanceName
+            Application.StatusBar = "Validating instance " & (i - 1) & " of " & (lastRow - 1) & ": " & instanceName
             
-            startTime = Timer
             isHealthy = False
             errorMessage = ""
             
-            ' Validate the instance
-            isHealthy = ValidateTM1InstanceByLaunch(instanceName, serverAddress, instancePath, errorMessage)
+            ' Test connection using Excel TM1 formulas
+            isHealthy = TestTM1ConnectionWithFormula(wsTest, serverAddress, instanceName, errorMessage)
             
             ' Log the result
             Call LogValidationResult(wsLog, instanceName, serverAddress, isHealthy, errorMessage)
             
-            ' Brief pause between checks
-            Application.Wait Now + TimeValue("00:00:02")
+            DoEvents
         End If
     Next i
     
     ' Cleanup
-    Set wshShell = Nothing
-    
+    Application.Calculation = xlCalculationAutomatic
+    Application.Calculate
     Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
     Application.StatusBar = False
     
     MsgBox "TM1 instance validation completed. Check the " & LOG_SHEET_NAME & " sheet for results.", vbInformation
@@ -104,161 +89,144 @@ Sub ValidateAllTM1Instances()
     Exit Sub
     
 ErrorHandler:
+    Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
     Application.StatusBar = False
-    Set wshShell = Nothing
     MsgBox "Error in validation process: " & Err.Description, vbCritical
 End Sub
 
-Function ValidateTM1InstanceByLaunch(instanceName As String, serverAddress As String, instancePath As String, ByRef errorMsg As String) As Boolean
-    ' Validates a TM1 instance by launching it and checking for errors
+Function TestTM1ConnectionWithFormula(wsTest As Worksheet, serverAddress As String, instanceName As String, ByRef errorMsg As String) As Boolean
+    ' Tests TM1 connection using native Excel TM1 functions
     
-    Dim startTime As Double
-    Dim tm1WindowTitle As String
-    Dim launchCommand As String
-    Dim processID As Long
+    Dim testCell As Range
+    Dim formulaString As String
+    Dim cellValue As Variant
     Dim waitCounter As Integer
-    Dim windowFound As Boolean
-    Dim errorWindowFound As Boolean
+    Dim maxWait As Integer
     
-    On Error GoTo LaunchError
+    On Error GoTo TestError
     
-    ValidateTM1InstanceByLaunch = False
+    TestTM1ConnectionWithFormula = False
     errorMsg = ""
-    startTime = Timer
+    maxWait = 15 ' seconds
     
-    ' Determine launch method
-    If instancePath <> "" Then
-        ' Method 1: Direct instance file path (e.g., .opt file)
-        If Dir(instancePath) <> "" Then
-            launchCommand = instancePath
-        Else
-            errorMsg = "Instance path not found: " & instancePath
-            Exit Function
-        End If
-    Else
-        ' Method 2: Try to launch TM1 Perspectives with server parameter
-        launchCommand = "tm1p.exe"
-    End If
+    ' Set test cell
+    Set testCell = wsTest.Range("A2")
+    testCell.Clear
     
-    ' Launch the instance
-    On Error Resume Next
-    wshShell.Run launchCommand, 1, False
+    ' Method 1: Try SUBNM function (gets server name - proves connection)
+    ' Format: =SUBNM("ServerName:Port", "}")
+    formulaString = "=SUBNM(""" & serverAddress & """, ""}"")"
     
-    If Err.Number <> 0 Then
-        errorMsg = "Failed to launch instance: " & Err.Description
-        Err.Clear
-        Exit Function
-    End If
-    On Error GoTo LaunchError
+    testCell.Formula = formulaString
     
-    ' Wait for instance window to appear
-    waitCounter = 0
-    windowFound = False
-    errorWindowFound = False
+    ' Force calculation and wait
+    Application.Calculate
+    DoEvents
     
-    Do While waitCounter < LAUNCH_WAIT_SECONDS
-        DoEvents
+    ' Wait for formula to resolve (up to maxWait seconds)
+    For waitCounter = 1 To maxWait
         Application.Wait Now + TimeValue("00:00:01")
-        waitCounter = waitCounter + 1
+        DoEvents
+        cellValue = testCell.Value
         
-        ' Check for TM1 window (various possible titles)
-        If IsWindowOpen("TM1") Or IsWindowOpen(instanceName) Or IsWindowOpen("Perspectives") Then
-            windowFound = True
-            Exit Do
+        ' Check if we got a valid result
+        If Not IsError(cellValue) Then
+            If cellValue <> "" And cellValue <> 0 Then
+                ' Success - we got server name back
+                TestTM1ConnectionWithFormula = True
+                errorMsg = "Connected successfully - Server: " & cellValue
+                Exit Function
+            End If
+        Else
+            ' Got an error from the formula
+            Exit For
         End If
-        
-        ' Check for error dialogs
-        If IsWindowOpen("Error") Or IsWindowOpen("TM1 Server Login") Or IsWindowOpen("Connection Failed") Then
-            errorWindowFound = True
-            Exit Do
-        End If
-        
-        ' Check timeout
-        If (Timer - startTime) > TIMEOUT_SECONDS Then
-            errorMsg = "Launch timeout exceeded"
-            Call CloseAnyTM1Windows
-            Exit Function
-        End If
-    Loop
+    Next waitCounter
     
-    ' Evaluate results
-    If errorWindowFound Then
-        errorMsg = "Instance launch failed - Error dialog detected"
-        Call CloseAnyTM1Windows
+    ' Method 2: Try alternative connection test using TM1RPTROW
+    testCell.Clear
+    formulaString = "=TM1RPTROW(""" & serverAddress & """,""}"","""","""")"
+    testCell.Formula = formulaString
+    
+    Application.Calculate
+    DoEvents
+    Application.Wait Now + TimeValue("00:00:02")
+    
+    cellValue = testCell.Value
+    
+    If Not IsError(cellValue) Then
+        TestTM1ConnectionWithFormula = True
+        errorMsg = "Connected successfully using TM1RPTROW"
         Exit Function
     End If
     
-    If Not windowFound Then
-        errorMsg = "Instance window not detected within timeout period"
-        Call CloseAnyTM1Windows
-        Exit Function
-    End If
-    
-    ' Additional wait to ensure components load
-    Application.Wait Now + TimeValue("00:00:03")
-    
-    ' Check if window still exists (didn't crash)
-    If IsWindowOpen("TM1") Or IsWindowOpen(instanceName) Or IsWindowOpen("Perspectives") Then
-        ValidateTM1InstanceByLaunch = True
-        errorMsg = "Instance launched successfully - Window active"
+    ' If we reach here, connection failed
+    If IsError(testCell.Value) Then
+        errorMsg = "Connection failed - " & GetErrorDescription(testCell.Value)
     Else
-        errorMsg = "Instance window closed unexpectedly after launch"
+        errorMsg = "Connection timeout - No response from server"
     End If
     
-    ' Close the instance window
-    Call CloseAnyTM1Windows
-    
+    TestTM1ConnectionWithFormula = False
     Exit Function
     
-LaunchError:
-    errorMsg = "Launch error: " & Err.Description & " (Code: " & Err.Number & ")"
-    ValidateTM1InstanceByLaunch = False
-    Call CloseAnyTM1Windows
+TestError:
+    errorMsg = "Test error: " & Err.Description
+    TestTM1ConnectionWithFormula = False
 End Function
 
-Function IsWindowOpen(windowTitle As String) As Boolean
-    ' Checks if a window with the given title exists
-    On Error Resume Next
-    IsWindowOpen = (wshShell.AppActivate(windowTitle) = True)
-    On Error GoTo 0
+Function GetErrorDescription(errorValue As Variant) As String
+    ' Translates Excel error values to readable descriptions
+    Select Case errorValue
+        Case CVErr(xlErrName)
+            GetErrorDescription = "#NAME? - Server not found or TM1 functions not available"
+        Case CVErr(xlErrNA)
+            GetErrorDescription = "#N/A - Cannot connect to TM1 instance"
+        Case CVErr(xlErrValue)
+            GetErrorDescription = "#VALUE! - Invalid server address format"
+        Case CVErr(xlErrRef)
+            GetErrorDescription = "#REF! - Reference error"
+        Case CVErr(xlErrNum)
+            GetErrorDescription = "#NUM! - Numeric error"
+        Case CVErr(xlErrNull)
+            GetErrorDescription = "#NULL! - Null error"
+        Case Else
+            GetErrorDescription = "Unknown error"
+    End Select
 End Function
 
-Sub CloseAnyTM1Windows()
-    ' Attempts to close any open TM1 windows
-    On Error Resume Next
+Sub InitializeConfigSheet(ws As Worksheet)
+    ' Sets up the configuration sheet with headers and instructions
     
-    ' Try common TM1 window titles
-    Dim titles As Variant
-    Dim i As Integer
-    
-    titles = Array("TM1", "Perspectives", "IBM TM1", "TM1 Perspectives")
-    
-    For i = 0 To UBound(titles)
-        If wshShell.AppActivate(titles(i)) Then
-            wshShell.SendKeys "%{F4}", True  ' Alt+F4
-            Application.Wait Now + TimeValue("00:00:01")
-        End If
-    Next i
-    
-    On Error GoTo 0
-End Sub
-
-Function GetOrCreateSheet(sheetName As String) As Worksheet
-    ' Gets existing sheet or creates new one
-    Dim ws As Worksheet
-    
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(sheetName)
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        ws.Name = sheetName
+    If ws.Cells(1, 1).Value = "" Then
+        ws.Cells(1, 1).Value = "Instance Name"
+        ws.Cells(1, 2).Value = "Server Address"
+        
+        With ws.Range("A1:B1")
+            .Font.Bold = True
+            .Interior.Color = RGB(79, 129, 189)
+            .Font.Color = RGB(255, 255, 255)
+            .HorizontalAlignment = xlCenter
+        End With
+        
+        ' Add instructions
+        ws.Cells(2, 1).Value = "PROD_Finance"
+        ws.Cells(2, 2).Value = "servername:port"
+        
+        ws.Cells(4, 1).Value = "INSTRUCTIONS:"
+        ws.Cells(5, 1).Value = "1. Replace 'servername:port' with your actual TM1 server"
+        ws.Cells(6, 1).Value = "2. Format: hostname:port or IP:port (e.g., tm1prod:12345)"
+        ws.Cells(7, 1).Value = "3. Add more instances in rows below"
+        ws.Cells(8, 1).Value = "4. Run ValidateAllTM1Instances macro"
+        
+        ws.Range("A4:A8").Font.Italic = True
+        ws.Range("A4:A8").Font.Color = RGB(100, 100, 100)
+        
+        ws.Columns("A:B").AutoFit
     End If
-    
-    Set GetOrCreateSheet = ws
-End Function
+End Sub
 
 Sub InitializeLogSheet(ws As Worksheet)
     ' Sets up the log sheet with headers
@@ -281,36 +249,6 @@ Sub InitializeLogSheet(ws As Worksheet)
         ws.Columns("A:E").AutoFit
     End If
 End Sub
-
-Function ValidateConfigSheet(ws As Worksheet) As Boolean
-    ' Validates the configuration sheet has required columns
-    ValidateConfigSheet = False
-    
-    If ws.Cells(1, 1).Value = "" Then
-        ' Setup config sheet if empty
-        ws.Cells(1, 1).Value = "Instance Name"
-        ws.Cells(1, 2).Value = "Server Address"
-        ws.Cells(1, 3).Value = "Instance Path (Optional)"
-        
-        With ws.Range("A1:C1")
-            .Font.Bold = True
-            .Interior.Color = RGB(79, 129, 189)
-            .Font.Color = RGB(255, 255, 255)
-        End With
-        
-        ' Add sample data with instructions
-        ws.Cells(2, 1).Value = "PROD_Instance"
-        ws.Cells(2, 2).Value = "localhost:12345"
-        ws.Cells(2, 3).Value = "C:\ProgramData\IBM\TM1\Instance1.opt"
-        
-        ws.Cells(3, 1).Value = "INSTRUCTIONS:"
-        ws.Cells(3, 2).Value = "Find .opt files in your TM1 configuration folder"
-        
-        ws.Columns("A:C").AutoFit
-    End If
-    
-    ValidateConfigSheet = True
-End Function
 
 Sub LogValidationResult(ws As Worksheet, instanceName As String, serverAddress As String, isHealthy As Boolean, errorMsg As String)
     ' Logs validation result to the log sheet
@@ -348,6 +286,22 @@ Sub LogValidationResult(ws As Worksheet, instanceName As String, serverAddress A
     ws.Columns("A:E").AutoFit
 End Sub
 
+Function GetOrCreateSheet(sheetName As String) As Worksheet
+    ' Gets existing sheet or creates new one
+    Dim ws As Worksheet
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(sheetName)
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = sheetName
+    End If
+    
+    Set GetOrCreateSheet = ws
+End Function
+
 Sub ClearValidationLog()
     ' Utility to clear the validation log (keeps headers)
     Dim ws As Worksheet
@@ -370,83 +324,72 @@ Sub ClearValidationLog()
     End If
 End Sub
 
-Sub PopulateHardcodedInstances(ws As Worksheet)
-    ' *** ADD YOUR TM1 INSTANCES HERE ***
-    ' Clears existing data and populates with hardcoded instance list
+' ====================================================================
+' MANUAL TEST: Test Single TM1 Connection Using Formula
+' Use this to manually test one server before running full validation
+' ====================================================================
+Sub TestSingleTM1Connection()
+    Dim serverAddress As String
+    Dim wsTest As Worksheet
+    Dim testResult As Boolean
+    Dim errorMsg As String
     
-    Dim lastRow As Long
+    ' Prompt for server address
+    serverAddress = InputBox("Enter TM1 server address (format: servername:port)", "Test TM1 Connection", "localhost:12345")
     
-    ' Clear existing data (except headers)
-    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
-    If lastRow > 1 Then
-        ws.Range("A2:C" & lastRow).ClearContents
+    If serverAddress = "" Then Exit Sub
+    
+    Set wsTest = GetOrCreateSheet(TEST_SHEET_NAME)
+    wsTest.Cells.Clear
+    
+    MsgBox "Testing connection to: " & serverAddress & vbCrLf & vbCrLf & "Please wait...", vbInformation
+    
+    testResult = TestTM1ConnectionWithFormula(wsTest, serverAddress, "Test", errorMsg)
+    
+    If testResult Then
+        MsgBox "SUCCESS!" & vbCrLf & vbCrLf & errorMsg, vbInformation, "Connection Test Result"
+    Else
+        MsgBox "FAILED!" & vbCrLf & vbCrLf & errorMsg, vbCritical, "Connection Test Result"
     End If
-    
-    ' ====================================================================
-    ' DEFINE YOUR TM1 INSTANCES BELOW
-    ' Format: ws.Cells(row, 1) = "Instance Name"
-    '         ws.Cells(row, 2) = "server:port"
-    '         ws.Cells(row, 3) = "C:\Path\To\Instance.opt" (OPTIONAL)
-    ' ====================================================================
-    
-    ' Example instances - REPLACE WITH YOUR INSTANCES
-    ws.Cells(2, 1).Value = "PROD_Finance"
-    ws.Cells(2, 2).Value = "tm1server01:12345"
-    ws.Cells(2, 3).Value = "C:\ProgramData\IBM\TM1\PROD_Finance.opt"
-    
-    ws.Cells(3, 1).Value = "PROD_Sales"
-    ws.Cells(3, 2).Value = "tm1server02:12346"
-    ws.Cells(3, 3).Value = "C:\ProgramData\IBM\TM1\PROD_Sales.opt"
-    
-    ws.Cells(4, 1).Value = "DEV_Testing"
-    ws.Cells(4, 2).Value = "localhost:5555"
-    ws.Cells(4, 3).Value = ""  ' Leave blank if unknown
-    
-    ' Add more instances as needed
-    
-    ws.Columns("A:C").AutoFit
-    
 End Sub
 
 ' ====================================================================
-' HELPER FUNCTION: Find TM1 Instance Configuration Files
-' Run this once to find your .opt files locations
+' Create a Manual Test Sheet with TM1 Formulas
+' This creates a sheet where you can see the actual TM1 formulas working
 ' ====================================================================
-Sub FindTM1ConfigFiles()
-    Dim fso As Object
-    Dim folder As Object
-    Dim file As Object
-    Dim searchPaths As Variant
-    Dim i As Integer
-    Dim resultMsg As String
+Sub CreateManualTestSheet()
+    Dim ws As Worksheet
+    Dim serverAddress As String
     
-    Set fso = CreateObject("Scripting.FileSystemObject")
+    serverAddress = InputBox("Enter TM1 server address to test:", "Manual Test Sheet", "localhost:12345")
+    If serverAddress = "" Then Exit Sub
     
-    ' Common TM1 configuration locations
-    searchPaths = Array( _
-        "C:\ProgramData\IBM\TM1", _
-        "C:\Program Files\IBM\Cognos\TM1", _
-        "C:\TM1Data", _
-        Environ("USERPROFILE") & "\Documents\TM1" _
-    )
+    Set ws = GetOrCreateSheet("TM1_ManualTest")
+    ws.Cells.Clear
     
-    resultMsg = "TM1 Configuration Files Found:" & vbCrLf & vbCrLf
+    ' Header
+    ws.Cells(1, 1).Value = "TM1 Manual Connection Test"
+    ws.Cells(1, 1).Font.Bold = True
+    ws.Cells(1, 1).Font.Size = 14
     
-    For i = 0 To UBound(searchPaths)
-        If fso.FolderExists(searchPaths(i)) Then
-            Set folder = fso.GetFolder(searchPaths(i))
-            resultMsg = resultMsg & "Location: " & searchPaths(i) & vbCrLf
-            
-            For Each file In folder.Files
-                If LCase(fso.GetExtensionName(file.Name)) = "opt" Then
-                    resultMsg = resultMsg & "  - " & file.Path & vbCrLf
-                End If
-            Next file
-            resultMsg = resultMsg & vbCrLf
-        End If
-    Next i
+    ws.Cells(2, 1).Value = "Server:"
+    ws.Cells(2, 2).Value = serverAddress
+    ws.Cells(2, 2).Font.Bold = True
     
-    MsgBox resultMsg, vbInformation, "TM1 Instance Finder"
+    ' Test formulas
+    ws.Cells(4, 1).Value = "Test 1: SUBNM"
+    ws.Cells(4, 2).Formula = "=SUBNM(""" & serverAddress & """, ""}"")"
     
-    Set fso = Nothing
+    ws.Cells(5, 1).Value = "Test 2: TM1RPTROW"
+    ws.Cells(5, 2).Formula = "=TM1RPTROW(""" & serverAddress & """,""}"","""","""")"
+    
+    ws.Cells(7, 1).Value = "Instructions:"
+    ws.Cells(8, 1).Value = "- If formulas show server name or data = SUCCESS"
+    ws.Cells(9, 1).Value = "- If formulas show #N/A or #NAME? = FAILED"
+    ws.Cells(10, 1).Value = "- Wait 10-15 seconds for formulas to calculate"
+    
+    ws.Range("A7:A10").Font.Italic = True
+    ws.Columns("A:B").AutoFit
+    
+    MsgBox "Manual test sheet created!" & vbCrLf & vbCrLf & "Check cells B4 and B5 for results.", vbInformation
 End Sub
