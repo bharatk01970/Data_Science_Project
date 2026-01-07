@@ -1,18 +1,19 @@
 Option Explicit
 
 ' ===================================================================
-' TM1 Instance Health Check Validator
+' TM1 Instance Health Check Validator - Windows Automation Method
 ' Purpose: Automate validation of TM1 instances in Citrix environment
+' Method: Uses Windows Shell and UI automation instead of TM1 API
 ' ===================================================================
 
 ' Configuration Constants
-Const TIMEOUT_SECONDS As Long = 30
+Const TIMEOUT_SECONDS As Long = 45
 Const LOG_SHEET_NAME As String = "TM1_ValidationLog"
 Const CONFIG_SHEET_NAME As String = "TM1_Instances"
+Const LAUNCH_WAIT_SECONDS As Long = 10
 
-' TM1 API Object References
-Dim tm1API As Object
-Dim tm1Server As Object
+' Windows Shell Object
+Dim wshShell As Object
 
 Sub ValidateAllTM1Instances()
     ' Main procedure to validate all configured TM1 instances
@@ -23,12 +24,17 @@ Sub ValidateAllTM1Instances()
     Dim i As Long
     Dim instanceName As String
     Dim serverAddress As String
+    Dim instancePath As String
     Dim startTime As Double
     Dim validationResult As String
     Dim errorMessage As String
     Dim isHealthy As Boolean
+    Dim useHardcodedList As Boolean
     
     On Error GoTo ErrorHandler
+    
+    ' *** CONFIGURATION: Set to True to use hardcoded list below ***
+    useHardcodedList = False
     
     ' Initialize worksheets
     Set wsConfig = GetOrCreateSheet(CONFIG_SHEET_NAME)
@@ -37,9 +43,14 @@ Sub ValidateAllTM1Instances()
     ' Setup log sheet headers if needed
     Call InitializeLogSheet(wsLog)
     
+    ' If using hardcoded list, populate the config sheet
+    If useHardcodedList Then
+        Call PopulateHardcodedInstances(wsConfig)
+    End If
+    
     ' Validate configuration sheet structure
     If Not ValidateConfigSheet(wsConfig) Then
-        MsgBox "Configuration sheet is invalid. Please ensure columns: Instance Name, Server Address", vbCritical
+        MsgBox "Configuration sheet is invalid. Please ensure columns: Instance Name, Server Address, Instance Path", vbCritical
         Exit Sub
     End If
     
@@ -55,19 +66,14 @@ Sub ValidateAllTM1Instances()
     Application.ScreenUpdating = False
     Application.StatusBar = "Starting TM1 instance validation..."
     
-    ' Initialize TM1 API
-    On Error Resume Next
-    Set tm1API = CreateObject("TM1API.TM1API")
-    If tm1API Is Nothing Then
-        MsgBox "Failed to initialize TM1 API. Please ensure TM1 is properly installed.", vbCritical
-        Exit Sub
-    End If
-    On Error GoTo ErrorHandler
+    ' Initialize Windows Shell
+    Set wshShell = CreateObject("WScript.Shell")
     
     ' Iterate through all instances
     For i = 2 To lastRow
         instanceName = Trim(wsConfig.Cells(i, 1).Value)
         serverAddress = Trim(wsConfig.Cells(i, 2).Value)
+        instancePath = Trim(wsConfig.Cells(i, 3).Value)
         
         If instanceName <> "" And serverAddress <> "" Then
             Application.StatusBar = "Validating instance " & i - 1 & " of " & lastRow - 1 & ": " & instanceName
@@ -77,18 +83,18 @@ Sub ValidateAllTM1Instances()
             errorMessage = ""
             
             ' Validate the instance
-            isHealthy = ValidateTM1Instance(instanceName, serverAddress, errorMessage)
+            isHealthy = ValidateTM1InstanceByLaunch(instanceName, serverAddress, instancePath, errorMessage)
             
             ' Log the result
             Call LogValidationResult(wsLog, instanceName, serverAddress, isHealthy, errorMessage)
             
             ' Brief pause between checks
-            Application.Wait Now + TimeValue("00:00:01")
+            Application.Wait Now + TimeValue("00:00:02")
         End If
     Next i
     
     ' Cleanup
-    Call CleanupTM1Objects
+    Set wshShell = Nothing
     
     Application.ScreenUpdating = True
     Application.StatusBar = False
@@ -100,132 +106,141 @@ Sub ValidateAllTM1Instances()
 ErrorHandler:
     Application.ScreenUpdating = True
     Application.StatusBar = False
-    Call CleanupTM1Objects
+    Set wshShell = Nothing
     MsgBox "Error in validation process: " & Err.Description, vbCritical
 End Sub
 
-Function ValidateTM1Instance(instanceName As String, serverAddress As String, ByRef errorMsg As String) As Boolean
-    ' Validates a single TM1 instance by attempting to connect and verify components
+Function ValidateTM1InstanceByLaunch(instanceName As String, serverAddress As String, instancePath As String, ByRef errorMsg As String) As Boolean
+    ' Validates a TM1 instance by launching it and checking for errors
     
     Dim startTime As Double
-    Dim isConnected As Boolean
-    Dim tm1Process As Object
-    Dim cubeCount As Long
+    Dim tm1WindowTitle As String
+    Dim launchCommand As String
+    Dim processID As Long
+    Dim waitCounter As Integer
+    Dim windowFound As Boolean
+    Dim errorWindowFound As Boolean
     
-    On Error GoTo InstanceError
+    On Error GoTo LaunchError
     
-    ValidateTM1Instance = False
+    ValidateTM1InstanceByLaunch = False
     errorMsg = ""
     startTime = Timer
     
-    ' Attempt to connect to TM1 server
-    Set tm1Server = tm1API.Connect(serverAddress)
-    
-    If tm1Server Is Nothing Then
-        errorMsg = "Failed to connect to server"
-        Exit Function
+    ' Determine launch method
+    If instancePath <> "" Then
+        ' Method 1: Direct instance file path (e.g., .opt file)
+        If Dir(instancePath) <> "" Then
+            launchCommand = instancePath
+        Else
+            errorMsg = "Instance path not found: " & instancePath
+            Exit Function
+        End If
+    Else
+        ' Method 2: Try to launch TM1 Perspectives with server parameter
+        launchCommand = "tm1p.exe"
     End If
     
-    ' Check timeout
-    If (Timer - startTime) > TIMEOUT_SECONDS Then
-        errorMsg = "Connection timeout exceeded"
-        Call DisconnectTM1
-        Exit Function
-    End If
-    
-    ' Verify server connection is active
+    ' Launch the instance
     On Error Resume Next
-    cubeCount = tm1Server.Cubes.Count
+    wshShell.Run launchCommand, 1, False
+    
     If Err.Number <> 0 Then
-        errorMsg = "Server connection failed: " & Err.Description
-        Err.Clear
-        Call DisconnectTM1
-        Exit Function
-    End If
-    On Error GoTo InstanceError
-    
-    ' Additional component checks
-    If Not ValidateTM1Components(errorMsg) Then
-        Call DisconnectTM1
-        Exit Function
-    End If
-    
-    ' Check total validation time
-    If (Timer - startTime) > TIMEOUT_SECONDS Then
-        errorMsg = "Component validation timeout"
-        Call DisconnectTM1
-        Exit Function
-    End If
-    
-    ' Successful validation
-    ValidateTM1Instance = True
-    errorMsg = "Instance healthy - All components loaded"
-    
-    Call DisconnectTM1
-    Exit Function
-    
-InstanceError:
-    errorMsg = "Error: " & Err.Description & " (Code: " & Err.Number & ")"
-    ValidateTM1Instance = False
-    Call DisconnectTM1
-End Function
-
-Function ValidateTM1Components(ByRef errorMsg As String) As Boolean
-    ' Validates critical TM1 components are accessible
-    
-    Dim dimCount As Long
-    Dim processCount As Long
-    
-    On Error GoTo ComponentError
-    
-    ValidateTM1Components = False
-    
-    ' Check Dimensions
-    dimCount = tm1Server.Dimensions.Count
-    If dimCount < 0 Then
-        errorMsg = "Dimensions collection not accessible"
-        Exit Function
-    End If
-    
-    ' Check Cubes
-    If tm1Server.Cubes.Count < 0 Then
-        errorMsg = "Cubes collection not accessible"
-        Exit Function
-    End If
-    
-    ' Check Processes
-    On Error Resume Next
-    processCount = tm1Server.Processes.Count
-    If Err.Number <> 0 Then
-        errorMsg = "Processes collection not accessible"
+        errorMsg = "Failed to launch instance: " & Err.Description
         Err.Clear
         Exit Function
     End If
-    On Error GoTo ComponentError
+    On Error GoTo LaunchError
     
-    ValidateTM1Components = True
+    ' Wait for instance window to appear
+    waitCounter = 0
+    windowFound = False
+    errorWindowFound = False
+    
+    Do While waitCounter < LAUNCH_WAIT_SECONDS
+        DoEvents
+        Application.Wait Now + TimeValue("00:00:01")
+        waitCounter = waitCounter + 1
+        
+        ' Check for TM1 window (various possible titles)
+        If IsWindowOpen("TM1") Or IsWindowOpen(instanceName) Or IsWindowOpen("Perspectives") Then
+            windowFound = True
+            Exit Do
+        End If
+        
+        ' Check for error dialogs
+        If IsWindowOpen("Error") Or IsWindowOpen("TM1 Server Login") Or IsWindowOpen("Connection Failed") Then
+            errorWindowFound = True
+            Exit Do
+        End If
+        
+        ' Check timeout
+        If (Timer - startTime) > TIMEOUT_SECONDS Then
+            errorMsg = "Launch timeout exceeded"
+            Call CloseAnyTM1Windows
+            Exit Function
+        End If
+    Loop
+    
+    ' Evaluate results
+    If errorWindowFound Then
+        errorMsg = "Instance launch failed - Error dialog detected"
+        Call CloseAnyTM1Windows
+        Exit Function
+    End If
+    
+    If Not windowFound Then
+        errorMsg = "Instance window not detected within timeout period"
+        Call CloseAnyTM1Windows
+        Exit Function
+    End If
+    
+    ' Additional wait to ensure components load
+    Application.Wait Now + TimeValue("00:00:03")
+    
+    ' Check if window still exists (didn't crash)
+    If IsWindowOpen("TM1") Or IsWindowOpen(instanceName) Or IsWindowOpen("Perspectives") Then
+        ValidateTM1InstanceByLaunch = True
+        errorMsg = "Instance launched successfully - Window active"
+    Else
+        errorMsg = "Instance window closed unexpectedly after launch"
+    End If
+    
+    ' Close the instance window
+    Call CloseAnyTM1Windows
+    
     Exit Function
     
-ComponentError:
-    errorMsg = "Component validation error: " & Err.Description
-    ValidateTM1Components = False
+LaunchError:
+    errorMsg = "Launch error: " & Err.Description & " (Code: " & Err.Number & ")"
+    ValidateTM1InstanceByLaunch = False
+    Call CloseAnyTM1Windows
 End Function
 
-Sub DisconnectTM1()
-    ' Safely disconnect from TM1 server
+Function IsWindowOpen(windowTitle As String) As Boolean
+    ' Checks if a window with the given title exists
     On Error Resume Next
-    If Not tm1Server Is Nothing Then
-        tm1Server.Disconnect
-        Set tm1Server = Nothing
-    End If
+    IsWindowOpen = (wshShell.AppActivate(windowTitle) = True)
     On Error GoTo 0
-End Sub
+End Function
 
-Sub CleanupTM1Objects()
-    ' Release all TM1 object references
+Sub CloseAnyTM1Windows()
+    ' Attempts to close any open TM1 windows
     On Error Resume Next
-    Call DisconnectTM1
-    Set tm1API = Nothing
+    
+    ' Try common TM1 window titles
+    Dim titles As Variant
+    Dim i As Integer
+    
+    titles = Array("TM1", "Perspectives", "IBM TM1", "TM1 Perspectives")
+    
+    For i = 0 To UBound(titles)
+        If wshShell.AppActivate(titles(i)) Then
+            wshShell.SendKeys "%{F4}", True  ' Alt+F4
+            Application.Wait Now + TimeValue("00:00:01")
+        End If
+    Next i
+    
     On Error GoTo 0
 End Sub
 
@@ -275,18 +290,23 @@ Function ValidateConfigSheet(ws As Worksheet) As Boolean
         ' Setup config sheet if empty
         ws.Cells(1, 1).Value = "Instance Name"
         ws.Cells(1, 2).Value = "Server Address"
+        ws.Cells(1, 3).Value = "Instance Path (Optional)"
         
-        With ws.Range("A1:B1")
+        With ws.Range("A1:C1")
             .Font.Bold = True
             .Interior.Color = RGB(79, 129, 189)
             .Font.Color = RGB(255, 255, 255)
         End With
         
-        ' Add sample data
+        ' Add sample data with instructions
         ws.Cells(2, 1).Value = "PROD_Instance"
         ws.Cells(2, 2).Value = "localhost:12345"
+        ws.Cells(2, 3).Value = "C:\ProgramData\IBM\TM1\Instance1.opt"
         
-        ws.Columns("A:B").AutoFit
+        ws.Cells(3, 1).Value = "INSTRUCTIONS:"
+        ws.Cells(3, 2).Value = "Find .opt files in your TM1 configuration folder"
+        
+        ws.Columns("A:C").AutoFit
     End If
     
     ValidateConfigSheet = True
@@ -348,4 +368,85 @@ Sub ClearValidationLog()
     Else
         MsgBox "Log sheet not found.", vbExclamation
     End If
+End Sub
+
+Sub PopulateHardcodedInstances(ws As Worksheet)
+    ' *** ADD YOUR TM1 INSTANCES HERE ***
+    ' Clears existing data and populates with hardcoded instance list
+    
+    Dim lastRow As Long
+    
+    ' Clear existing data (except headers)
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    If lastRow > 1 Then
+        ws.Range("A2:C" & lastRow).ClearContents
+    End If
+    
+    ' ====================================================================
+    ' DEFINE YOUR TM1 INSTANCES BELOW
+    ' Format: ws.Cells(row, 1) = "Instance Name"
+    '         ws.Cells(row, 2) = "server:port"
+    '         ws.Cells(row, 3) = "C:\Path\To\Instance.opt" (OPTIONAL)
+    ' ====================================================================
+    
+    ' Example instances - REPLACE WITH YOUR INSTANCES
+    ws.Cells(2, 1).Value = "PROD_Finance"
+    ws.Cells(2, 2).Value = "tm1server01:12345"
+    ws.Cells(2, 3).Value = "C:\ProgramData\IBM\TM1\PROD_Finance.opt"
+    
+    ws.Cells(3, 1).Value = "PROD_Sales"
+    ws.Cells(3, 2).Value = "tm1server02:12346"
+    ws.Cells(3, 3).Value = "C:\ProgramData\IBM\TM1\PROD_Sales.opt"
+    
+    ws.Cells(4, 1).Value = "DEV_Testing"
+    ws.Cells(4, 2).Value = "localhost:5555"
+    ws.Cells(4, 3).Value = ""  ' Leave blank if unknown
+    
+    ' Add more instances as needed
+    
+    ws.Columns("A:C").AutoFit
+    
+End Sub
+
+' ====================================================================
+' HELPER FUNCTION: Find TM1 Instance Configuration Files
+' Run this once to find your .opt files locations
+' ====================================================================
+Sub FindTM1ConfigFiles()
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim searchPaths As Variant
+    Dim i As Integer
+    Dim resultMsg As String
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Common TM1 configuration locations
+    searchPaths = Array( _
+        "C:\ProgramData\IBM\TM1", _
+        "C:\Program Files\IBM\Cognos\TM1", _
+        "C:\TM1Data", _
+        Environ("USERPROFILE") & "\Documents\TM1" _
+    )
+    
+    resultMsg = "TM1 Configuration Files Found:" & vbCrLf & vbCrLf
+    
+    For i = 0 To UBound(searchPaths)
+        If fso.FolderExists(searchPaths(i)) Then
+            Set folder = fso.GetFolder(searchPaths(i))
+            resultMsg = resultMsg & "Location: " & searchPaths(i) & vbCrLf
+            
+            For Each file In folder.Files
+                If LCase(fso.GetExtensionName(file.Name)) = "opt" Then
+                    resultMsg = resultMsg & "  - " & file.Path & vbCrLf
+                End If
+            Next file
+            resultMsg = resultMsg & vbCrLf
+        End If
+    Next i
+    
+    MsgBox resultMsg, vbInformation, "TM1 Instance Finder"
+    
+    Set fso = Nothing
 End Sub
