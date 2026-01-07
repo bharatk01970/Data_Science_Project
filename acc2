@@ -1,9 +1,9 @@
 Option Explicit
 
 ' ===================================================================
-' TM1 Instance Health Check Validator - Excel Formula Method
-' Purpose: Validate TM1 instances using native Excel TM1 functions
-' Method: Uses DBRW/SUBNM functions to test connectivity
+' TM1 Instance Health Check Validator - Improved Formula Method
+' Purpose: Validate TM1 instances with proper error detection
+' Method: Uses multiple validation checks with fresh connections
 ' ===================================================================
 
 ' Configuration Constants
@@ -12,7 +12,7 @@ Const CONFIG_SHEET_NAME As String = "TM1_Instances"
 Const TEST_SHEET_NAME As String = "TM1_ConnectionTest"
 
 Sub ValidateAllTM1Instances()
-    ' Main procedure to validate all configured TM1 instances using Excel formulas
+    ' Main procedure to validate all configured TM1 instances
     
     Dim wsConfig As Worksheet
     Dim wsLog As Worksheet
@@ -21,11 +21,8 @@ Sub ValidateAllTM1Instances()
     Dim i As Long
     Dim instanceName As String
     Dim serverAddress As String
-    Dim testCell As Range
-    Dim formulaResult As Variant
     Dim isHealthy As Boolean
     Dim errorMessage As String
-    Dim attempts As Integer
     
     On Error GoTo ErrorHandler
     
@@ -49,12 +46,11 @@ Sub ValidateAllTM1Instances()
     ' Display progress
     Application.ScreenUpdating = False
     Application.DisplayAlerts = False
-    Application.StatusBar = "Starting TM1 instance validation using Excel formulas..."
-    Application.Calculation = xlCalculationManual
+    Application.StatusBar = "Starting TM1 instance validation..."
     
-    ' Clear test sheet
+    ' Clear test sheet and disable calculation temporarily
     wsTest.Cells.Clear
-    wsTest.Cells(1, 1).Value = "Test Area - Do Not Delete"
+    wsTest.Cells(1, 1).Value = "Test Area"
     
     ' Iterate through all instances
     For i = 2 To lastRow
@@ -67,8 +63,11 @@ Sub ValidateAllTM1Instances()
             isHealthy = False
             errorMessage = ""
             
-            ' Test connection using Excel TM1 formulas
-            isHealthy = TestTM1ConnectionWithFormula(wsTest, serverAddress, instanceName, errorMessage)
+            ' Clear previous test results
+            wsTest.Range("A2:Z100").Clear
+            
+            ' Test connection with proper error detection
+            isHealthy = TestTM1ConnectionRobust(wsTest, serverAddress, instanceName, errorMessage)
             
             ' Log the result
             Call LogValidationResult(wsLog, instanceName, serverAddress, isHealthy, errorMessage)
@@ -78,8 +77,6 @@ Sub ValidateAllTM1Instances()
     Next i
     
     ' Cleanup
-    Application.Calculation = xlCalculationAutomatic
-    Application.Calculate
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
     Application.StatusBar = False
@@ -89,111 +86,183 @@ Sub ValidateAllTM1Instances()
     Exit Sub
     
 ErrorHandler:
-    Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
     Application.DisplayAlerts = True
     Application.StatusBar = False
     MsgBox "Error in validation process: " & Err.Description, vbCritical
 End Sub
 
-Function TestTM1ConnectionWithFormula(wsTest As Worksheet, serverAddress As String, instanceName As String, ByRef errorMsg As String) As Boolean
-    ' Tests TM1 connection using native Excel TM1 functions
+Function TestTM1ConnectionRobust(wsTest As Worksheet, serverAddress As String, instanceName As String, ByRef errorMsg As String) As Boolean
+    ' Tests TM1 connection with multiple validation methods and proper error detection
     
     Dim testCell As Range
     Dim formulaString As String
     Dim cellValue As Variant
     Dim waitCounter As Integer
     Dim maxWait As Integer
+    Dim testsPassed As Integer
+    Dim originalCalc As XlCalculation
     
     On Error GoTo TestError
     
-    TestTM1ConnectionWithFormula = False
+    TestTM1ConnectionRobust = False
     errorMsg = ""
-    maxWait = 15 ' seconds
+    maxWait = 20 ' seconds
+    testsPassed = 0
     
-    ' Set test cell
-    Set testCell = wsTest.Range("A2")
+    ' Save calculation mode and set to automatic
+    originalCalc = Application.Calculation
+    Application.Calculation = xlCalculationAutomatic
+    
+    ' ===================================================================
+    ' TEST 1: SUBNM - Get Server Name
+    ' ===================================================================
+    Set testCell = wsTest.Range("B2")
     testCell.Clear
+    wsTest.Range("A2").Value = "Test 1: SUBNM"
     
-    ' Method 1: Try SUBNM function (gets server name - proves connection)
-    ' Format: =SUBNM("ServerName:Port", "}")
     formulaString = "=SUBNM(""" & serverAddress & """, ""}"")"
-    
     testCell.Formula = formulaString
     
-    ' Force calculation and wait
+    ' Wait for formula to calculate
     Application.Calculate
-    DoEvents
-    
-    ' Wait for formula to resolve (up to maxWait seconds)
-    For waitCounter = 1 To maxWait
-        Application.Wait Now + TimeValue("00:00:01")
+    For waitCounter = 1 To 8
         DoEvents
+        Application.Wait Now + TimeValue("00:00:01")
         cellValue = testCell.Value
         
-        ' Check if we got a valid result
-        If Not IsError(cellValue) Then
-            If cellValue <> "" And cellValue <> 0 Then
-                ' Success - we got server name back
-                TestTM1ConnectionWithFormula = True
-                errorMsg = "Connected successfully - Server: " & cellValue
-                Exit Function
-            End If
-        Else
-            ' Got an error from the formula
+        ' Check for valid result
+        If Not IsEmpty(cellValue) Then
             Exit For
         End If
     Next waitCounter
     
-    ' Method 2: Try alternative connection test using TM1RPTROW
+    cellValue = testCell.Value
+    
+    ' Validate result
+    If IsError(cellValue) Then
+        errorMsg = "SUBNM failed: " & GetErrorDescription(cellValue)
+    ElseIf IsEmpty(cellValue) Or cellValue = "" Or cellValue = 0 Then
+        errorMsg = "SUBNM returned empty - Server not responding"
+    ElseIf VarType(cellValue) = vbString And Len(cellValue) > 0 Then
+        testsPassed = testsPassed + 1
+        errorMsg = "SUBNM passed (Server: " & cellValue & ")"
+    Else
+        errorMsg = "SUBNM returned unexpected value: " & cellValue
+    End If
+    
+    wsTest.Range("C2").Value = errorMsg
+    
+    ' ===================================================================
+    ' TEST 2: TM1SERVERHANDLE - Get Server Handle (proves active connection)
+    ' ===================================================================
+    Set testCell = wsTest.Range("B3")
     testCell.Clear
-    formulaString = "=TM1RPTROW(""" & serverAddress & """,""}"","""","""")"
+    wsTest.Range("A3").Value = "Test 2: TM1SERVERHANDLE"
+    
+    formulaString = "=TM1SERVERHANDLE(""" & serverAddress & """)"
     testCell.Formula = formulaString
     
     Application.Calculate
-    DoEvents
-    Application.Wait Now + TimeValue("00:00:02")
+    For waitCounter = 1 To 8
+        DoEvents
+        Application.Wait Now + TimeValue("00:00:01")
+        cellValue = testCell.Value
+        
+        If Not IsEmpty(cellValue) Then
+            Exit For
+        End If
+    Next waitCounter
     
     cellValue = testCell.Value
     
-    If Not IsError(cellValue) Then
-        TestTM1ConnectionWithFormula = True
-        errorMsg = "Connected successfully using TM1RPTROW"
-        Exit Function
-    End If
-    
-    ' If we reach here, connection failed
-    If IsError(testCell.Value) Then
-        errorMsg = "Connection failed - " & GetErrorDescription(testCell.Value)
+    If IsError(cellValue) Then
+        wsTest.Range("C3").Value = "FAILED: " & GetErrorDescription(cellValue)
+    ElseIf IsEmpty(cellValue) Or cellValue = "" Or cellValue = 0 Then
+        wsTest.Range("C3").Value = "FAILED: No handle returned"
+    ElseIf IsNumeric(cellValue) And cellValue > 0 Then
+        testsPassed = testsPassed + 1
+        wsTest.Range("C3").Value = "PASSED (Handle: " & cellValue & ")"
     Else
-        errorMsg = "Connection timeout - No response from server"
+        wsTest.Range("C3").Value = "FAILED: Invalid handle"
     End If
     
-    TestTM1ConnectionWithFormula = False
+    ' ===================================================================
+    ' TEST 3: Try to get dimension count using DBSW
+    ' ===================================================================
+    Set testCell = wsTest.Range("B4")
+    testCell.Clear
+    wsTest.Range("A4").Value = "Test 3: DBSW"
+    
+    ' Try to get system info - this will fail if server isn't accessible
+    formulaString = "=DBSW(""" & serverAddress & """,""}"","""")"
+    testCell.Formula = formulaString
+    
+    Application.Calculate
+    For waitCounter = 1 To 8
+        DoEvents
+        Application.Wait Now + TimeValue("00:00:01")
+        cellValue = testCell.Value
+        
+        If Not IsEmpty(cellValue) Then
+            Exit For
+        End If
+    Next waitCounter
+    
+    cellValue = testCell.Value
+    
+    If IsError(cellValue) Then
+        wsTest.Range("C4").Value = "FAILED: " & GetErrorDescription(cellValue)
+    ElseIf IsEmpty(cellValue) Then
+        wsTest.Range("C4").Value = "FAILED: No response"
+    Else
+        testsPassed = testsPassed + 1
+        wsTest.Range("C4").Value = "PASSED"
+    End If
+    
+    ' ===================================================================
+    ' FINAL EVALUATION
+    ' ===================================================================
+    Application.Calculation = originalCalc
+    
+    ' Need at least 2 out of 3 tests to pass
+    If testsPassed >= 2 Then
+        TestTM1ConnectionRobust = True
+        errorMsg = "Instance AVAILABLE - " & testsPassed & " of 3 tests passed"
+    Else
+        TestTM1ConnectionRobust = False
+        If errorMsg = "" Then
+            errorMsg = "Instance UNAVAILABLE - Only " & testsPassed & " of 3 tests passed. Check TM1_ConnectionTest sheet for details."
+        End If
+    End If
+    
     Exit Function
     
 TestError:
+    Application.Calculation = originalCalc
     errorMsg = "Test error: " & Err.Description
-    TestTM1ConnectionWithFormula = False
+    TestTM1ConnectionRobust = False
 End Function
 
 Function GetErrorDescription(errorValue As Variant) As String
     ' Translates Excel error values to readable descriptions
     Select Case errorValue
         Case CVErr(xlErrName)
-            GetErrorDescription = "#NAME? - Server not found or TM1 functions not available"
+            GetErrorDescription = "#NAME? (TM1 function not available or server not found)"
         Case CVErr(xlErrNA)
-            GetErrorDescription = "#N/A - Cannot connect to TM1 instance"
+            GetErrorDescription = "#N/A (Cannot connect to server)"
         Case CVErr(xlErrValue)
-            GetErrorDescription = "#VALUE! - Invalid server address format"
+            GetErrorDescription = "#VALUE! (Invalid server format)"
         Case CVErr(xlErrRef)
-            GetErrorDescription = "#REF! - Reference error"
+            GetErrorDescription = "#REF! (Reference error)"
         Case CVErr(xlErrNum)
-            GetErrorDescription = "#NUM! - Numeric error"
+            GetErrorDescription = "#NUM! (Numeric error)"
         Case CVErr(xlErrNull)
-            GetErrorDescription = "#NULL! - Null error"
+            GetErrorDescription = "#NULL! (Null error)"
+        Case CVErr(xlErrDiv0)
+            GetErrorDescription = "#DIV/0! (Division by zero)"
         Case Else
-            GetErrorDescription = "Unknown error"
+            GetErrorDescription = "Unknown error (" & TypeName(errorValue) & ")"
     End Select
 End Function
 
@@ -211,15 +280,15 @@ Sub InitializeConfigSheet(ws As Worksheet)
             .HorizontalAlignment = xlCenter
         End With
         
-        ' Add instructions
-        ws.Cells(2, 1).Value = "PROD_Finance"
+        ' Add sample
+        ws.Cells(2, 1).Value = "Example_Instance"
         ws.Cells(2, 2).Value = "servername:port"
         
         ws.Cells(4, 1).Value = "INSTRUCTIONS:"
-        ws.Cells(5, 1).Value = "1. Replace 'servername:port' with your actual TM1 server"
-        ws.Cells(6, 1).Value = "2. Format: hostname:port or IP:port (e.g., tm1prod:12345)"
-        ws.Cells(7, 1).Value = "3. Add more instances in rows below"
-        ws.Cells(8, 1).Value = "4. Run ValidateAllTM1Instances macro"
+        ws.Cells(5, 1).Value = "1. Replace sample with your TM1 server address"
+        ws.Cells(6, 1).Value = "2. Format: hostname:port (e.g., tm1prod:12345)"
+        ws.Cells(7, 1).Value = "3. Make sure TM1 Perspectives is installed"
+        ws.Cells(8, 1).Value = "4. Test one server using TestSingleTM1Connection first"
         
         ws.Range("A4:A8").Font.Italic = True
         ws.Range("A4:A8").Font.Color = RGB(100, 100, 100)
@@ -325,8 +394,7 @@ Sub ClearValidationLog()
 End Sub
 
 ' ====================================================================
-' MANUAL TEST: Test Single TM1 Connection Using Formula
-' Use this to manually test one server before running full validation
+' MANUAL TEST: Test Single TM1 Connection
 ' ====================================================================
 Sub TestSingleTM1Connection()
     Dim serverAddress As String
@@ -335,61 +403,80 @@ Sub TestSingleTM1Connection()
     Dim errorMsg As String
     
     ' Prompt for server address
-    serverAddress = InputBox("Enter TM1 server address (format: servername:port)", "Test TM1 Connection", "localhost:12345")
+    serverAddress = InputBox("Enter TM1 server address (format: servername:port)" & vbCrLf & vbCrLf & _
+                            "Example: tm1prod:12345 or localhost:5555", _
+                            "Test TM1 Connection", "localhost:12345")
     
     If serverAddress = "" Then Exit Sub
     
     Set wsTest = GetOrCreateSheet(TEST_SHEET_NAME)
     wsTest.Cells.Clear
     
-    MsgBox "Testing connection to: " & serverAddress & vbCrLf & vbCrLf & "Please wait...", vbInformation
+    Application.ScreenUpdating = False
     
-    testResult = TestTM1ConnectionWithFormula(wsTest, serverAddress, "Test", errorMsg)
+    MsgBox "Testing connection to: " & serverAddress & vbCrLf & vbCrLf & _
+           "This will take 15-20 seconds. Please wait...", vbInformation
+    
+    testResult = TestTM1ConnectionRobust(wsTest, serverAddress, "Manual Test", errorMsg)
+    
+    Application.ScreenUpdating = True
+    
+    ' Format the test sheet for readability
+    wsTest.Columns("A:C").AutoFit
+    wsTest.Range("A1").Value = "Connection Test Results for: " & serverAddress
+    wsTest.Range("A1").Font.Bold = True
+    wsTest.Range("A1").Font.Size = 12
     
     If testResult Then
-        MsgBox "SUCCESS!" & vbCrLf & vbCrLf & errorMsg, vbInformation, "Connection Test Result"
+        MsgBox "✓ CONNECTION SUCCESS!" & vbCrLf & vbCrLf & _
+               errorMsg & vbCrLf & vbCrLf & _
+               "Check the TM1_ConnectionTest sheet for detailed results.", _
+               vbInformation, "Connection Test Result"
     Else
-        MsgBox "FAILED!" & vbCrLf & vbCrLf & errorMsg, vbCritical, "Connection Test Result"
+        MsgBox "✗ CONNECTION FAILED!" & vbCrLf & vbCrLf & _
+               errorMsg & vbCrLf & vbCrLf & _
+               "Check the TM1_ConnectionTest sheet for detailed error information.", _
+               vbCritical, "Connection Test Result"
     End If
 End Sub
 
 ' ====================================================================
-' Create a Manual Test Sheet with TM1 Formulas
-' This creates a sheet where you can see the actual TM1 formulas working
+' Check if TM1 Functions are Available
 ' ====================================================================
-Sub CreateManualTestSheet()
+Sub CheckTM1FunctionsAvailable()
     Dim ws As Worksheet
-    Dim serverAddress As String
+    Dim testCell As Range
+    Dim result As String
     
-    serverAddress = InputBox("Enter TM1 server address to test:", "Manual Test Sheet", "localhost:12345")
-    If serverAddress = "" Then Exit Sub
-    
-    Set ws = GetOrCreateSheet("TM1_ManualTest")
+    Set ws = GetOrCreateSheet(TEST_SHEET_NAME)
     ws.Cells.Clear
     
-    ' Header
-    ws.Cells(1, 1).Value = "TM1 Manual Connection Test"
+    ws.Cells(1, 1).Value = "TM1 Excel Functions Availability Check"
     ws.Cells(1, 1).Font.Bold = True
-    ws.Cells(1, 1).Font.Size = 14
     
-    ws.Cells(2, 1).Value = "Server:"
-    ws.Cells(2, 2).Value = serverAddress
-    ws.Cells(2, 2).Font.Bold = True
+    ' Test if SUBNM function exists
+    Set testCell = ws.Range("B3")
+    On Error Resume Next
+    testCell.Formula = "=SUBNM(""test"", ""}"")"
     
-    ' Test formulas
-    ws.Cells(4, 1).Value = "Test 1: SUBNM"
-    ws.Cells(4, 2).Formula = "=SUBNM(""" & serverAddress & """, ""}"")"
+    If IsError(testCell.Value) Then
+        If testCell.Value = CVErr(xlErrName) Then
+            result = "TM1 functions are NOT available in this Excel session." & vbCrLf & vbCrLf & _
+                    "Please ensure:" & vbCrLf & _
+                    "1. TM1 Perspectives is installed" & vbCrLf & _
+                    "2. TM1 Excel Add-in is loaded" & vbCrLf & _
+                    "3. You have opened TM1 Perspectives at least once"
+            MsgBox result, vbCritical, "TM1 Functions Not Found"
+        Else
+            result = "TM1 functions appear to be available (got error but not #NAME?)"
+            MsgBox result, vbInformation, "TM1 Functions Check"
+        End If
+    Else
+        result = "TM1 functions are available and working!"
+        MsgBox result, vbInformation, "TM1 Functions Check"
+    End If
     
-    ws.Cells(5, 1).Value = "Test 2: TM1RPTROW"
-    ws.Cells(5, 2).Formula = "=TM1RPTROW(""" & serverAddress & """,""}"","""","""")"
-    
-    ws.Cells(7, 1).Value = "Instructions:"
-    ws.Cells(8, 1).Value = "- If formulas show server name or data = SUCCESS"
-    ws.Cells(9, 1).Value = "- If formulas show #N/A or #NAME? = FAILED"
-    ws.Cells(10, 1).Value = "- Wait 10-15 seconds for formulas to calculate"
-    
-    ws.Range("A7:A10").Font.Italic = True
-    ws.Columns("A:B").AutoFit
-    
-    MsgBox "Manual test sheet created!" & vbCrLf & vbCrLf & "Check cells B4 and B5 for results.", vbInformation
+    ws.Cells(3, 1).Value = result
+    testCell.Clear
+    On Error GoTo 0
 End Sub
