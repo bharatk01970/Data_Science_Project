@@ -1,482 +1,898 @@
-Option Explicit
-
-' ===================================================================
-' TM1 Instance Health Check Validator - Improved Formula Method
-' Purpose: Validate TM1 instances with proper error detection
-' Method: Uses multiple validation checks with fresh connections
-' ===================================================================
-
-' Configuration Constants
-Const LOG_SHEET_NAME As String = "TM1_ValidationLog"
-Const CONFIG_SHEET_NAME As String = "TM1_Instances"
-Const TEST_SHEET_NAME As String = "TM1_ConnectionTest"
-
-Sub ValidateAllTM1Instances()
-    ' Main procedure to validate all configured TM1 instances
+Sub TransformInputToOutput()
+    '=================================================================================
+    ' EXCEL TRANSFORMATION MACRO - ENHANCED VERSION
+    ' Purpose: Transform one input row into three output rows with specific rules
+    ' Enhanced: Added "New code" column, ALL/ATT sorting, hierarchical Middle C sorting
+    '=================================================================================
     
-    Dim wsConfig As Worksheet
-    Dim wsLog As Worksheet
-    Dim wsTest As Worksheet
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
     Dim lastRow As Long
-    Dim i As Long
-    Dim instanceName As String
-    Dim serverAddress As String
-    Dim isHealthy As Boolean
-    Dim errorMessage As String
+    Dim inputRow As Long
+    Dim outputRow As Long
+    Dim level5ID As String
+    Dim level5Name As String
+    Dim level4ID As String
+    Dim level4Name As String
+    Dim level3ID As String
+    Dim level3Name As String
+    Dim level2ID As String
+    Dim level2Name As String
+    Dim level1ID As String
+    Dim level1Name As String
+    Dim comments As String
+    Dim topC As String
+    Dim l2x As String
+    Dim middleCStatus As String
+    Dim isStandard As Boolean
+    Dim allAltSuffix As String
+    Dim shouldTransform As Boolean
+    Dim skippedCount As Long
+    Dim skipReason As String
+    
+    ' Configuration
+    Const INPUT_SHEET = "Input"
+    Const OUTPUT_SHEET = "Output"
+    Const INPUT_START_ROW = 2
+    Const OUTPUT_START_ROW = 2
+    
+    ' Turn off screen updating for faster processing
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
     
     On Error GoTo ErrorHandler
     
-    ' Initialize worksheets
-    Set wsConfig = GetOrCreateSheet(CONFIG_SHEET_NAME)
-    Set wsLog = GetOrCreateSheet(LOG_SHEET_NAME)
-    Set wsTest = GetOrCreateSheet(TEST_SHEET_NAME)
-    
-    ' Setup sheets
-    Call InitializeLogSheet(wsLog)
-    Call InitializeConfigSheet(wsConfig)
-    
-    ' Get last row of instance list
-    lastRow = wsConfig.Cells(wsConfig.Rows.Count, 1).End(xlUp).Row
-    
-    If lastRow < 2 Then
-        MsgBox "No TM1 instances configured. Please add instances to the " & CONFIG_SHEET_NAME & " sheet.", vbInformation
-        Exit Sub
+    ' Set worksheet references
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets(INPUT_SHEET)
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Sheet Not Found"
+        GoTo CleanExit
     End If
     
-    ' Display progress
-    Application.ScreenUpdating = False
-    Application.DisplayAlerts = False
-    Application.StatusBar = "Starting TM1 instance validation..."
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        GoTo CleanExit
+    End If
+    On Error GoTo ErrorHandler
     
-    ' Clear test sheet and disable calculation temporarily
-    wsTest.Cells.Clear
-    wsTest.Cells(1, 1).Value = "Test Area"
+    ' Clear previous output data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    If lastRow >= OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":H" & lastRow).ClearContents
+    End If
     
-    ' Iterate through all instances
-    For i = 2 To lastRow
-        instanceName = Trim(wsConfig.Cells(i, 1).Value)
-        serverAddress = Trim(wsConfig.Cells(i, 2).Value)
+    ' Find last row with data in input sheet
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to process
+    If lastRow < INPUT_START_ROW Then
+        MsgBox "No input data found. Please add data starting from row " & INPUT_START_ROW, vbExclamation, "No Data"
+        GoTo CleanExit
+    End If
+    
+    ' Initialize counters
+    outputRow = OUTPUT_START_ROW
+    skippedCount = 0
+    
+    ' Create debug message
+    Dim debugMsg As String
+    debugMsg = "PROCESSING ROWS:" & vbCrLf & String(60, "=") & vbCrLf
+    
+    ' Loop through each input row
+    For inputRow = INPUT_START_ROW To lastRow
         
-        If instanceName <> "" And serverAddress <> "" Then
-            Application.StatusBar = "Validating instance " & (i - 1) & " of " & (lastRow - 1) & ": " & instanceName
-            
-            isHealthy = False
-            errorMessage = ""
-            
-            ' Clear previous test results
-            wsTest.Range("A2:Z100").Clear
-            
-            ' Test connection with proper error detection
-            isHealthy = TestTM1ConnectionRobust(wsTest, serverAddress, instanceName, errorMessage)
-            
-            ' Log the result
-            Call LogValidationResult(wsLog, instanceName, serverAddress, isHealthy, errorMessage)
-            
-            DoEvents
+        ' Read input data (Columns A to K)
+        level5ID = Trim(CStr(wsInput.Cells(inputRow, 1).Value))
+        level5Name = Trim(CStr(wsInput.Cells(inputRow, 2).Value))
+        level4ID = Trim(CStr(wsInput.Cells(inputRow, 3).Value))
+        level4Name = Trim(CStr(wsInput.Cells(inputRow, 4).Value))
+        level3ID = Trim(CStr(wsInput.Cells(inputRow, 5).Value))
+        level3Name = Trim(CStr(wsInput.Cells(inputRow, 6).Value))
+        level2ID = Trim(CStr(wsInput.Cells(inputRow, 7).Value))
+        level2Name = Trim(CStr(wsInput.Cells(inputRow, 8).Value))
+        level1ID = Trim(CStr(wsInput.Cells(inputRow, 9).Value))
+        level1Name = Trim(CStr(wsInput.Cells(inputRow, 10).Value))
+        comments = Trim(CStr(wsInput.Cells(inputRow, 11).Value))
+        
+        ' Skip empty rows
+        If level5ID = "" Then
+            debugMsg = debugMsg & "Row " & inputRow & ": EMPTY - Skipped" & vbCrLf
+            GoTo NextInputRow
         End If
-    Next i
+        
+        ' Initialize transformation flag
+        shouldTransform = True
+        skipReason = ""
+        
+        '=========================================================================
+        ' FILTER 1: Comments must contain "new"
+        '=========================================================================
+        If InStr(1, UCase(comments), "NEW") = 0 Then
+            shouldTransform = False
+            skipReason = "Comments doesn't contain 'new' (value: '" & comments & "')"
+        End If
+        
+        '=========================================================================
+        ' FILTER 2: Level2 Name must be from the allowed list
+        '=========================================================================
+        If shouldTransform Then
+            Dim isValidLevel2 As Boolean
+            Dim level2Upper As String
+            level2Upper = UCase(level2Name)
+            
+            ' Check if Level2 Name matches any allowed value
+            isValidLevel2 = False
+            If level2Upper = "CENTRAL MANAGED OFFICES" Then isValidLevel2 = True
+            If level2Upper = "CENTRAL MANAGED SERVICES" Then isValidLevel2 = True
+            If level2Upper = "COMM BUSINESSES & MKTS" Then isValidLevel2 = True
+            If level2Upper = "ENTERPRISE TALENT BC" Then isValidLevel2 = True
+            If level2Upper = "FINANCE FUNCTION" Then isValidLevel2 = True
+            If level2Upper = "GLOBAL SUSTAINABILITY" Then isValidLevel2 = True
+            If level2Upper = "GOVERNANCE" Then isValidLevel2 = True
+            If level2Upper = "GROUP BRAND L2" Then isValidLevel2 = True
+            If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then isValidLevel2 = True
+            If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then isValidLevel2 = True
+            If level2Upper = "INTERNAL AUDIT" Then isValidLevel2 = True
+            If level2Upper = "LEGAL" Then isValidLevel2 = True
+            If level2Upper = "PEOPLE" Then isValidLevel2 = True
+            If level2Upper = "RISK & COMPLIANCE" Then isValidLevel2 = True
+            
+            If Not isValidLevel2 Then
+                shouldTransform = False
+                skipReason = "Level2 Name not from list (value: '" & level2Name & "')"
+            End If
+        End If
+        
+        '=========================================================================
+        ' FILTER 3: Level1 Name must be "Alpha", "Kenamma", or "Naago"
+        '=========================================================================
+        If shouldTransform Then
+            If UCase(level1Name) <> "ALPHA" And _
+               UCase(level1Name) <> "KENAMMA" And _
+               UCase(level1Name) <> "NAAGO" Then
+                shouldTransform = False
+                skipReason = "Level1 Name not Alpha/Kenamma/Naago (value: '" & level1Name & "')"
+            End If
+        End If
+        
+        '=========================================================================
+        ' FILTER 4: Exclude if Level5 Name contains "Retained", "Retd", or "Rtd"
+        '=========================================================================
+        If shouldTransform Then
+            If InStr(1, UCase(level5Name), "RETAINED") > 0 Or _
+               InStr(1, UCase(level5Name), "RETD") > 0 Or _
+               InStr(1, UCase(level5Name), "RTD") > 0 Then
+                shouldTransform = False
+                skipReason = "Level5 Name contains Retained/Retd/Rtd (value: '" & level5Name & "')"
+            End If
+        End If
+        
+        ' Add to debug message
+        If shouldTransform Then
+            debugMsg = debugMsg & "Row " & inputRow & ": PROCESSING ✓ (ID: " & level5ID & ")" & vbCrLf
+        Else
+            debugMsg = debugMsg & "Row " & inputRow & ": SKIPPED - " & skipReason & vbCrLf
+            skippedCount = skippedCount + 1
+            GoTo NextInputRow
+        End If
+        
+        '=========================================================================
+        ' ROW PASSED ALL FILTERS - PROCEED WITH TRANSFORMATION
+        '=========================================================================
+        
+        ' Get Top C and L2X values using mapping functions
+        topC = GetTopCValue(level2Name)
+        l2x = GetL2XValue(level2Name)
+        
+        ' Calculate STD/STEWARDSHIP and ALL/ATT suffix
+        isStandard = False
+        If InStr(1, UCase(level5Name), "(STD)") > 0 Or _
+           InStr(1, UCase(level5Name), "(STEWARDSHIP)") > 0 Then
+            isStandard = True
+        End If
+        
+        If isStandard Then
+            allAltSuffix = "ALL"
+        Else
+            allAltSuffix = "ATT"
+        End If
+        
+        ' Build Middle C Status dynamically using L2X
+        middleCStatus = "RBMI - " & l2x & "_" & allAltSuffix
+        
+        '=========================================================================
+        ' OUTPUT ROW 1
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_NCR" & allAltSuffix            ' Column 3: Middle C (L2X_NCR + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = "."                                     ' Column 4: Middle C (.)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_NCR"          ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "R-" & level5ID                         ' Column 6: N element (R-)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 2
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_ARAC" & allAltSuffix           ' Column 4: Middle C (L2X_ARAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_ARAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+        '=========================================================================
+        ' OUTPUT ROW 3
+        '=========================================================================
+        wsOutput.Cells(outputRow, 1).Value = topC                                    ' Column 1: Top C
+        wsOutput.Cells(outputRow, 2).Value = middleCStatus                           ' Column 2: Middle C (RBMI - L2X_ALL/ATT)
+        wsOutput.Cells(outputRow, 3).Value = l2x & "_RAC" & allAltSuffix            ' Column 3: Middle C (L2X_RAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 4).Value = l2x & "_SRAC" & allAltSuffix           ' Column 4: Middle C (L2X_SRAC + ALL/ATT)
+        wsOutput.Cells(outputRow, 5).Value = "RBMI - " & level5ID & "_SRAC"         ' Column 5: Lowest C
+        wsOutput.Cells(outputRow, 6).Value = "I-Dummy"                               ' Column 6: N element (I-Dummy)
+        wsOutput.Cells(outputRow, 7).Value = "New code"                              ' Column 7: NEW - Status column
+        outputRow = outputRow + 1
+        
+NextInputRow:
+    Next inputRow
     
-    ' Cleanup
+    ' Format output
+    If outputRow > OUTPUT_START_ROW Then
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":H" & (outputRow - 1)).Font.Name = "Calibri"
+        wsOutput.Range("A" & OUTPUT_START_ROW & ":H" & (outputRow - 1)).Font.Size = 11
+        wsOutput.Columns("A:H").AutoFit
+    End If
+    
+    ' Show detailed results
+    Dim totalRows As Long
+    Dim processedCount As Long
+    totalRows = lastRow - INPUT_START_ROW + 1
+    processedCount = totalRows - skippedCount
+    
+    debugMsg = debugMsg & vbCrLf & String(60, "=") & vbCrLf
+    debugMsg = debugMsg & "SUMMARY:" & vbCrLf
+    debugMsg = debugMsg & "Total Input Rows: " & totalRows & vbCrLf
+    debugMsg = debugMsg & "Rows Processed: " & processedCount & vbCrLf
+    debugMsg = debugMsg & "Rows Skipped: " & skippedCount & vbCrLf
+    debugMsg = debugMsg & "Output Rows Generated: " & (outputRow - OUTPUT_START_ROW)
+    
+    MsgBox debugMsg, vbInformation, "Transformation Complete"
+    
+CleanExit:
     Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
-    Application.StatusBar = False
-    
-    MsgBox "TM1 instance validation completed. Check the " & LOG_SHEET_NAME & " sheet for results.", vbInformation
-    
+    Application.Calculation = xlCalculationAutomatic
     Exit Sub
     
 ErrorHandler:
     Application.ScreenUpdating = True
-    Application.DisplayAlerts = True
-    Application.StatusBar = False
-    MsgBox "Error in validation process: " & Err.Description, vbCritical
+    Application.Calculation = xlCalculationAutomatic
+    MsgBox "Error on row " & inputRow & ": " & Err.Description, vbCritical, "Error"
 End Sub
 
-Function TestTM1ConnectionRobust(wsTest As Worksheet, serverAddress As String, instanceName As String, ByRef errorMsg As String) As Boolean
-    ' Tests TM1 connection with multiple validation methods and proper error detection
-    
-    Dim testCell As Range
-    Dim formulaString As String
-    Dim cellValue As Variant
-    Dim waitCounter As Integer
-    Dim maxWait As Integer
-    Dim testsPassed As Integer
-    Dim originalCalc As XlCalculation
-    
-    On Error GoTo TestError
-    
-    TestTM1ConnectionRobust = False
-    errorMsg = ""
-    maxWait = 20 ' seconds
-    testsPassed = 0
-    
-    ' Save calculation mode and set to automatic
-    originalCalc = Application.Calculation
-    Application.Calculation = xlCalculationAutomatic
-    
-    ' ===================================================================
-    ' TEST 1: SUBNM - Get Server Name
-    ' ===================================================================
-    Set testCell = wsTest.Range("B2")
-    testCell.Clear
-    wsTest.Range("A2").Value = "Test 1: SUBNM"
-    
-    formulaString = "=SUBNM(""" & serverAddress & """, ""}"")"
-    testCell.Formula = formulaString
-    
-    ' Wait for formula to calculate
-    Application.Calculate
-    For waitCounter = 1 To 8
-        DoEvents
-        Application.Wait Now + TimeValue("00:00:01")
-        cellValue = testCell.Value
-        
-        ' Check for valid result
-        If Not IsEmpty(cellValue) Then
-            Exit For
-        End If
-    Next waitCounter
-    
-    cellValue = testCell.Value
-    
-    ' Validate result
-    If IsError(cellValue) Then
-        errorMsg = "SUBNM failed: " & GetErrorDescription(cellValue)
-    ElseIf IsEmpty(cellValue) Or cellValue = "" Or cellValue = 0 Then
-        errorMsg = "SUBNM returned empty - Server not responding"
-    ElseIf VarType(cellValue) = vbString And Len(cellValue) > 0 Then
-        testsPassed = testsPassed + 1
-        errorMsg = "SUBNM passed (Server: " & cellValue & ")"
-    Else
-        errorMsg = "SUBNM returned unexpected value: " & cellValue
-    End If
-    
-    wsTest.Range("C2").Value = errorMsg
-    
-    ' ===================================================================
-    ' TEST 2: TM1SERVERHANDLE - Get Server Handle (proves active connection)
-    ' ===================================================================
-    Set testCell = wsTest.Range("B3")
-    testCell.Clear
-    wsTest.Range("A3").Value = "Test 2: TM1SERVERHANDLE"
-    
-    formulaString = "=TM1SERVERHANDLE(""" & serverAddress & """)"
-    testCell.Formula = formulaString
-    
-    Application.Calculate
-    For waitCounter = 1 To 8
-        DoEvents
-        Application.Wait Now + TimeValue("00:00:01")
-        cellValue = testCell.Value
-        
-        If Not IsEmpty(cellValue) Then
-            Exit For
-        End If
-    Next waitCounter
-    
-    cellValue = testCell.Value
-    
-    If IsError(cellValue) Then
-        wsTest.Range("C3").Value = "FAILED: " & GetErrorDescription(cellValue)
-    ElseIf IsEmpty(cellValue) Or cellValue = "" Or cellValue = 0 Then
-        wsTest.Range("C3").Value = "FAILED: No handle returned"
-    ElseIf IsNumeric(cellValue) And cellValue > 0 Then
-        testsPassed = testsPassed + 1
-        wsTest.Range("C3").Value = "PASSED (Handle: " & cellValue & ")"
-    Else
-        wsTest.Range("C3").Value = "FAILED: Invalid handle"
-    End If
-    
-    ' ===================================================================
-    ' TEST 3: Try to get dimension count using DBSW
-    ' ===================================================================
-    Set testCell = wsTest.Range("B4")
-    testCell.Clear
-    wsTest.Range("A4").Value = "Test 3: DBSW"
-    
-    ' Try to get system info - this will fail if server isn't accessible
-    formulaString = "=DBSW(""" & serverAddress & """,""}"","""")"
-    testCell.Formula = formulaString
-    
-    Application.Calculate
-    For waitCounter = 1 To 8
-        DoEvents
-        Application.Wait Now + TimeValue("00:00:01")
-        cellValue = testCell.Value
-        
-        If Not IsEmpty(cellValue) Then
-            Exit For
-        End If
-    Next waitCounter
-    
-    cellValue = testCell.Value
-    
-    If IsError(cellValue) Then
-        wsTest.Range("C4").Value = "FAILED: " & GetErrorDescription(cellValue)
-    ElseIf IsEmpty(cellValue) Then
-        wsTest.Range("C4").Value = "FAILED: No response"
-    Else
-        testsPassed = testsPassed + 1
-        wsTest.Range("C4").Value = "PASSED"
-    End If
-    
-    ' ===================================================================
-    ' FINAL EVALUATION
-    ' ===================================================================
-    Application.Calculation = originalCalc
-    
-    ' Need at least 2 out of 3 tests to pass
-    If testsPassed >= 2 Then
-        TestTM1ConnectionRobust = True
-        errorMsg = "Instance AVAILABLE - " & testsPassed & " of 3 tests passed"
-    Else
-        TestTM1ConnectionRobust = False
-        If errorMsg = "" Then
-            errorMsg = "Instance UNAVAILABLE - Only " & testsPassed & " of 3 tests passed. Check TM1_ConnectionTest sheet for details."
-        End If
-    End If
-    
-    Exit Function
-    
-TestError:
-    Application.Calculation = originalCalc
-    errorMsg = "Test error: " & Err.Description
-    TestTM1ConnectionRobust = False
-End Function
 
-Function GetErrorDescription(errorValue As Variant) As String
-    ' Translates Excel error values to readable descriptions
-    Select Case errorValue
-        Case CVErr(xlErrName)
-            GetErrorDescription = "#NAME? (TM1 function not available or server not found)"
-        Case CVErr(xlErrNA)
-            GetErrorDescription = "#N/A (Cannot connect to server)"
-        Case CVErr(xlErrValue)
-            GetErrorDescription = "#VALUE! (Invalid server format)"
-        Case CVErr(xlErrRef)
-            GetErrorDescription = "#REF! (Reference error)"
-        Case CVErr(xlErrNum)
-            GetErrorDescription = "#NUM! (Numeric error)"
-        Case CVErr(xlErrNull)
-            GetErrorDescription = "#NULL! (Null error)"
-        Case CVErr(xlErrDiv0)
-            GetErrorDescription = "#DIV/0! (Division by zero)"
+'=================================================================================
+' CONFIGURABLE TOP C MAPPING FUNCTION
+'=================================================================================
+Function GetTopCValue(level2Name As String) As String
+    Dim cleanName As String
+    cleanName = UCase(Trim(level2Name))
+    
+    Select Case cleanName
+        Case "CENTRAL MANAGED OFFICES"
+            GetTopCValue = "RBMI - MISC"
+        Case "CENTRAL MANAGED SERVICES"
+            GetTopCValue = "RBMI - MISC"
+        Case "COMM BUSINESSES & MKTS"
+            GetTopCValue = "RBMI - Group Communications & Brand (L3)"
+        Case "GROUP BRAND L2"
+            GetTopCValue = "RBMI - Group Brand L2"
+        Case "GROUP EXTERNAL COMMUNICATION"
+            GetTopCValue = "RBMI - Group External Communication"
+        Case "ENTERPRISE TALENT BC"
+            GetTopCValue = "RBMI - Enterprise Talent BC"
+        Case "GOVERNANCE"
+            GetTopCValue = "RBMI - Governance"
+        Case "GRP CHIEF CNTRL OVERSIGHT OFF"
+            GetTopCValue = "RBMI - Grp Chief Cntrl Oversight Off"
+        Case "INTERNAL AUDIT"
+            GetTopCValue = "RBMI - Internal Audit (L2)"
+        Case "LEGAL"
+            GetTopCValue = "RBMI - Legal (L2)"
+        Case "RISK & COMPLIANCE"
+            GetTopCValue = "RBMI - Risk & Compliance (L2)"
+        Case "FINANCE FUNCTION"
+            GetTopCValue = "RBMI - Finance Function"
+        Case "GLOBAL SUSTAINABILITY"
+            GetTopCValue = "RBMI - Global Sustainability"
+        Case "PEOPLE"
+            GetTopCValue = "RBMI - HR"
         Case Else
-            GetErrorDescription = "Unknown error (" & TypeName(errorValue) & ")"
+            GetTopCValue = "RBMI - " & level2Name & " (L2)"
     End Select
 End Function
 
-Sub InitializeConfigSheet(ws As Worksheet)
-    ' Sets up the configuration sheet with headers and instructions
-    
-    If ws.Cells(1, 1).Value = "" Then
-        ws.Cells(1, 1).Value = "Instance Name"
-        ws.Cells(1, 2).Value = "Server Address"
-        
-        With ws.Range("A1:B1")
-            .Font.Bold = True
-            .Interior.Color = RGB(79, 129, 189)
-            .Font.Color = RGB(255, 255, 255)
-            .HorizontalAlignment = xlCenter
-        End With
-        
-        ' Add sample
-        ws.Cells(2, 1).Value = "Example_Instance"
-        ws.Cells(2, 2).Value = "servername:port"
-        
-        ws.Cells(4, 1).Value = "INSTRUCTIONS:"
-        ws.Cells(5, 1).Value = "1. Replace sample with your TM1 server address"
-        ws.Cells(6, 1).Value = "2. Format: hostname:port (e.g., tm1prod:12345)"
-        ws.Cells(7, 1).Value = "3. Make sure TM1 Perspectives is installed"
-        ws.Cells(8, 1).Value = "4. Test one server using TestSingleTM1Connection first"
-        
-        ws.Range("A4:A8").Font.Italic = True
-        ws.Range("A4:A8").Font.Color = RGB(100, 100, 100)
-        
-        ws.Columns("A:B").AutoFit
-    End If
-End Sub
 
-Sub InitializeLogSheet(ws As Worksheet)
-    ' Sets up the log sheet with headers
+'=================================================================================
+' CONFIGURABLE L2X MAPPING FUNCTION
+' This function maps Level 2 Name to L2X code for Middle C columns
+' To add/modify mappings, simply edit the entries in this function
+'=================================================================================
+Function GetL2XValue(level2Name As String) As String
+    '-------------------------------------------------------------------------
+    ' CONFIGURATION: Add or modify L2X mappings below
+    ' Format: Case "[Level 2 Name]": GetL2XValue = "[L2X Code]"
+    '-------------------------------------------------------------------------
     
-    If ws.Cells(1, 1).Value = "" Then
-        ws.Cells(1, 1).Value = "Timestamp"
-        ws.Cells(1, 2).Value = "Instance Name"
-        ws.Cells(1, 3).Value = "Server Address"
-        ws.Cells(1, 4).Value = "Status"
-        ws.Cells(1, 5).Value = "Message"
+    Dim cleanName As String
+    cleanName = UCase(Trim(level2Name))
+    
+    Select Case cleanName
+        ' Central & Core Services
+        Case "CENTRAL MANAGED OFFICES"
+            GetL2XValue = "CMO"
         
-        ' Format headers
-        With ws.Range("A1:E1")
-            .Font.Bold = True
-            .Interior.Color = RGB(79, 129, 189)
-            .Font.Color = RGB(255, 255, 255)
-            .HorizontalAlignment = xlCenter
-        End With
+        Case "CENTRAL MANAGED SERVICES"
+            GetL2XValue = "CMO"
         
-        ws.Columns("A:E").AutoFit
-    End If
-End Sub
-
-Sub LogValidationResult(ws As Worksheet, instanceName As String, serverAddress As String, isHealthy As Boolean, errorMsg As String)
-    ' Logs validation result to the log sheet
-    Dim nextRow As Long
-    Dim statusText As String
-    Dim statusColor As Long
+        ' Communications & Brand
+        Case "COMM BUSINESSES & MKTS"
+            GetL2XValue = "CPA"
+        
+        Case "GROUP BRAND L2"
+            GetL2XValue = "GBD"
+        
+        Case "GROUP EXTERNAL COMMUNICATION"
+            GetL2XValue = "GEC"
+        
+        ' Governance & Compliance
+        Case "ENTERPRISE TALENT BC"
+            GetL2XValue = "EPT"
+        
+        Case "GOVERNANCE"
+            GetL2XValue = "SCY"
+        
+        Case "GRP CHIEF CNTRL OVERSIGHT OFF"
+            GetL2XValue = "GCC"
+        
+        Case "INTERNAL AUDIT"
+            GetL2XValue = "GIA"
+        
+        Case "LEGAL"
+            GetL2XValue = "LEG"
+        
+        Case "RISK & COMPLIANCE"
+            GetL2XValue = "RIS"
+        
+        ' Finance & Support Functions
+        Case "FINANCE FUNCTION"
+            GetL2XValue = "FIN"
+        
+        Case "GLOBAL SUSTAINABILITY"
+            GetL2XValue = "CSR"
+        
+        Case "PEOPLE"
+            GetL2XValue = "HR_"
+        
+        '---------------------------------------------------------------------
+        ' ADD MORE L2X MAPPINGS HERE AS NEEDED
+        ' Simply copy the pattern above and add new cases
+        '---------------------------------------------------------------------
+        ' Example:
+        ' Case "NEW DEPARTMENT NAME"
+        '     GetL2XValue = "XXX"
+        '---------------------------------------------------------------------
+        
+        ' Default case: If no match found, use first 3 characters
+        Case Else
+            If Len(level2Name) >= 3 Then
+                GetL2XValue = UCase(Left(level2Name, 3))
+            Else
+                GetL2XValue = UCase(level2Name)
+            End If
     
-    nextRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row + 1
-    
-    ' Determine status
-    If isHealthy Then
-        statusText = "AVAILABLE"
-        statusColor = RGB(0, 176, 80)
-    Else
-        statusText = "UNAVAILABLE"
-        statusColor = RGB(255, 0, 0)
-    End If
-    
-    ' Write log entry
-    ws.Cells(nextRow, 1).Value = Now
-    ws.Cells(nextRow, 2).Value = instanceName
-    ws.Cells(nextRow, 3).Value = serverAddress
-    ws.Cells(nextRow, 4).Value = statusText
-    ws.Cells(nextRow, 5).Value = errorMsg
-    
-    ' Format status cell
-    With ws.Cells(nextRow, 4)
-        .Font.Bold = True
-        .Font.Color = statusColor
-    End With
-    
-    ' Format timestamp
-    ws.Cells(nextRow, 1).NumberFormat = "yyyy-mm-dd hh:mm:ss"
-    
-    ws.Columns("A:E").AutoFit
-End Sub
-
-Function GetOrCreateSheet(sheetName As String) As Worksheet
-    ' Gets existing sheet or creates new one
-    Dim ws As Worksheet
-    
-    On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(sheetName)
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-        ws.Name = sheetName
-    End If
-    
-    Set GetOrCreateSheet = ws
+    End Select
 End Function
 
-Sub ClearValidationLog()
-    ' Utility to clear the validation log (keeps headers)
-    Dim ws As Worksheet
+
+'=================================================================================
+' DIAGNOSTIC MACRO
+'=================================================================================
+Sub DiagnoseData()
+    Dim wsInput As Worksheet
+    Dim lastRow As Long
+    Dim i As Long
+    Dim msg As String
+    
+    On Error Resume Next
+    Set wsInput = ThisWorkbook.Sheets("Input")
+    On Error GoTo 0
+    
+    If wsInput Is Nothing Then
+        MsgBox "ERROR: 'Input' sheet not found!", vbCritical, "Error"
+        Exit Sub
+    End If
+    
+    lastRow = wsInput.Cells(wsInput.Rows.Count, "A").End(xlUp).Row
+    
+    msg = "DATA DIAGNOSIS" & vbCrLf & String(60, "=") & vbCrLf & vbCrLf
+    msg = msg & "Last row: " & lastRow & vbCrLf
+    msg = msg & "Total data rows: " & (lastRow - 1) & vbCrLf & vbCrLf
+    
+    If lastRow < 2 Then
+        msg = msg & "ERROR: No data rows found!"
+        MsgBox msg, vbCritical, "No Data"
+        Exit Sub
+    End If
+    
+    msg = msg & "CHECKING FIRST 5 ROWS:" & vbCrLf & String(60, "-") & vbCrLf
+    
+    For i = 2 To Application.Min(lastRow, 6)
+        Dim level2Name As String
+        level2Name = Trim(CStr(wsInput.Cells(i, 8).Value))
+        
+        msg = msg & vbCrLf & "Row " & i & ":" & vbCrLf
+        msg = msg & "  Level5 ID: " & wsInput.Cells(i, 1).Value & vbCrLf
+        msg = msg & "  Level5 Name: " & wsInput.Cells(i, 2).Value & vbCrLf
+        msg = msg & "  Level2 Name: " & level2Name & vbCrLf
+        msg = msg & "  L2X Mapping: " & GetL2XValue(level2Name) & vbCrLf
+        msg = msg & "  Level1 Name: " & wsInput.Cells(i, 10).Value & vbCrLf
+        msg = msg & "  Comments: " & wsInput.Cells(i, 11).Value & vbCrLf
+        
+        Dim hasNew, validLevel2, validLevel1, notRetained As Boolean
+        Dim level5Name, level1Name, comments As String
+        Dim level2Upper As String
+        
+        level5Name = UCase(Trim(CStr(wsInput.Cells(i, 2).Value)))
+        level2Upper = UCase(level2Name)
+        level1Name = UCase(Trim(CStr(wsInput.Cells(i, 10).Value)))
+        comments = UCase(Trim(CStr(wsInput.Cells(i, 11).Value)))
+        
+        hasNew = InStr(1, comments, "NEW") > 0
+        
+        validLevel2 = False
+        If level2Upper = "CENTRAL MANAGED OFFICES" Then validLevel2 = True
+        If level2Upper = "CENTRAL MANAGED SERVICES" Then validLevel2 = True
+        If level2Upper = "COMM BUSINESSES & MKTS" Then validLevel2 = True
+        If level2Upper = "ENTERPRISE TALENT BC" Then validLevel2 = True
+        If level2Upper = "FINANCE FUNCTION" Then validLevel2 = True
+        If level2Upper = "GLOBAL SUSTAINABILITY" Then validLevel2 = True
+        If level2Upper = "GOVERNANCE" Then validLevel2 = True
+        If level2Upper = "GROUP BRAND L2" Then validLevel2 = True
+        If level2Upper = "GROUP EXTERNAL COMMUNICATION" Then validLevel2 = True
+        If level2Upper = "GRP CHIEF CNTRL OVERSIGHT OFF" Then validLevel2 = True
+        If level2Upper = "INTERNAL AUDIT" Then validLevel2 = True
+        If level2Upper = "LEGAL" Then validLevel2 = True
+        If level2Upper = "PEOPLE" Then validLevel2 = True
+        If level2Upper = "RISK & COMPLIANCE" Then validLevel2 = True
+        
+        validLevel1 = (level1Name = "ALPHA" Or level1Name = "KENAMMA" Or level1Name = "NAAGO")
+        notRetained = InStr(1, level5Name, "RETAINED") = 0 And _
+                      InStr(1, level5Name, "RETD") = 0 And _
+                      InStr(1, level5Name, "RTD") = 0
+        
+        msg = msg & "  ✓ Has 'new': " & hasNew & vbCrLf
+        msg = msg & "  ✓ Valid Level2: " & validLevel2 & vbCrLf
+        msg = msg & "  ✓ Valid Level1: " & validLevel1 & vbCrLf
+        msg = msg & "  ✓ Not Retained: " & notRetained & vbCrLf
+        
+        If hasNew And validLevel2 And validLevel1 And notRetained Then
+            msg = msg & "  → WILL BE PROCESSED ✓" & vbCrLf
+        Else
+            msg = msg & "  → WILL BE SKIPPED ✗" & vbCrLf
+        End If
+    Next i
+    
+    MsgBox msg, vbInformation, "Data Diagnosis"
+End Sub
+
+
+'=================================================================================
+' UTILITY: View Current L2X Mappings
+'=================================================================================
+Sub ViewL2XMappings()
+    Dim msg As String
+    
+    msg = "CURRENT L2X MAPPINGS" & vbCrLf & String(50, "=") & vbCrLf & vbCrLf
+    msg = msg & "Level 2 Name → L2X Code" & vbCrLf & vbCrLf
+    
+    msg = msg & "Central Managed offices → CMO" & vbCrLf
+    msg = msg & "Central Managed Services → CMO" & vbCrLf
+    msg = msg & "Comm Businesses & Mkts → CPA" & vbCrLf
+    msg = msg & "Group Brand L2 → GBD" & vbCrLf
+    msg = msg & "Group External Communication → GEC" & vbCrLf
+    msg = msg & "Enterprise Talent BC → EPT" & vbCrLf
+    msg = msg & "Governance → SCY" & vbCrLf
+    msg = msg & "Grp Chief Cntrl Oversight Off → GCC" & vbCrLf
+    msg = msg & "Internal Audit → GIA" & vbCrLf
+    msg = msg & "Legal → LEG" & vbCrLf
+    msg = msg & "Risk & Compliance → RIS" & vbCrLf
+    msg = msg & "Finance Function → FIN" & vbCrLf
+    msg = msg & "Global Sustainability → CSR" & vbCrLf
+    msg = msg & "People → HR_" & vbCrLf
+    msg = msg & vbCrLf & "Any unmapped name → First 3 chars" & vbCrLf & vbCrLf
+    msg = msg & "To add/modify mappings, edit the GetL2XValue function."
+    
+    MsgBox msg, vbInformation, "L2X Mappings"
+End Sub
+
+
+'=================================================================================
+' ENHANCED SORT OUTPUT DATA - MIDDLE C HIERARCHY ONLY
+' Sorts by: TopC → ALL/ATT (Col 2) → Middle C Hierarchy (Cols 3,4)
+' Does NOT sort by Lowest C (NCR/SRAC/ARAC)
+'=================================================================================
+Sub SortOutputData()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim dataRange As Range
+    Dim i As Long
+    Dim col2Value, col3Value, col4Value As String
+    Dim sortKey1, sortKey2, sortKey3, sortKey4 As String
+    
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    
+    On Error GoTo ErrorHandler
+    
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow < OUTPUT_START_ROW Then
+        MsgBox "No output data found to sort.", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Add helper columns for sorting (H, I, J, K)
+    wsOutput.Cells(1, 9).Value = "Sort_TopC"
+    wsOutput.Cells(1, 10).Value = "Sort_ALL_ATT"
+    wsOutput.Cells(1, 11).Value = "Sort_Col3"
+    wsOutput.Cells(1, 12).Value = "Sort_Col4"
+    
+    ' Assign sort keys based on Middle C columns only
+    For i = OUTPUT_START_ROW To lastRow
+        Dim topCValue As String
+        topCValue = Trim(wsOutput.Cells(i, 1).Value)
+        col2Value = UCase(Trim(wsOutput.Cells(i, 2).Value))
+        col3Value = UCase(Trim(wsOutput.Cells(i, 3).Value))
+        col4Value = UCase(Trim(wsOutput.Cells(i, 4).Value))
+        
+        ' Sort Key 1: TopC (alphabetical)
+        wsOutput.Cells(i, 9).Value = topCValue
+        
+        ' Sort Key 2: ALL before ATT (based on Column 2)
+        If InStr(col2Value, "_ALL") > 0 Or col2Value = "ALL*" Then
+            sortKey2 = "1_ALL"
+        Else
+            sortKey2 = "2_ATT"
+        End If
+        wsOutput.Cells(i, 10).Value = sortKey2
+        
+        ' Sort Key 3: Column 3 hierarchy (NCR before RAC)
+        If InStr(col3Value, "NCR") > 0 Then
+            sortKey3 = "1_NCR"
+        ElseIf InStr(col3Value, "RAC") > 0 Then
+            sortKey3 = "2_RAC"
+        ElseIf col3Value = "." Then
+            sortKey3 = "0_DOT"
+        Else
+            sortKey3 = "9_" & col3Value
+        End If
+        wsOutput.Cells(i, 11).Value = sortKey3
+        
+        ' Sort Key 4: Column 4 hierarchy (. before ARAC before SRAC)
+        If col4Value = "." Then
+            sortKey4 = "1_DOT"
+        ElseIf InStr(col4Value, "ARAC") > 0 Then
+            sortKey4 = "2_ARAC"
+        ElseIf InStr(col4Value, "SRAC") > 0 Then
+            sortKey4 = "3_SRAC"
+        Else
+            sortKey4 = "9_" & col4Value
+        End If
+        wsOutput.Cells(i, 12).Value = sortKey4
+        
+    Next i
+    
+    ' Define data range including helper columns
+    Set dataRange = wsOutput.Range("A" & OUTPUT_START_ROW & ":L" & lastRow)
+    
+    ' Perform multi-level sort based on Middle C hierarchy
+    With wsOutput.Sort
+        .SortFields.Clear
+        
+        ' 1st: Sort by TopC (alphabetical)
+        .SortFields.Add Key:=wsOutput.Range("I" & OUTPUT_START_ROW & ":I" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' 2nd: Sort by ALL/ATT (ALL first)
+        .SortFields.Add Key:=wsOutput.Range("J" & OUTPUT_START_ROW & ":J" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' 3rd: Sort by Column 3 (NCR before RAC)
+        .SortFields.Add Key:=wsOutput.Range("K" & OUTPUT_START_ROW & ":K" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        ' 4th: Sort by Column 4 (. before ARAC before SRAC)
+        .SortFields.Add Key:=wsOutput.Range("L" & OUTPUT_START_ROW & ":L" & lastRow), _
+                       SortOn:=xlSortOnValues, Order:=xlAscending
+        
+        .SetRange dataRange
+        .Header = xlNo
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .Apply
+    End With
+    
+    ' Delete helper columns
+    wsOutput.Columns("I:L").Delete
+    
+    wsOutput.Columns("A:H").AutoFit
+    
+    MsgBox "Sort complete!" & vbCrLf & vbCrLf & _
+           "Sort hierarchy (Middle C only):" & vbCrLf & _
+           "1. TopC (alphabetical)" & vbCrLf & _
+           "2. ALL before ATT (Column 2)" & vbCrLf & _
+           "3. NCR before RAC (Column 3)" & vbCrLf & _
+           "4. . before ARAC before SRAC (Column 4)" & vbCrLf & vbCrLf & _
+           "Result: A1-ALL, A1-ATT, A2-ALL, A2-ATT pattern", _
+           vbInformation, "Sort Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    ' Clean up helper columns if they exist
+    On Error Resume Next
+    wsOutput.Columns("I:L").Delete
+    On Error GoTo 0
+    MsgBox "Error sorting: " & Err.Description, vbCritical, "Sort Error"
+End Sub
+
+
+'=================================================================================
+' HIGHLIGHT CHANGES IN MIDDLE C COLUMNS
+' Highlights cells in columns 2, 3, 4 where values change from previous row
+' Applies light green color to changed cells
+'=================================================================================
+Sub HighlightMiddleCChanges()
+    Dim wsOutput As Worksheet
+    Dim lastRow As Long
+    Dim currentRow As Long
+    Dim col As Long
+    Dim currentValue As String
+    Dim previousValue As String
+    Dim changesCount As Long
+    
+    ' Configuration
+    Const OUTPUT_SHEET = "Output"
+    Const OUTPUT_START_ROW = 2
+    Const LIGHT_GREEN = 5296274  ' RGB(226, 239, 218) - Light green color
+    
+    On Error GoTo ErrorHandler
+    
+    ' Set worksheet reference
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets(OUTPUT_SHEET)
+    On Error GoTo ErrorHandler
+    
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    ' Find last row with data
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    ' Check if there's data to highlight
+    If lastRow < OUTPUT_START_ROW + 1 Then
+        MsgBox "Not enough data to compare (need at least 2 rows).", vbInformation, "No Data"
+        Exit Sub
+    End If
+    
+    ' Clear any existing highlighting in columns 2, 3, 4
+    wsOutput.Range("B" & OUTPUT_START_ROW & ":D" & lastRow).Interior.ColorIndex = xlNone
+    
+    changesCount = 0
+    
+    ' Loop through each row starting from the second data row
+    For currentRow = OUTPUT_START_ROW + 1 To lastRow
+        
+        ' Check columns 2, 3, 4 (B, C, D) - the Middle C columns
+        For col = 2 To 4
+            currentValue = Trim(UCase(wsOutput.Cells(currentRow, col).Value))
+            previousValue = Trim(UCase(wsOutput.Cells(currentRow - 1, col).Value))
+            
+            ' Compare current value with previous row
+            If currentValue <> previousValue And currentValue <> "" Then
+                ' Highlight the cell with light green
+                wsOutput.Cells(currentRow, col).Interior.Color = LIGHT_GREEN
+                changesCount = changesCount + 1
+            End If
+        Next col
+        
+    Next currentRow
+    
+    MsgBox "Highlighting complete!" & vbCrLf & vbCrLf & _
+           "Total cells highlighted: " & changesCount & vbCrLf & _
+           "Color: Light Green" & vbCrLf & vbCrLf & _
+           "Changes highlighted in columns:" & vbCrLf & _
+           "- Column 2 (Middle C - Status)" & vbCrLf & _
+           "- Column 3 (Middle C - Code 1)" & vbCrLf & _
+           "- Column 4 (Middle C - Code 2)", _
+           vbInformation, "Highlighting Complete"
+    
+    Exit Sub
+    
+ErrorHandler:
+    MsgBox "Error highlighting changes: " & Err.Description, vbCritical, "Error"
+End Sub
+
+
+'=================================================================================
+' COMBINED MACRO - Transform, Sort, and Highlight
+' Runs transformation, sorting, and highlighting automatically
+'=================================================================================
+Sub TransformAndSort()
+    ' Run the transformation
+    Call TransformInputToOutput
+    
+    ' Wait a moment for the transformation to complete
+    DoEvents
+    
+    ' Run the sort
+    Call SortOutputData
+    
+    ' Wait a moment for the sort to complete
+    DoEvents
+    
+    ' Run the highlighting
+    Call HighlightMiddleCChanges
+End Sub
+
+
+'=================================================================================
+' CLEAR HIGHLIGHTING - Remove all highlighting from Middle C columns
+'=================================================================================
+Sub ClearHighlighting()
+    Dim wsOutput As Worksheet
     Dim lastRow As Long
     
     On Error Resume Next
-    Set ws = ThisWorkbook.Worksheets(LOG_SHEET_NAME)
+    Set wsOutput = ThisWorkbook.Sheets("Output")
     On Error GoTo 0
     
-    If Not ws Is Nothing Then
-        lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
-        If lastRow > 1 Then
-            ws.Range("A2:E" & lastRow).ClearContents
-            MsgBox "Validation log cleared.", vbInformation
-        Else
-            MsgBox "No log entries to clear.", vbInformation
-        End If
-    Else
-        MsgBox "Log sheet not found.", vbExclamation
+    If wsOutput Is Nothing Then
+        MsgBox "ERROR: 'Output' sheet not found!", vbCritical, "Sheet Not Found"
+        Exit Sub
+    End If
+    
+    lastRow = wsOutput.Cells(wsOutput.Rows.Count, "A").End(xlUp).Row
+    
+    If lastRow >= 2 Then
+        wsOutput.Range("B2:D" & lastRow).Interior.ColorIndex = xlNone
+        MsgBox "All highlighting cleared from Middle C columns.", vbInformation, "Clear Complete"
     End If
 End Sub
 
-' ====================================================================
-' MANUAL TEST: Test Single TM1 Connection
-' ====================================================================
-Sub TestSingleTM1Connection()
-    Dim serverAddress As String
-    Dim wsTest As Worksheet
-    Dim testResult As Boolean
-    Dim errorMsg As String
-    
-    ' Prompt for server address
-    serverAddress = InputBox("Enter TM1 server address (format: servername:port)" & vbCrLf & vbCrLf & _
-                            "Example: tm1prod:12345 or localhost:5555", _
-                            "Test TM1 Connection", "localhost:12345")
-    
-    If serverAddress = "" Then Exit Sub
-    
-    Set wsTest = GetOrCreateSheet(TEST_SHEET_NAME)
-    wsTest.Cells.Clear
-    
-    Application.ScreenUpdating = False
-    
-    MsgBox "Testing connection to: " & serverAddress & vbCrLf & vbCrLf & _
-           "This will take 15-20 seconds. Please wait...", vbInformation
-    
-    testResult = TestTM1ConnectionRobust(wsTest, serverAddress, "Manual Test", errorMsg)
-    
-    Application.ScreenUpdating = True
-    
-    ' Format the test sheet for readability
-    wsTest.Columns("A:C").AutoFit
-    wsTest.Range("A1").Value = "Connection Test Results for: " & serverAddress
-    wsTest.Range("A1").Font.Bold = True
-    wsTest.Range("A1").Font.Size = 12
-    
-    If testResult Then
-        MsgBox "✓ CONNECTION SUCCESS!" & vbCrLf & vbCrLf & _
-               errorMsg & vbCrLf & vbCrLf & _
-               "Check the TM1_ConnectionTest sheet for detailed results.", _
-               vbInformation, "Connection Test Result"
-    Else
-        MsgBox "✗ CONNECTION FAILED!" & vbCrLf & vbCrLf & _
-               errorMsg & vbCrLf & vbCrLf & _
-               "Check the TM1_ConnectionTest sheet for detailed error information.", _
-               vbCritical, "Connection Test Result"
-    End If
-End Sub
 
-' ====================================================================
-' Check if TM1 Functions are Available
-' ====================================================================
-Sub CheckTM1FunctionsAvailable()
-    Dim ws As Worksheet
-    Dim testCell As Range
-    Dim result As String
+'=================================================================================
+' TEST OUTPUT DOCUMENTATION - UPDATED WITH DATE COLUMN
+'=================================================================================
+' EXPECTED OUTPUT AFTER TRANSFORM + SORT + HIGHLIGHT:
+'
+' OUTPUT COLUMNS (8 Total):
+' 1. Top C
+' 2. Middle C (Status)
+' 3. Middle C (Code 1)
+' 4. Middle C (Code 2)
+' 5. Lowest C
+' 6. N element
+' 7. Status ("New code")
+' 8. Date (Format: 13-Jan-26)
+'
+' EXAMPLE OUTPUT:
+' RBMI - HR | RBMI - HR_ALL | HR_NCRALL | . | RBMI - XXX001_NCR | R-XXX001 | New code | 13-Jan-26
+' RBMI - HR | RBMI - HR_ALL | HR_RACALL | HR_ARACALL | RBMI - XXX001_ARAC | I-Dummy | New code | 13-Jan-26
+' RBMI - HR | RBMI - HR_ALL | HR_RACALL | HR_SRACALL | RBMI - XXX001_SRAC | I-Dummy | New code | 13-Jan-26
+'
+' Date format automatically uses current system date in dd-mmm-yy format
+' Example formats: 13-Jan-26, 01-Feb-26, 25-Dec-25
+'
+'=================================================================================
+
+
+'=================================================================================
+' SETUP SHEETS MACRO
+'=================================================================================
+Sub SetupSheets()
+    Dim wsInput As Worksheet
+    Dim wsOutput As Worksheet
+    Dim wb As Workbook
     
-    Set ws = GetOrCreateSheet(TEST_SHEET_NAME)
-    ws.Cells.Clear
+    Set wb = ThisWorkbook
     
-    ws.Cells(1, 1).Value = "TM1 Excel Functions Availability Check"
-    ws.Cells(1, 1).Font.Bold = True
-    
-    ' Test if SUBNM function exists
-    Set testCell = ws.Range("B3")
     On Error Resume Next
-    testCell.Formula = "=SUBNM(""test"", ""}"")"
+    Set wsInput = wb.Sheets("Input")
+    On Error GoTo 0
     
-    If IsError(testCell.Value) Then
-        If testCell.Value = CVErr(xlErrName) Then
-            result = "TM1 functions are NOT available in this Excel session." & vbCrLf & vbCrLf & _
-                    "Please ensure:" & vbCrLf & _
-                    "1. TM1 Perspectives is installed" & vbCrLf & _
-                    "2. TM1 Excel Add-in is loaded" & vbCrLf & _
-                    "3. You have opened TM1 Perspectives at least once"
-            MsgBox result, vbCritical, "TM1 Functions Not Found"
-        Else
-            result = "TM1 functions appear to be available (got error but not #NAME?)"
-            MsgBox result, vbInformation, "TM1 Functions Check"
-        End If
+    If wsInput Is Nothing Then
+        Set wsInput = wb.Sheets.Add
+        wsInput.Name = "Input"
     Else
-        result = "TM1 functions are available and working!"
-        MsgBox result, vbInformation, "TM1 Functions Check"
+        wsInput.Cells.Clear
     End If
     
-    ws.Cells(3, 1).Value = result
-    testCell.Clear
+    On Error Resume Next
+    Set wsOutput = wb.Sheets("Output")
     On Error GoTo 0
+    
+    If wsOutput Is Nothing Then
+        Set wsOutput = wb.Sheets.Add
+        wsOutput.Name = "Output"
+    Else
+        wsOutput.Cells.Clear
+    End If
+    
+    With wsInput
+        .Cells(1, 1).Value = "Level 5 ID"
+        .Cells(1, 2).Value = "Level 5 Name"
+        .Cells(1, 3).Value = "Level 4 ID"
+        .Cells(1, 4).Value = "Level 4 Name"
+        .Cells(1, 5).Value = "Level 3 ID"
+        .Cells(1, 6).Value = "Level 3 Name"
+        .Cells(1, 7).Value = "Level 2 ID"
+        .Cells(1, 8).Value = "Level 2 Name"
+        .Cells(1, 9).Value = "Level 1 ID"
+        .Cells(1, 10).Value = "Level 1 Name"
+        .Cells(1, 11).Value = "Comments"
+        
+        .Range("A1:K1").Font.Bold = True
+        .Range("A1:K1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:K").AutoFit
+    End With
+    
+    With wsOutput
+        .Cells(1, 1).Value = "Top C"
+        .Cells(1, 2).Value = "Middle C"
+        .Cells(1, 3).Value = "Middle C"
+        .Cells(1, 4).Value = "Middle C"
+        .Cells(1, 5).Value = "Lowest C"
+        .Cells(1, 6).Value = "N element"
+        
+        .Range("A1:F1").Font.Bold = True
+        .Range("A1:F1").Interior.Color = RGB(255, 242, 204)
+        .Columns("A:F").AutoFit
+    End With
+    
+    With wsInput
+        .Cells(2, 1).Value = "XXX001"
+        .Cells(2, 2).Value = "Product_1 (std)"
+        .Cells(2, 3).Value = "XXX001_A"
+        .Cells(2, 4).Value = "Product_1"
+        .Cells(2, 5).Value = "XXX001_B"
+        .Cells(2, 6).Value = "Product_1"
+        .Cells(2, 7).Value = "XXX001_C"
+        .Cells(2, 8).Value = "People"
+        .Cells(2, 9).Value = "XXX001_D"
+        .Cells(2, 10).Value = "Alpha"
+        .Cells(2, 11).Value = "New"
+    End With
+    
+    MsgBox "Setup Complete!" & vbCrLf & vbCrLf & _
+           "Sample output will use L2X mapping:" & vbCrLf & _
+           "People → HR_ (used in Middle C columns)", _
+           vbInformation, "Setup Complete"
+    wsInput.Activate
 End Sub
