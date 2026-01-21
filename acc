@@ -1,0 +1,146 @@
+Option Explicit
+
+Function SearchFilesForKeyword(folderPath As String, keyword As String) As Variant
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim results As Object
+    Dim fileContent As String
+    Dim fileNum As Integer
+    Dim fileName As String
+    Dim matchFound As Boolean
+    
+    ' Create FileSystemObject
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set results = CreateObject("System.Collections.ArrayList")
+    
+    ' Check if folder exists
+    If Not fso.FolderExists(folderPath) Then
+        SearchFilesForKeyword = Array("Error: Folder not found")
+        Exit Function
+    End If
+    
+    Set folder = fso.GetFolder(folderPath)
+    keyword = LCase(keyword) ' Case-insensitive search
+    
+    ' Loop through all files in the folder
+    For Each file In folder.Files
+        matchFound = False
+        fileName = file.Name
+        
+        ' First, check if keyword is in file name
+        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
+            matchFound = True
+        End If
+        
+        ' Then check file contents (for text-based files)
+        If Not matchFound Then
+            matchFound = SearchFileContent(file.Path, keyword)
+        ElseIf SearchFileContent(file.Path, keyword) Then
+            ' Even if found in name, verify it's also in content or just in name
+            matchFound = True
+        End If
+        
+        ' Add to results if match found
+        If matchFound Then
+            results.Add fileName
+        End If
+    Next file
+    
+    ' Return results
+    If results.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To results.Count - 1)
+        Dim i As Long
+        For i = 0 To results.Count - 1
+            arr(i) = results(i)
+        Next i
+        SearchFilesForKeyword = arr
+    Else
+        SearchFilesForKeyword = Array("No matches found")
+    End If
+    
+    Set fso = Nothing
+    Set folder = Nothing
+    Set results = Nothing
+End Function
+
+Function SearchFileContent(filePath As String, keyword As String) As Boolean
+    Dim fileNum As Integer
+    Dim fileContent As String
+    Dim textStream As Object
+    Dim fso As Object
+    
+    On Error Resume Next
+    
+    SearchFileContent = False
+    
+    ' Only search text-based files (txt, csv, log, xml, json, etc.)
+    If IsTextFile(filePath) Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        Set textStream = fso.OpenTextFile(filePath, 1, False) ' 1 = ForReading
+        
+        If Err.Number = 0 Then
+            fileContent = textStream.ReadAll
+            textStream.Close
+            
+            If InStr(1, LCase(fileContent), keyword, vbTextCompare) > 0 Then
+                SearchFileContent = True
+            End If
+        End If
+        
+        Set textStream = Nothing
+        Set fso = Nothing
+    End If
+    
+    On Error GoTo 0
+End Function
+
+Function IsTextFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
+    
+    ' Add or remove extensions as needed
+    Select Case ext
+        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", "sql", "vbs", "bat"
+            IsTextFile = True
+        Case Else
+            IsTextFile = False
+    End Select
+End Function
+
+Sub RunSearch()
+    Dim folderPath As String
+    Dim keyword As String
+    Dim results As Variant
+    Dim ws As Worksheet
+    Dim i As Long
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    
+    ' Get inputs from worksheet
+    folderPath = ws.Range("B2").Value
+    keyword = ws.Range("B3").Value
+    
+    If folderPath = "" Or keyword = "" Then
+        MsgBox "Please enter both folder path and keyword", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Clear previous results
+    ws.Range("A6:A1000").ClearContents
+    
+    ' Run search
+    Application.ScreenUpdating = False
+    results = SearchFilesForKeyword(folderPath, keyword)
+    
+    ' Output results
+    ws.Range("A6").Value = "Results:"
+    For i = LBound(results) To UBound(results)
+        ws.Range("A" & (7 + i)).Value = results(i)
+    Next i
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "Search complete! Found " & UBound(results) + 1 & " result(s)", vbInformation
+End Sub
