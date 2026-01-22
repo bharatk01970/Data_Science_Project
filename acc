@@ -1,255 +1,266 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import os
-import threading
-from pathlib import Path
-import time
+Option Explicit
 
-class FileSearchGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("File Search Tool")
-        self.root.geometry("800x600")
-        self.root.resizable(True, True)
+Function SearchFilesForKeyword(folderPath As String, keyword As String) As Variant
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim results As Object
+    Dim fileContent As String
+    Dim fileNum As Integer
+    Dim fileName As String
+    Dim matchFound As Boolean
+    
+    ' Create FileSystemObject
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set results = CreateObject("System.Collections.ArrayList")
+    
+    ' Check if folder exists
+    If Not fso.FolderExists(folderPath) Then
+        SearchFilesForKeyword = Array("Error: Folder not found")
+        Exit Function
+    End If
+    
+    Set folder = fso.GetFolder(folderPath)
+    keyword = LCase(keyword) ' Case-insensitive search
+    
+    ' Loop through all files in the folder
+    For Each file In folder.Files
+        matchFound = False
+        fileName = file.Name
         
-        # Configure style
-        style = ttk.Style()
-        style.theme_use('clam')
+        ' First, check if keyword is in file name
+        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
+            matchFound = True
+        End If
         
-        # Variables
-        self.folder_path = tk.StringVar()
-        self.keyword = tk.StringVar()
-        self.search_running = False
+        ' Then check file contents (for text-based files)
+        If Not matchFound Then
+            matchFound = SearchFileContent(file.Path, keyword)
+        ElseIf SearchFileContent(file.Path, keyword) Then
+            matchFound = True
+        End If
         
-        # Create GUI
-        self.create_widgets()
-        
-    def create_widgets(self):
-        # Main frame
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Configure grid weights
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
-        
-        # Folder selection
-        ttk.Label(main_frame, text="Folder Path:", font=('Arial', 10, 'bold')).grid(
-            row=0, column=0, sticky=tk.W, pady=5
-        )
-        
-        folder_frame = ttk.Frame(main_frame)
-        folder_frame.grid(row=0, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-        folder_frame.columnconfigure(0, weight=1)
-        
-        ttk.Entry(folder_frame, textvariable=self.folder_path, font=('Arial', 10)).grid(
-            row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5)
-        )
-        ttk.Button(folder_frame, text="Browse", command=self.browse_folder).grid(
-            row=0, column=1
-        )
-        
-        # Keyword input
-        ttk.Label(main_frame, text="Keyword:", font=('Arial', 10, 'bold')).grid(
-            row=1, column=0, sticky=tk.W, pady=5
-        )
-        ttk.Entry(main_frame, textvariable=self.keyword, font=('Arial', 10)).grid(
-            row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5
-        )
-        
-        # Buttons frame
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=2, column=0, columnspan=3, pady=10)
-        
-        self.search_button = ttk.Button(
-            button_frame, text="Search", command=self.start_search, width=15
-        )
-        self.search_button.grid(row=0, column=0, padx=5)
-        
-        ttk.Button(button_frame, text="Clear Results", command=self.clear_results, width=15).grid(
-            row=0, column=1, padx=5
-        )
-        
-        # Progress bar
-        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
-        
-        # Results area
-        ttk.Label(main_frame, text="Results:", font=('Arial', 10, 'bold')).grid(
-            row=4, column=0, sticky=(tk.W, tk.N), pady=(5, 0)
-        )
-        
-        # Results text area with scrollbar
-        results_frame = ttk.Frame(main_frame)
-        results_frame.grid(row=5, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        results_frame.columnconfigure(0, weight=1)
-        results_frame.rowconfigure(0, weight=1)
-        
-        self.results_text = scrolledtext.ScrolledText(
-            results_frame, 
-            width=80, 
-            height=20, 
-            font=('Courier', 9),
-            wrap=tk.WORD
-        )
-        self.results_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Status bar
-        self.status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(
-            main_frame, 
-            textvariable=self.status_var, 
-            relief=tk.SUNKEN, 
-            anchor=tk.W
-        )
-        status_bar.grid(row=6, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(5, 0))
-        
-    def browse_folder(self):
-        folder = filedialog.askdirectory()
-        if folder:
-            self.folder_path.set(folder)
-            
-    def start_search(self):
-        if self.search_running:
-            messagebox.showwarning("Search Running", "A search is already in progress!")
-            return
-            
-        folder = self.folder_path.get()
-        keyword = self.keyword.get()
-        
-        if not folder or not keyword:
-            messagebox.showerror("Input Error", "Please enter both folder path and keyword!")
-            return
-            
-        if not os.path.exists(folder):
-            messagebox.showerror("Folder Error", "The specified folder does not exist!")
-            return
-            
-        # Start search in separate thread
-        self.search_running = True
-        self.search_button.config(state='disabled')
-        self.progress.start(10)
-        self.clear_results()
-        self.status_var.set("Searching...")
-        
-        search_thread = threading.Thread(target=self.perform_search, args=(folder, keyword))
-        search_thread.daemon = True
-        search_thread.start()
-        
-    def perform_search(self, folder_path, keyword):
-        try:
-            start_time = time.time()
-            results = []
-            keyword_lower = keyword.lower()
-            
-            # Get all files in the folder
-            files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
-            
-            for filename in files:
-                file_path = os.path.join(folder_path, filename)
-                match_found = False
-                
-                # Check if keyword is in filename
-                if keyword_lower in filename.lower():
-                    match_found = True
-                    results.append((filename, "Found in filename"))
-                
-                # Check file contents (for text files)
-                if not match_found:
-                    content_match = self.search_file_content(file_path, keyword_lower)
-                    if content_match:
-                        match_found = True
-                        results.append((filename, "Found in content"))
-                elif self.search_file_content(file_path, keyword_lower):
-                    # Update if found in both
-                    results[-1] = (filename, "Found in filename and content")
-            
-            elapsed_time = time.time() - start_time
-            
-            # Update GUI in main thread
-            self.root.after(0, self.display_results, results, elapsed_time, len(files))
-            
-        except Exception as e:
-            self.root.after(0, self.show_error, str(e))
-        finally:
-            self.root.after(0, self.search_complete)
-            
-    def search_file_content(self, file_path, keyword):
-        # Define text file extensions
-        text_extensions = {
-            '.txt', '.csv', '.log', '.xml', '.json', '.ini', '.cfg', '.md', 
-            '.html', '.htm', '.sql', '.py', '.js', '.java', '.c', '.cpp', 
-            '.h', '.vbs', '.bat', '.sh', '.yaml', '.yml', '.properties'
-        }
-        
-        # Check file extension
-        file_ext = Path(file_path).suffix.lower()
-        if file_ext not in text_extensions:
-            return False
-            
-        # Check file size (skip files larger than 10MB)
-        try:
-            if os.path.getsize(file_path) > 10 * 1024 * 1024:
-                return False
-        except:
-            return False
-            
-        # Try to read and search file content
-        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-        
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    # Read in chunks to handle large files
-                    chunk_size = 50000
-                    while True:
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-                        if keyword in chunk.lower():
-                            return True
-                return False
-            except (UnicodeDecodeError, PermissionError):
-                continue
-            except Exception:
-                return False
-                
-        return False
-        
-    def display_results(self, results, elapsed_time, total_files):
-        self.results_text.insert(tk.END, f"Search completed in {elapsed_time:.2f} seconds\n")
-        self.results_text.insert(tk.END, f"Searched {total_files} file(s)\n")
-        self.results_text.insert(tk.END, f"Found {len(results)} match(es)\n")
-        self.results_text.insert(tk.END, "=" * 80 + "\n\n")
-        
-        if results:
-            for i, (filename, location) in enumerate(results, 1):
-                self.results_text.insert(tk.END, f"{i}. {filename}\n")
-                self.results_text.insert(tk.END, f"   ({location})\n\n")
-        else:
-            self.results_text.insert(tk.END, "No matches found.\n")
-            
-        self.status_var.set(f"Found {len(results)} match(es) in {elapsed_time:.2f} seconds")
-        
-    def show_error(self, error_message):
-        messagebox.showerror("Search Error", f"An error occurred during search:\n{error_message}")
-        self.status_var.set("Error occurred")
-        
-    def search_complete(self):
-        self.search_running = False
-        self.search_button.config(state='normal')
-        self.progress.stop()
-        
-    def clear_results(self):
-        self.results_text.delete(1.0, tk.END)
-        self.status_var.set("Ready")
+        ' Add to results if match found (store both name and path)
+        If matchFound Then
+            results.Add fileName & "|" & file.Path
+        End If
+    Next file
+    
+    ' Return results
+    If results.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To results.Count - 1)
+        Dim i As Long
+        For i = 0 To results.Count - 1
+            arr(i) = results(i)
+        Next i
+        SearchFilesForKeyword = arr
+    Else
+        SearchFilesForKeyword = Array("No matches found")
+    End If
+    
+    Set fso = Nothing
+    Set folder = Nothing
+    Set results = Nothing
+End Function
 
-def main():
-    root = tk.Tk()
-    app = FileSearchGUI(root)
-    root.mainloop()
+Function SearchFileContent(filePath As String, keyword As String) As Boolean
+    Dim fileNum As Integer
+    Dim fileContent As String
+    Dim textStream As Object
+    Dim fso As Object
+    
+    On Error Resume Next
+    
+    SearchFileContent = False
+    
+    ' Only search text-based files (txt, csv, log, xml, json, etc.)
+    If IsTextFile(filePath) Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        Set textStream = fso.OpenTextFile(filePath, 1, False) ' 1 = ForReading
+        
+        If Err.Number = 0 Then
+            fileContent = textStream.ReadAll
+            textStream.Close
+            
+            If InStr(1, LCase(fileContent), keyword, vbTextCompare) > 0 Then
+                SearchFileContent = True
+            End If
+        End If
+        
+        Set textStream = Nothing
+        Set fso = Nothing
+    End If
+    
+    On Error GoTo 0
+End Function
 
-if __name__ == "__main__":
-    main()
+Function IsTextFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
+    
+    ' Add or remove extensions as needed
+    Select Case ext
+        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", "sql", "vbs", "bat"
+            IsTextFile = True
+        Case Else
+            IsTextFile = False
+    End Select
+End Function
+
+Sub RunSearch()
+    Dim folderPath As String
+    Dim keyword As String
+    Dim results As Variant
+    Dim ws As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String
+    Dim filePath As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    
+    ' Get inputs from worksheet
+    folderPath = ws.Range("B2").Value
+    keyword = ws.Range("B3").Value
+    
+    If folderPath = "" Or keyword = "" Then
+        MsgBox "Please enter both folder path and keyword", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Clear previous results
+    ws.Range("A6:B1000").ClearContents
+    
+    ' Run search
+    Application.ScreenUpdating = False
+    results = SearchFilesForKeyword(folderPath, keyword)
+    
+    ' Output results with headers
+    ws.Range("A6").Value = "File Name"
+    ws.Range("B6").Value = "File Path"
+    
+    ' Format headers
+    ws.Range("A6:B6").Font.Bold = True
+    
+    ' Check if results contain error or no matches
+    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
+        ws.Range("A7").Value = results(0)
+        Application.ScreenUpdating = True
+        MsgBox results(0), vbExclamation
+        Exit Sub
+    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
+        ws.Range("A7").Value = results(0)
+        Application.ScreenUpdating = True
+        MsgBox "No matches found", vbInformation
+        Exit Sub
+    End If
+    
+    ' Output results with hyperlinks
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName = resultParts(0)
+        filePath = resultParts(1)
+        
+        ' Add file name as clickable hyperlink
+        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (7 + i)), _
+                          Address:=filePath, _
+                          TextToDisplay:=fileName
+        
+        ' Add full path in column B
+        ws.Range("B" & (7 + i)).Value = filePath
+    Next i
+    
+    ' Auto-fit columns
+    ws.Columns("A:B").AutoFit
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "Search complete! Found " & (UBound(results) + 1) & " result(s)" & vbCrLf & _
+           "Click on file names to open them.", vbInformation
+End Sub
+
+' ========== OPTIONAL: COPY FILES FUNCTIONALITY ==========
+' This macro copies the found files to a destination folder
+' Run this separately AFTER running the search if you want to copy the files
+
+Sub CopyFoundFiles()
+    Dim ws As Worksheet
+    Dim destFolder As String
+    Dim fso As Object
+    Dim lastRow As Long
+    Dim i As Long
+    Dim sourcePath As String
+    Dim fileName As String
+    Dim copyCount As Long
+    Dim errorCount As Long
+    Dim errorMsg As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    ' Check if there are search results
+    If ws.Range("A7").Value = "" Or ws.Range("A6").Value <> "File Name" Then
+        MsgBox "No search results found. Please run the search first.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Ask user for destination folder
+    With Application.FileDialog(msoFileDialogFolderPicker)
+        .Title = "Select Destination Folder to Copy Files"
+        .AllowMultiSelect = False
+        If .Show = -1 Then
+            destFolder = .SelectedItems(1)
+        Else
+            Exit Sub ' User cancelled
+        End If
+    End With
+    
+    ' Ensure destination folder ends with backslash
+    If Right(destFolder, 1) <> "\" Then destFolder = destFolder & "\"
+    
+    ' Find last row with data
+    lastRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
+    
+    ' Copy files
+    Application.ScreenUpdating = False
+    copyCount = 0
+    errorCount = 0
+    errorMsg = ""
+    
+    For i = 7 To lastRow
+        sourcePath = ws.Range("B" & i).Value
+        
+        If sourcePath <> "" And fso.FileExists(sourcePath) Then
+            On Error Resume Next
+            fileName = fso.GetFileName(sourcePath)
+            fso.CopyFile sourcePath, destFolder & fileName, True ' True = overwrite if exists
+            
+            If Err.Number = 0 Then
+                copyCount = copyCount + 1
+            Else
+                errorCount = errorCount + 1
+                errorMsg = errorMsg & vbCrLf & "- " & fileName & " (Error: " & Err.Description & ")"
+                Err.Clear
+            End If
+            On Error GoTo 0
+        End If
+    Next i
+    
+    Application.ScreenUpdating = True
+    
+    ' Show summary
+    Dim msg As String
+    msg = "Copy operation complete!" & vbCrLf & vbCrLf & _
+          "Successfully copied: " & copyCount & " file(s)" & vbCrLf & _
+          "Destination: " & destFolder
+    
+    If errorCount > 0 Then
+        msg = msg & vbCrLf & vbCrLf & "Failed to copy: " & errorCount & " file(s)" & errorMsg
+        MsgBox msg, vbExclamation
+    Else
+        MsgBox msg, vbInformation
+    End If
+    
+    Set fso = Nothing
+End Sub
