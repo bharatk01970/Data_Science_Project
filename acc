@@ -34,10 +34,12 @@ Function SearchFilesForKeywords(folderPath As String, keywords() As String, keyw
     Next file
     
     ' Progressive filtering: Apply each keyword as a filter level
+    Dim tempFiles As Object
     For currentLevel = 0 To keywordCount - 1
         If candidateFiles.Count = 0 Then Exit For ' No candidates left
         
-        candidateFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount)
+        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount)
+        Set candidateFiles = tempFiles
     Next currentLevel
     
     ' Convert final candidates to results array
