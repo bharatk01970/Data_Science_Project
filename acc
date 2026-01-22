@@ -1,67 +1,110 @@
 Option Explicit
 
-Function SearchFilesForKeyword(folderPath As String, keyword As String) As Variant
+' ========== CONFIGURATION ==========
+' Change this constant to allow more or fewer keywords without code changes
+Const MAX_KEYWORDS As Integer = 8
+
+' ========== MAIN SEARCH FUNCTION ==========
+Function SearchFilesForKeywords(folderPath As String, keywords() As String, keywordCount As Integer) As Variant
     Dim fso As Object
     Dim folder As Object
     Dim file As Object
     Dim results As Object
-    Dim fileContent As String
-    Dim fileNum As Integer
+    Dim candidateFiles As Object
     Dim fileName As String
-    Dim matchFound As Boolean
+    Dim i As Integer
+    Dim currentLevel As Integer
     
     ' Create FileSystemObject
     Set fso = CreateObject("Scripting.FileSystemObject")
     Set results = CreateObject("System.Collections.ArrayList")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
     
     ' Check if folder exists
     If Not fso.FolderExists(folderPath) Then
-        SearchFilesForKeyword = Array("Error: Folder not found")
+        SearchFilesForKeywords = Array("Error: Folder not found")
         Exit Function
     End If
     
     Set folder = fso.GetFolder(folderPath)
-    keyword = LCase(keyword) ' Case-insensitive search
     
-    ' Loop through all files in the folder
+    ' Level 0: Get all files as initial candidates
     For Each file In folder.Files
-        matchFound = False
-        fileName = file.Name
-        
-        ' First, check if keyword is in file name
-        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
-            matchFound = True
-        End If
-        
-        ' Then check file contents (for text-based files)
-        If Not matchFound Then
-            matchFound = SearchFileContent(file.Path, keyword)
-        ElseIf SearchFileContent(file.Path, keyword) Then
-            matchFound = True
-        End If
-        
-        ' Add to results if match found (store both name and path)
-        If matchFound Then
-            results.Add fileName & "|" & file.Path
-        End If
+        candidateFiles.Add file.Path
     Next file
     
-    ' Return results
-    If results.Count > 0 Then
+    ' Progressive filtering: Apply each keyword as a filter level
+    For currentLevel = 0 To keywordCount - 1
+        If candidateFiles.Count = 0 Then Exit For ' No candidates left
+        
+        candidateFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount)
+    Next currentLevel
+    
+    ' Convert final candidates to results array
+    If candidateFiles.Count > 0 Then
         Dim arr() As Variant
-        ReDim arr(0 To results.Count - 1)
-        Dim i As Long
-        For i = 0 To results.Count - 1
-            arr(i) = results(i)
-        Next i
-        SearchFilesForKeyword = arr
+        ReDim arr(0 To candidateFiles.Count - 1)
+        Dim j As Long
+        For j = 0 To candidateFiles.Count - 1
+            Dim filePath As String
+            filePath = candidateFiles(j)
+            fileName = fso.GetFileName(filePath)
+            arr(j) = fileName & "|" & filePath
+        Next j
+        SearchFilesForKeywords = arr
     Else
-        SearchFilesForKeyword = Array("No matches found")
+        SearchFilesForKeywords = Array("No matches found")
     End If
     
     Set fso = Nothing
     Set folder = Nothing
     Set results = Nothing
+    Set candidateFiles = Nothing
+End Function
+
+Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, level As Integer, totalLevels As Integer) As Object
+    Dim filteredFiles As Object
+    Dim i As Long
+    Dim filePath As String
+    Dim fileName As String
+    Dim fso As Object
+    Dim matchFound As Boolean
+    
+    Set filteredFiles = CreateObject("System.Collections.ArrayList")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    keyword = LCase(Trim(keyword))
+    
+    ' Skip empty keywords
+    If keyword = "" Then
+        Set FilterFilesByKeyword = candidateFiles
+        Exit Function
+    End If
+    
+    ' Filter candidates by current keyword
+    For i = 0 To candidateFiles.Count - 1
+        filePath = candidateFiles(i)
+        fileName = fso.GetFileName(filePath)
+        matchFound = False
+        
+        ' Check if keyword is in file name
+        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
+            matchFound = True
+        End If
+        
+        ' Check file contents (for text-based files) if not found in name
+        If Not matchFound Then
+            matchFound = SearchFileContent(filePath, keyword)
+        End If
+        
+        ' Add to filtered list if match found
+        If matchFound Then
+            filteredFiles.Add filePath
+        End If
+    Next i
+    
+    Set FilterFilesByKeyword = filteredFiles
+    Set fso = Nothing
 End Function
 
 Function SearchFileContent(filePath As String, keyword As String) As Boolean
@@ -110,49 +153,79 @@ End Function
 
 Sub RunSearch()
     Dim folderPath As String
-    Dim keyword As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
     Dim results As Variant
     Dim ws As Worksheet
     Dim i As Long
+    Dim j As Integer
     Dim resultParts() As String
     Dim fileName As String
     Dim filePath As String
+    Dim keywordList As String
     
     Set ws = ThisWorkbook.Sheets("Search")
     
-    ' Get inputs from worksheet
+    ' Get folder path
     folderPath = ws.Range("B2").Value
-    keyword = ws.Range("B3").Value
     
-    If folderPath = "" Or keyword = "" Then
-        MsgBox "Please enter both folder path and keyword", vbExclamation
+    ' Get keywords from worksheet (B3, B4, B5, ... up to MAX_KEYWORDS)
+    keywordCount = 0
+    keywordList = ""
+    
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (3 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+    
+    ' Validation
+    If folderPath = "" Then
+        MsgBox "Please enter folder path in cell B2", vbExclamation
+        Exit Sub
+    End If
+    
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword (cells B3 onwards)", vbExclamation
         Exit Sub
     End If
     
     ' Clear previous results
-    ws.Range("A6:B1000").ClearContents
+    ws.Range("A" & (5 + MAX_KEYWORDS) & ":C1000").ClearContents
     
     ' Run search
     Application.ScreenUpdating = False
-    results = SearchFilesForKeyword(folderPath, keyword)
+    Application.StatusBar = "Searching for " & keywordCount & " keyword(s): " & keywordList & "..."
+    
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount)
+    
+    ' Calculate result row start
+    Dim resultRowStart As Integer
+    resultRowStart = 6 + MAX_KEYWORDS
     
     ' Output results with headers
-    ws.Range("A6").Value = "File Name"
-    ws.Range("B6").Value = "File Path"
+    ws.Range("A" & resultRowStart).Value = "File Name"
+    ws.Range("B" & resultRowStart).Value = "File Path"
+    ws.Range("C" & resultRowStart).Value = "Match Info"
     
     ' Format headers
-    ws.Range("A6:B6").Font.Bold = True
+    ws.Range("A" & resultRowStart & ":C" & resultRowStart).Font.Bold = True
     
     ' Check if results contain error or no matches
     If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
-        ws.Range("A7").Value = results(0)
+        ws.Range("A" & (resultRowStart + 1)).Value = results(0)
         Application.ScreenUpdating = True
+        Application.StatusBar = False
         MsgBox results(0), vbExclamation
         Exit Sub
     ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
-        ws.Range("A7").Value = results(0)
+        ws.Range("A" & (resultRowStart + 1)).Value = results(0)
         Application.ScreenUpdating = True
-        MsgBox "No matches found", vbInformation
+        Application.StatusBar = False
+        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
         Exit Sub
     End If
     
@@ -163,27 +236,89 @@ Sub RunSearch()
         filePath = resultParts(1)
         
         ' Add file name as clickable hyperlink
-        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (7 + i)), _
+        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (resultRowStart + 1 + i)), _
                           Address:=filePath, _
                           TextToDisplay:=fileName
         
         ' Add full path in column B
-        ws.Range("B" & (7 + i)).Value = filePath
+        ws.Range("B" & (resultRowStart + 1 + i)).Value = filePath
+        
+        ' Add match information
+        ws.Range("C" & (resultRowStart + 1 + i)).Value = "Matches all " & keywordCount & " keyword(s)"
     Next i
     
     ' Auto-fit columns
-    ws.Columns("A:B").AutoFit
+    ws.Columns("A:C").AutoFit
     
     Application.ScreenUpdating = True
+    Application.StatusBar = False
     
-    MsgBox "Search complete! Found " & (UBound(results) + 1) & " result(s)" & vbCrLf & _
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Keywords used: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
            "Click on file names to open them.", vbInformation
 End Sub
 
-' ========== OPTIONAL: COPY FILES FUNCTIONALITY ==========
-' This macro copies the found files to a destination folder
-' Run this separately AFTER running the search if you want to copy the files
+Sub SetupSearchSheet()
+    ' This macro sets up the Search sheet with proper labels and formatting
+    Dim ws As Worksheet
+    Dim i As Integer
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Search")
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add
+        ws.Name = "Search"
+    End If
+    
+    Application.ScreenUpdating = False
+    
+    ' Clear existing content
+    ws.Cells.Clear
+    
+    ' Set up headers and input fields
+    ws.Range("A1").Value = "Multi-Level File Search Tool"
+    ws.Range("A1").Font.Bold = True
+    ws.Range("A1").Font.Size = 14
+    
+    ws.Range("A2").Value = "Folder Path:"
+    ws.Range("A2").Font.Bold = True
+    ws.Range("B2").Value = "C:\Your\Folder\Path"
+    
+    ' Set up keyword input fields
+    For i = 1 To MAX_KEYWORDS
+        ws.Range("A" & (2 + i)).Value = "Keyword " & i & ":"
+        ws.Range("A" & (2 + i)).Font.Bold = True
+        ws.Range("B" & (2 + i)).Value = ""
+    Next i
+    
+    ' Add instruction text
+    Dim instructionRow As Integer
+    instructionRow = 3 + MAX_KEYWORDS
+    
+    ws.Range("A" & instructionRow).Value = "Instructions:"
+    ws.Range("A" & instructionRow).Font.Bold = True
+    ws.Range("A" & (instructionRow + 1)).Value = "1. Enter the folder path in cell B2"
+    ws.Range("A" & (instructionRow + 2)).Value = "2. Enter keywords in cells B3 onwards (you can use 1 to " & MAX_KEYWORDS & " keywords)"
+    ws.Range("A" & (instructionRow + 3)).Value = "3. Run 'RunSearch' macro to find files matching ALL keywords"
+    ws.Range("A" & (instructionRow + 4)).Value = "4. Click on file names in results to open them"
+    ws.Range("A" & (instructionRow + 5)).Value = "5. Optionally run 'CopyFoundFiles' to copy all found files to a destination folder"
+    
+    ' Format columns
+    ws.Columns("A").ColumnWidth = 20
+    ws.Columns("B").ColumnWidth = 50
+    ws.Columns("C").ColumnWidth = 25
+    
+    Application.ScreenUpdating = True
+    
+    MsgBox "Search sheet setup complete!" & vbCrLf & vbCrLf & _
+           "Maximum keywords: " & MAX_KEYWORDS & vbCrLf & _
+           "You can change MAX_KEYWORDS constant in the code to adjust this limit.", vbInformation
+End Sub
 
+' ========== OPTIONAL: COPY FILES FUNCTIONALITY ==========
 Sub CopyFoundFiles()
     Dim ws As Worksheet
     Dim destFolder As String
@@ -195,12 +330,15 @@ Sub CopyFoundFiles()
     Dim copyCount As Long
     Dim errorCount As Long
     Dim errorMsg As String
+    Dim resultRowStart As Integer
     
     Set ws = ThisWorkbook.Sheets("Search")
     Set fso = CreateObject("Scripting.FileSystemObject")
     
+    resultRowStart = 6 + MAX_KEYWORDS
+    
     ' Check if there are search results
-    If ws.Range("A7").Value = "" Or ws.Range("A6").Value <> "File Name" Then
+    If ws.Range("A" & (resultRowStart + 1)).Value = "" Or ws.Range("A" & resultRowStart).Value <> "File Name" Then
         MsgBox "No search results found. Please run the search first.", vbExclamation
         Exit Sub
     End If
@@ -228,7 +366,7 @@ Sub CopyFoundFiles()
     errorCount = 0
     errorMsg = ""
     
-    For i = 7 To lastRow
+    For i = resultRowStart + 1 To lastRow
         sourcePath = ws.Range("B" & i).Value
         
         If sourcePath <> "" And fso.FileExists(sourcePath) Then
