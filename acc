@@ -1,406 +1,956 @@
-Option Explicit
+```markdown
+# 2026 DEVELOPMENT GOALS - DETAILED ACTION PLAN
+## TM1 Support Analyst | Banking Corp | Measurable Impact Framework
 
-' ========== CONFIGURATION ==========
-' Change this constant to allow more or fewer keywords without code changes
-Const MAX_KEYWORDS As Integer = 8
+---
 
-' ========== MAIN SEARCH FUNCTION ==========
-Function SearchFilesForKeywords(folderPath As String, keywords() As String, keywordCount As Integer) As Variant
-    Dim fso As Object
-    Dim folder As Object
-    Dim file As Object
-    Dim results As Object
-    Dim candidateFiles As Object
-    Dim fileName As String
-    Dim i As Integer
-    Dim currentLevel As Integer
-    
-    ' Create FileSystemObject
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set results = CreateObject("System.Collections.ArrayList")
-    Set candidateFiles = CreateObject("System.Collections.ArrayList")
-    
-    ' Check if folder exists
-    If Not fso.FolderExists(folderPath) Then
-        SearchFilesForKeywords = Array("Error: Folder not found")
-        Exit Function
-    End If
-    
-    Set folder = fso.GetFolder(folderPath)
-    
-    ' Level 0: Get all files as initial candidates
-    For Each file In folder.Files
-        candidateFiles.Add file.Path
-    Next file
-    
-    ' Progressive filtering: Apply each keyword as a filter level
-    Dim tempFiles As Object
-    For currentLevel = 0 To keywordCount - 1
-        If candidateFiles.Count = 0 Then Exit For ' No candidates left
-        
-        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount)
-        Set candidateFiles = tempFiles
-    Next currentLevel
-    
-    ' Convert final candidates to results array
-    If candidateFiles.Count > 0 Then
-        Dim arr() As Variant
-        ReDim arr(0 To candidateFiles.Count - 1)
-        Dim j As Long
-        For j = 0 To candidateFiles.Count - 1
-            Dim filePath As String
-            filePath = candidateFiles(j)
-            fileName = fso.GetFileName(filePath)
-            arr(j) = fileName & "|" & filePath
-        Next j
-        SearchFilesForKeywords = arr
-    Else
-        SearchFilesForKeywords = Array("No matches found")
-    End If
-    
-    Set fso = Nothing
-    Set folder = Nothing
-    Set results = Nothing
-    Set candidateFiles = Nothing
-End Function
+## GOAL 1: BUSINESS ANALYTICS
 
-Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, level As Integer, totalLevels As Integer) As Object
-    Dim filteredFiles As Object
-    Dim i As Long
-    Dim filePath As String
-    Dim fileName As String
-    Dim fso As Object
-    Dim matchFound As Boolean
-    
-    Set filteredFiles = CreateObject("System.Collections.ArrayList")
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    keyword = LCase(Trim(keyword))
-    
-    ' Skip empty keywords
-    If keyword = "" Then
-        Set FilterFilesByKeyword = candidateFiles
-        Exit Function
-    End If
-    
-    ' Filter candidates by current keyword
-    For i = 0 To candidateFiles.Count - 1
-        filePath = candidateFiles(i)
-        fileName = fso.GetFileName(filePath)
-        matchFound = False
-        
-        ' Check if keyword is in file name
-        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
-            matchFound = True
-        End If
-        
-        ' Check file contents (for text-based files) if not found in name
-        If Not matchFound Then
-            matchFound = SearchFileContent(filePath, keyword)
-        End If
-        
-        ' Add to filtered list if match found
-        If matchFound Then
-            filteredFiles.Add filePath
-        End If
-    Next i
-    
-    Set FilterFilesByKeyword = filteredFiles
-    Set fso = Nothing
-End Function
+### DEFINITION:
+Develop capability to analyze TM1 data, identify trends, derive insights, and present findings that drive business decisions. Move beyond technical support to strategic business partner who understands the "why" behind the data.
 
-Function SearchFileContent(filePath As String, keyword As String) As Boolean
-    Dim fileNum As Integer
-    Dim fileContent As String
-    Dim textStream As Object
-    Dim fso As Object
-    
-    On Error Resume Next
-    
-    SearchFileContent = False
-    
-    ' Only search text-based files (txt, csv, log, xml, json, etc.)
-    If IsTextFile(filePath) Then
-        Set fso = CreateObject("Scripting.FileSystemObject")
-        Set textStream = fso.OpenTextFile(filePath, 1, False) ' 1 = ForReading
-        
-        If Err.Number = 0 Then
-            fileContent = textStream.ReadAll
-            textStream.Close
-            
-            If InStr(1, LCase(fileContent), keyword, vbTextCompare) > 0 Then
-                SearchFileContent = True
-            End If
-        End If
-        
-        Set textStream = Nothing
-        Set fso = Nothing
-    End If
-    
-    On Error GoTo 0
-End Function
+---
 
-Function IsTextFile(filePath As String) As Boolean
-    Dim ext As String
-    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
-    
-    ' Add or remove extensions as needed
-    Select Case ext
-        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", "sql", "vbs", "bat"
-            IsTextFile = True
-        Case Else
-            IsTextFile = False
-    End Select
-End Function
+### DEVELOPMENT ACTIONS:
 
-Sub RunSearch()
-    Dim folderPath As String
-    Dim keywords(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordCount As Integer
-    Dim results As Variant
-    Dim ws As Worksheet
-    Dim i As Long
-    Dim j As Integer
-    Dim resultParts() As String
-    Dim fileName As String
-    Dim filePath As String
-    Dim keywordList As String
-    
-    Set ws = ThisWorkbook.Sheets("Search")
-    
-    ' Get folder path
-    folderPath = ws.Range("B2").Value
-    
-    ' Get keywords from worksheet (B3, B4, B5, ... up to MAX_KEYWORDS)
-    keywordCount = 0
-    keywordList = ""
-    
-    For i = 0 To MAX_KEYWORDS - 1
-        keywords(i) = Trim(ws.Range("B" & (3 + i)).Value)
-        If keywords(i) <> "" Then
-            keywordCount = keywordCount + 1
-            If keywordList <> "" Then keywordList = keywordList & ", "
-            keywordList = keywordList & """" & keywords(i) & """"
-        End If
-    Next i
-    
-    ' Validation
-    If folderPath = "" Then
-        MsgBox "Please enter folder path in cell B2", vbExclamation
-        Exit Sub
-    End If
-    
-    If keywordCount = 0 Then
-        MsgBox "Please enter at least one keyword (cells B3 onwards)", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Clear previous results
-    ws.Range("A" & (5 + MAX_KEYWORDS) & ":C1000").ClearContents
-    
-    ' Run search
-    Application.ScreenUpdating = False
-    Application.StatusBar = "Searching for " & keywordCount & " keyword(s): " & keywordList & "..."
-    
-    results = SearchFilesForKeywords(folderPath, keywords, keywordCount)
-    
-    ' Calculate result row start
-    Dim resultRowStart As Integer
-    resultRowStart = 6 + MAX_KEYWORDS
-    
-    ' Output results with headers
-    ws.Range("A" & resultRowStart).Value = "File Name"
-    ws.Range("B" & resultRowStart).Value = "File Path"
-    ws.Range("C" & resultRowStart).Value = "Match Info"
-    
-    ' Format headers
-    ws.Range("A" & resultRowStart & ":C" & resultRowStart).Font.Bold = True
-    
-    ' Check if results contain error or no matches
-    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
-        ws.Range("A" & (resultRowStart + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox results(0), vbExclamation
-        Exit Sub
-    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
-        ws.Range("A" & (resultRowStart + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
-        Exit Sub
-    End If
-    
-    ' Output results with hyperlinks
-    For i = LBound(results) To UBound(results)
-        resultParts = Split(results(i), "|")
-        fileName = resultParts(0)
-        filePath = resultParts(1)
-        
-        ' Add file name as clickable hyperlink
-        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (resultRowStart + 1 + i)), _
-                          Address:=filePath, _
-                          TextToDisplay:=fileName
-        
-        ' Add full path in column B
-        ws.Range("B" & (resultRowStart + 1 + i)).Value = filePath
-        
-        ' Add match information
-        ws.Range("C" & (resultRowStart + 1 + i)).Value = "Matches all " & keywordCount & " keyword(s)"
-    Next i
-    
-    ' Auto-fit columns
-    ws.Columns("A:C").AutoFit
-    
-    Application.ScreenUpdating = True
-    Application.StatusBar = False
-    
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Keywords used: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
-           "Click on file names to open them.", vbInformation
-End Sub
+1. **Master analytical frameworks and methodologies**
+   - Learn root cause analysis (5 Whys, Fishbone diagrams)
+   - Study variance analysis techniques (actual vs budget, YoY comparisons)
+   - Practice trend identification and forecasting basics
+   - Apply statistical thinking to TM1 data (averages, distributions, outliers)
+   - Build monthly "insights report" from TM1 data patterns
 
-Sub SetupSearchSheet()
-    ' This macro sets up the Search sheet with proper labels and formatting
-    Dim ws As Worksheet
-    Dim i As Integer
-    
-    On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("Search")
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        Set ws = ThisWorkbook.Sheets.Add
-        ws.Name = "Search"
-    End If
-    
-    Application.ScreenUpdating = False
-    
-    ' Clear existing content
-    ws.Cells.Clear
-    
-    ' Set up headers and input fields
-    ws.Range("A1").Value = "Multi-Level File Search Tool"
-    ws.Range("A1").Font.Bold = True
-    ws.Range("A1").Font.Size = 14
-    
-    ws.Range("A2").Value = "Folder Path:"
-    ws.Range("A2").Font.Bold = True
-    ws.Range("B2").Value = "C:\Your\Folder\Path"
-    
-    ' Set up keyword input fields
-    For i = 1 To MAX_KEYWORDS
-        ws.Range("A" & (2 + i)).Value = "Keyword " & i & ":"
-        ws.Range("A" & (2 + i)).Font.Bold = True
-        ws.Range("B" & (2 + i)).Value = ""
-    Next i
-    
-    ' Add instruction text
-    Dim instructionRow As Integer
-    instructionRow = 3 + MAX_KEYWORDS
-    
-    ws.Range("A" & instructionRow).Value = "Instructions:"
-    ws.Range("A" & instructionRow).Font.Bold = True
-    ws.Range("A" & (instructionRow + 1)).Value = "1. Enter the folder path in cell B2"
-    ws.Range("A" & (instructionRow + 2)).Value = "2. Enter keywords in cells B3 onwards (you can use 1 to " & MAX_KEYWORDS & " keywords)"
-    ws.Range("A" & (instructionRow + 3)).Value = "3. Run 'RunSearch' macro to find files matching ALL keywords"
-    ws.Range("A" & (instructionRow + 4)).Value = "4. Click on file names in results to open them"
-    ws.Range("A" & (instructionRow + 5)).Value = "5. Optionally run 'CopyFoundFiles' to copy all found files to a destination folder"
-    
-    ' Format columns
-    ws.Columns("A").ColumnWidth = 20
-    ws.Columns("B").ColumnWidth = 50
-    ws.Columns("C").ColumnWidth = 25
-    
-    Application.ScreenUpdating = True
-    
-    MsgBox "Search sheet setup complete!" & vbCrLf & vbCrLf & _
-           "Maximum keywords: " & MAX_KEYWORDS & vbCrLf & _
-           "You can change MAX_KEYWORDS constant in the code to adjust this limit.", vbInformation
-End Sub
+2. **Understand business context for TM1 data**
+   - Shadow Finance users quarterly to see how they use TM1 outputs
+   - Map TM1 cubes to business processes (budgeting, forecasting, reporting)
+   - Learn what decisions are made with each TM1 report
+   - Document business glossary (what does each metric actually mean?)
+   - Attend business review meetings where TM1 data is discussed
 
-' ========== OPTIONAL: COPY FILES FUNCTIONALITY ==========
-Sub CopyFoundFiles()
-    Dim ws As Worksheet
-    Dim destFolder As String
-    Dim fso As Object
-    Dim lastRow As Long
-    Dim i As Long
-    Dim sourcePath As String
-    Dim fileName As String
-    Dim copyCount As Long
-    Dim errorCount As Long
-    Dim errorMsg As String
-    Dim resultRowStart As Integer
-    
-    Set ws = ThisWorkbook.Sheets("Search")
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    resultRowStart = 6 + MAX_KEYWORDS
-    
-    ' Check if there are search results
-    If ws.Range("A" & (resultRowStart + 1)).Value = "" Or ws.Range("A" & resultRowStart).Value <> "File Name" Then
-        MsgBox "No search results found. Please run the search first.", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Ask user for destination folder
-    With Application.FileDialog(msoFileDialogFolderPicker)
-        .Title = "Select Destination Folder to Copy Files"
-        .AllowMultiSelect = False
-        If .Show = -1 Then
-            destFolder = .SelectedItems(1)
-        Else
-            Exit Sub ' User cancelled
-        End If
-    End With
-    
-    ' Ensure destination folder ends with backslash
-    If Right(destFolder, 1) <> "\" Then destFolder = destFolder & "\"
-    
-    ' Find last row with data
-    lastRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
-    
-    ' Copy files
-    Application.ScreenUpdating = False
-    copyCount = 0
-    errorCount = 0
-    errorMsg = ""
-    
-    For i = resultRowStart + 1 To lastRow
-        sourcePath = ws.Range("B" & i).Value
-        
-        If sourcePath <> "" And fso.FileExists(sourcePath) Then
-            On Error Resume Next
-            fileName = fso.GetFileName(sourcePath)
-            fso.CopyFile sourcePath, destFolder & fileName, True ' True = overwrite if exists
-            
-            If Err.Number = 0 Then
-                copyCount = copyCount + 1
-            Else
-                errorCount = errorCount + 1
-                errorMsg = errorMsg & vbCrLf & "- " & fileName & " (Error: " & Err.Description & ")"
-                Err.Clear
-            End If
-            On Error GoTo 0
-        End If
-    Next i
-    
-    Application.ScreenUpdating = True
-    
-    ' Show summary
-    Dim msg As String
-    msg = "Copy operation complete!" & vbCrLf & vbCrLf & _
-          "Successfully copied: " & copyCount & " file(s)" & vbCrLf & _
-          "Destination: " & destFolder
-    
-    If errorCount > 0 Then
-        msg = msg & vbCrLf & vbCrLf & "Failed to copy: " & errorCount & " file(s)" & errorMsg
-        MsgBox msg, vbExclamation
-    Else
-        MsgBox msg, vbInformation
-    End If
-    
-    Set fso = Nothing
-End Sub
+3. **Build visualization and presentation skills**
+   - Create dashboards in Excel using TM1 data (charts, conditional formatting)
+   - Learn storytelling with data (context → insight → recommendation)
+   - Practice executive summaries (one slide, key insight, so what?)
+   - Present monthly "TM1 data insights" to team
+   - Master Power BI or Tableau basics if available (visualize TM1 data)
+
+4. **Develop hypothesis-driven analysis capability**
+   - For each support ticket, ask: "What pattern might this indicate?"
+   - Conduct monthly TM1 usage analysis (which cubes, which users, what trends)
+   - Proactively identify data quality issues before users report them
+   - Build predictive capabilities (forecast support volume, identify risk areas)
+   - Document and share findings with stakeholders
+
+5. **Apply analytics to automation decisions**
+   - Use data to prioritize which processes to automate (frequency × impact analysis)
+   - Measure adoption rates of your automations (usage analytics)
+   - Calculate ROI for each automation project (time saved × cost per hour)
+   - Track and analyze support ticket trends to identify systemic issues
+   - Build business cases for major initiatives using quantitative analysis
+
+---
+
+### MEASURES OF SUCCESS:
+
+1. **Quantitative Metrics**
+   - Deliver 12 monthly "TM1 Insights Reports" with actionable recommendations
+   - Identify and resolve 5+ data quality issues proactively (before user reports)
+   - Present 4 quarterly business reviews with TM1 usage analytics to stakeholders
+   - Build 3-5 analytical dashboards used regularly by Finance/business users
+   - Achieve 90%+ accuracy in trend predictions/forecasts you make
+
+2. **Qualitative Recognition**
+   - Finance stakeholders seek your analytical input (not just technical support)
+   - Manager recognizes you as "business analyst" not just "technical support"
+   - Invited to business planning meetings where TM1 data informs decisions
+   - Testimonials from stakeholders about value of your insights
+   - Asked to analyze new business problems beyond TM1 scope
+
+3. **Business Impact**
+   - Your analysis leads to 3+ specific business decisions or process improvements
+   - Prevent at least 2 major data issues through proactive monitoring/analysis
+   - Reduce time Finance spends on data analysis by 20% (you pre-analyze)
+   - Support ticket volume decreases 15% due to proactive issue identification
+   - Cost savings from insights-driven improvements: quantify and document
+
+4. **Skill Demonstration**
+   - Can independently conduct variance analysis and explain drivers
+   - Present complex findings simply to non-technical executives
+   - Build predictive models for support volume, data quality issues
+   - Create executive-ready visualizations without assistance
+   - Translate technical TM1 issues into business impact statements
+
+5. **Strategic Positioning**
+   - Positioned for Business Analyst or Analytics role (not just support)
+   - Referenced as "go-to person" for TM1 data interpretation
+   - Portfolio of analytical projects demonstrates business acumen
+   - Network expanded to include business leaders (not just IT)
+   - Clear path to front-office or strategic analytics role
+
+---
+
+### REQUIRED SUPPORT:
+
+1. **Access and Permissions**
+   - Read access to all major TM1 cubes and dimensions
+   - Historical TM1 data for trend analysis (2-3 years if possible)
+   - Access to business context (budgets, actuals, strategic plans)
+   - Permission to attend Finance team meetings quarterly
+   - Ability to share insights broadly (no data confidentiality blocks)
+
+2. **Manager/Mentor Support**
+   - Monthly 1:1 with manager to discuss analytical findings
+   - Mentor from Finance or Analytics team (guidance on business context)
+   - Opportunity to present insights in team/department meetings
+   - Support in connecting with business stakeholders
+   - Feedback on analytical work quality and business relevance
+
+3. **Learning Resources**
+   - Access to business analytics courses (Coursera, LinkedIn Learning, internal)
+   - Budget for 1-2 analytics books/resources
+   - Time allocation: 2-3 hours/week for learning + practice
+   - Participation in Finance/Analytics communities of practice
+   - Shadowing opportunities with Finance analysts (1 day per quarter)
+
+4. **Tools and Technology**
+   - Excel advanced features (Power Query, Power Pivot, charts)
+   - Power BI or Tableau license if available
+   - Statistical tools access (basic R or Python libraries for analysis)
+   - Presentation tools (PowerPoint, better chart libraries)
+   - Collaboration tools to share insights (SharePoint, internal portal)
+
+5. **Stakeholder Engagement**
+   - Bi-weekly touchpoints with key Finance users (understand needs)
+   - Quarterly business review presentation slot
+   - Feedback loop with data consumers (are insights useful?)
+   - Cross-functional project opportunities (apply analytics to real problems)
+   - Executive visibility for high-impact analytical work
+
+---
+
+### LINKED SKILLS:
+
+1. **SQL (Data Extraction & Analysis)**
+   - Use SQL to query TM1 database directly for custom analysis
+   - Complex joins to combine multiple cube data for insights
+   - Window functions for trend analysis (YoY, MoM comparisons)
+   - Aggregations and grouping for summary analytics
+   - Performance optimization for large analytical queries
+
+2. **Power Query & Excel (Data Transformation & Visualization)**
+   - Power Query for cleaning and shaping TM1 data for analysis
+   - Power Pivot for data modeling and relationships
+   - DAX for calculated measures and KPIs
+   - Advanced Excel charts for visualizing trends
+   - Conditional formatting and dashboards for executive reporting
+
+3. **Python (Advanced Analytics & Automation)**
+   - pandas for complex data manipulation and analysis
+   - matplotlib/seaborn for visualizations
+   - Basic statistics libraries (numpy, scipy) for trend analysis
+   - Automated report generation with insights
+   - Predictive modeling basics (scikit-learn) for forecasting
+
+4. **Financial Domain Knowledge (Business Context)**
+   - Understand P&L, Balance Sheet to interpret TM1 financial data
+   - Know budgeting/forecasting cycles to time your analysis
+   - Recognize meaningful variances vs noise in financial data
+   - Speak Finance language when presenting insights
+   - Connect TM1 metrics to business outcomes
+
+5. **Stakeholder Management & Communication (Influence & Impact)**
+   - Present insights to non-technical audiences
+   - Tailor message to audience (exec summary vs detailed analysis)
+   - Build relationships with data consumers (understand their needs)
+   - Negotiate for data access and analytical opportunities
+   - Demonstrate business value of your analytical work
+
+---
+
+## GOAL 2: VBA (FOR SIMPLIFICATION AND AUTOMATION OF SIMPLE TASKS)
+
+### DEFINITION:
+Achieve advanced VBA proficiency to simplify and automate repetitive Excel-based TM1 workflows, creating user-friendly tools that improve team efficiency and reduce manual errors.
+
+---
+
+### DEVELOPMENT ACTIONS:
+
+1. **Master VBA fundamentals and Excel object model**
+   - Complete structured VBA course (Wise Owl, Udemy, or internal training)
+   - Practice daily: convert 1 manual task to VBA macro per week
+   - Study Excel object hierarchy (Workbooks → Worksheets → Ranges → Cells)
+   - Build library of reusable code snippets (common tasks you automate)
+   - Learn debugging techniques (breakpoints, watch windows, immediate window)
+
+2. **Develop user-friendly automation tools**
+   - Create user forms for 3-5 common tasks (friendly interfaces for team)
+   - Add error handling to all macros (graceful failures, helpful error messages)
+   - Build progress indicators for long-running processes (user feedback)
+   - Design custom ribbon buttons for frequently used automations
+   - Implement input validation (prevent user errors before they happen)
+
+3. **Automate TM1-Excel integration workflows**
+   - Master TM1 Excel add-in automation (refresh, drill, export)
+   - Build automated report generation from TM1 templates
+   - Create dynamic TM1 data retrieval based on user inputs
+   - Automate multi-step TM1 workflows (extract → transform → load)
+   - Develop TM1 data quality checks within Excel (automated validation)
+
+4. **Optimize code quality and maintainability**
+   - Refactor existing macros for better performance (eliminate loops where possible)
+   - Use meaningful variable/function names (self-documenting code)
+   - Add comprehensive comments explaining logic
+   - Organize code into modules by functionality
+   - Version control practices (save old versions, track changes in comments)
+
+5. **Document and share VBA knowledge**
+   - Create internal VBA coding standards document for team
+   - Build template workbooks with commonly used VBA functions
+   - Write user guides for each automation tool (screenshots + instructions)
+   - Conduct 2-3 lunch & learn sessions teaching basic VBA to colleagues
+   - Maintain VBA solutions repository with documentation
+
+---
+
+### MEASURES OF SUCCESS:
+
+1. **Automation Deployment**
+   - Deploy 10-15 VBA-based automations throughout 2026
+   - At least 5 with user forms (user-friendly interfaces)
+   - 3-5 TM1-specific automation tools in production
+   - All automations have error handling and user documentation
+   - Zero critical failures (bugs that break workflows)
+
+2. **Time Savings & Efficiency**
+   - Measure time saved per automation (before vs after)
+   - Aggregate 300+ hours saved across team through VBA automations
+   - Reduce manual Excel manipulation time by 40% for team
+   - Month-end processes shortened by 25% through VBA automation
+   - User-reported efficiency gains (survey/testimonials)
+
+3. **Quality & Reliability**
+   - Error reduction: 50% fewer Excel-related errors in automated processes
+   - All VBA tools run without assistance (self-service)
+   - User satisfaction: 8/10 or higher for VBA tools deployed
+   - Code quality: Pass peer review for structure, comments, error handling
+   - Maintenance: <5% of time spent fixing bugs (quality code upfront)
+
+4. **Knowledge Sharing & Enablement**
+   - Train 5+ colleagues on basic VBA (they can modify/create simple macros)
+   - VBA repository established with 20+ reusable code snippets
+   - 2-3 colleagues contribute to VBA solutions (not just you)
+   - Internal VBA documentation viewed/referenced 50+ times
+   - Recognized as team's VBA expert (go-to person for questions)
+
+5. **Technical Proficiency Demonstration**
+   - Can independently build complex multi-step automation
+   - Integrate VBA with TM1, SQL, file systems, email (if permitted)
+   - Debug and optimize other people's VBA code
+   - Design user interfaces that non-technical users can operate
+   - Apply object-oriented principles in VBA (basic classes/modules)
+
+---
+
+### REQUIRED SUPPORT:
+
+1. **Technical Infrastructure**
+   - Macro-enabled workbooks permitted in corporate environment
+   - Ability to save and distribute .xlsm files to team
+   - Shared drive location for VBA templates and code library
+   - Access to TM1 Excel add-in automation features
+   - Testing environment where VBA solutions can be piloted safely
+
+2. **Learning Resources**
+   - VBA training course access (online or internal)
+   - Books/reference materials (Excel VBA Programming for Dummies, etc.)
+   - Stack Overflow/forums access for troubleshooting
+   - Time allocation: 1 hour/day for VBA practice and development
+   - Example code from corporate VBA solutions (learn from existing work)
+
+3. **Manager/Peer Support**
+   - Manager approval to automate workflows (not blocked by policy)
+   - Peer code reviews (feedback from experienced VBA users if available)
+   - User testing volunteers (colleagues to test automations before rollout)
+   - Permission to distribute VBA tools across team/department
+   - Recognition for successful automations (share wins in team meetings)
+
+4. **User Collaboration**
+   - Access to end users for requirements gathering
+   - Feedback loops after deployment (what works, what doesn't)
+   - Iterative development approach (deploy, get feedback, improve)
+   - User acceptance testing before wide rollout
+   - Champions who advocate for VBA solutions in their teams
+
+5. **Documentation & Sharing Infrastructure**
+   - SharePoint/wiki for VBA documentation
+   - Screen recording tools for creating user guide videos
+   - Email/Teams channels to announce new automations
+   - Regular slot in team meetings to demo VBA solutions
+   - Recognition program for process improvement contributions
+
+---
+
+### LINKED SKILLS:
+
+1. **Process Mapping & Documentation (Identify What to Automate)**
+   - Map Excel-based workflows to identify automation opportunities
+   - Document current state before automating (baseline for improvement)
+   - Prioritize automations by impact vs effort (ROI thinking)
+   - Create before/after process documentation for each automation
+   - Measure and quantify time savings from VBA solutions
+
+2. **Excel Advanced Features (Leverage Full Excel Capability)**
+   - Advanced formulas to minimize VBA code needed
+   - PivotTables and charts manipulation via VBA
+   - Named ranges and dynamic ranges for flexible VBA code
+   - Conditional formatting applied programmatically
+   - Excel Tables for structured data (easier VBA manipulation)
+
+3. **TM1 Cube Rules (Understand Data Source)**
+   - Know when to automate in VBA vs optimize in TM1 rules
+   - Understand TM1 calculation logic to validate VBA outputs
+   - Integrate VBA with TM1 processes (trigger TM1 actions from Excel)
+   - Automate TM1 rule testing and validation
+   - Build VBA tools that help debug TM1 cube issues
+
+4. **SQL (Data Validation & Integration)**
+   - Query TM1 database from VBA to validate Excel data
+   - Import SQL query results into Excel via VBA
+   - Automate data reconciliation (Excel vs TM1 database)
+   - Build VBA tools that use SQL for data lookups
+   - Combine VBA + SQL for complex data workflows
+
+5. **Python (Complementary Automation)**
+   - Know when to use VBA vs Python (decision framework)
+   - Call Python scripts from VBA for heavy data processing
+   - Use Python for data prep, VBA for Excel presentation
+   - Share data between Python and VBA workflows
+   - Build integrated solutions leveraging strengths of both
+
+---
+
+## GOAL 3: POWER QUERY AND SQL LEARNING AND IMPLEMENTATION IN BAU
+
+### DEFINITION:
+Master Power Query and SQL to transform manual data manipulation into automated, repeatable processes, enabling self-service reporting and reducing BAU support workload significantly.
+
+---
+
+### DEVELOPMENT ACTIONS:
+
+1. **Build Power Query foundational proficiency**
+   - Complete Microsoft Learn Power Query learning path (free, comprehensive)
+   - Practice with real TM1 exports: convert 1 manual report per week to Power Query
+   - Master M language basics (understand code behind transformations)
+   - Learn parameter-driven queries (users can refresh with different inputs)
+   - Build 5 self-service Power Query solutions in first 6 months
+
+2. **Develop SQL querying skills progressively**
+   - Start with SELECT, WHERE, ORDER BY (Month 1-2)
+   - Progress to JOIN, GROUP BY, aggregations (Month 3-4)
+   - Master subqueries, CTEs, window functions (Month 5-6)
+   - Learn query optimization for large TM1 datasets (Month 7-12)
+   - Write 100+ SQL queries during 2026 (daily practice)
+
+3. **Integrate Power Query + SQL into BAU workflows**
+   - Replace top 5 manual Excel reports with Power Query solutions
+   - Build SQL queries for common TM1 data extraction needs
+   - Create Power Query connections to TM1 database (if permitted)
+   - Automate month-end data consolidation using Power Query
+   - Develop hybrid solutions (SQL extracts → Power Query transforms)
+
+4. **Enable self-service reporting for stakeholders**
+   - Design Power Query models that Finance users can refresh themselves
+   - Create user guides for refreshing Power Query reports
+   - Build parameter tables (users change inputs, query adapts)
+   - Train 5-10 stakeholders to use Power Query solutions independently
+   - Reduce "can you pull this data" requests by 40%
+
+5. **Establish best practices and governance**
+   - Document Power Query standards (naming, structure, comments)
+   - Create SQL query library (reusable queries for common needs)
+   - Build template Power Query models for different report types
+   - Implement data refresh schedules and monitoring
+   - Version control for Power Query models (save iterations)
+
+---
+
+### MEASURES OF SUCCESS:
+
+1. **Solution Deployment & Adoption**
+   - Deploy 15-20 Power Query solutions used regularly by 20+ people
+   - Build 50+ SQL queries for production use (data extraction, analysis)
+   - At least 5 self-service reports where users refresh independently
+   - Power Query solutions handle 60% of recurring report requests
+   - SQL direct access replaces manual TM1 exports for 10+ use cases
+
+2. **Efficiency & Time Savings**
+   - Reduce manual data manipulation time by 50% across team
+   - Save 400+ hours annually through Power Query automation
+   - Month-end reporting time reduced by 30% (faster data consolidation)
+   - Support tickets for "data pulls" decrease by 40%
+   - Average report refresh time: <5 minutes (was 1-2 hours manual)
+
+3. **Data Quality & Reliability**
+   - Error rate in automated reports: <2% (vs 10-15% manual)
+   - 100% of Power Query solutions have built-in data validation
+   - SQL queries optimized to run in <30 seconds
+   - Zero data corruption incidents from Power Query transformations
+   - Stakeholder confidence: 9/10 trust automated data as much as manual
+
+4. **Self-Service Enablement**
+   - 10+ users trained and actively using Power Query independently
+   - Self-service adoption rate: 70% of trained users refresh regularly
+   - Support requests shift from "can you pull data" to "help me understand data"
+   - Finance team can answer 80% of ad-hoc queries themselves
+   - User satisfaction with self-service tools: 8.5/10 or higher
+
+5. **Technical Proficiency Achievement**
+   - Can write complex SQL queries (multi-table joins, CTEs, window functions)
+   - Build Power Query solutions for any Excel-based workflow
+   - Troubleshoot and optimize slow-running queries
+   - Teach others SQL and Power Query basics
+   - Recognized as team expert in data transformation and extraction
+
+---
+
+### REQUIRED SUPPORT:
+
+1. **Database Access & Permissions**
+   - Read-only access to TM1 database for SQL queries
+   - Connection strings and database documentation
+   - Ability to test queries in non-production environment first
+   - Access to database admin for permission/performance questions
+   - Exemption from strict query timeouts during learning phase
+
+2. **Software & Tools**
+   - Excel with Power Query enabled (should be standard)
+   - SQL client tool (SQL Server Management Studio, DBeaver, or similar)
+   - Power BI Desktop if advanced visualization needed
+   - Testing environment with sample TM1 data
+   - Shared drive for storing Power Query models and SQL scripts
+
+3. **Learning Resources & Training**
+   - Microsoft Learn Power Query path access
+   - SQL tutorial resources (Mode Analytics, SQLZoo, internal courses)
+   - Time allocation: 1 hour/day for learning and practice
+   - Access to database schema documentation (understand TM1 data structure)
+   - Peer mentoring from experienced SQL users if available
+
+4. **Stakeholder Collaboration**
+   - Finance users willing to test and provide feedback on solutions
+   - Requirements gathering sessions (what reports do they need?)
+   - Pilot users for self-service model rollout
+   - Training time with end users (teach them to use Power Query)
+   - Regular feedback loops on solution usefulness and reliability
+
+5. **Manager Support & Recognition**
+   - Approval to shift from manual to automated reporting
+   - Time allocated for building Power Query solutions (not just firefighting)
+   - Recognition when solutions reduce workload significantly
+   - Permission to train others (time investment upfront, efficiency gain later)
+   - Support in communicating value to leadership
+
+---
+
+### LINKED SKILLS:
+
+1. **Business Analytics (Apply to Real Analysis)**
+   - Use SQL to extract data for business analytics projects
+   - Power Query for data preparation before analysis
+   - Combine SQL + Power Query + Excel for analytical workflows
+   - Self-service reporting enables more analytics by Finance users
+   - Query optimization improves analysis turnaround time
+
+2. **VBA (Complementary Automation)**
+   - VBA can trigger Power Query refreshes programmatically
+   - Combine Power Query (data transformation) + VBA (presentation layer)
+   - Use VBA to distribute Power Query-generated reports
+   - SQL queries can be embedded in VBA code
+   - Integrated solutions leveraging strengths of each tool
+
+3. **Python (Advanced Data Processing)**
+   - SQL for extraction, Python for complex transformations
+   - Power Query for routine tasks, Python for one-off analysis
+   - Export Power Query results, process in Python, reimport
+   - Use Python when Power Query hits limitations
+   - SQL knowledge transfers directly to Python (pandas + SQLAlchemy)
+
+4. **TM1 Cube Rules (Data Source Understanding)**
+   - Know TM1 data model to write effective SQL queries
+   - Understand cube structure to map to SQL tables
+   - Validate SQL output against TM1 cube rules (ensure consistency)
+   - Query TM1 database directly vs going through TM1 UI
+   - Optimize data retrieval based on TM1 architecture knowledge
+
+5. **Financial Domain Knowledge (Business Context)**
+   - Build Power Query reports that match Finance mental models
+   - SQL queries that pull relevant business metrics
+   - Self-service tools aligned to Finance workflows (month-end, forecasting)
+   - Understand what data Finance needs (anticipate requirements)
+   - Speak Finance language when training users on self-service tools
+
+---
+
+## GOAL 4: TM1 CUBE RULES
+
+### DEFINITION:
+Develop deep understanding of TM1 cube rules and calculation logic to optimize performance, troubleshoot issues faster, and design better data structures for business requirements.
+
+---
+
+### DEVELOPMENT ACTIONS:
+
+1. **Master TM1 rules fundamentals and syntax**
+   - Study TM1 rules documentation and tutorials (IBM/official resources)
+   - Analyze existing cube rules in your TM1 environment (learn by example)
+   - Understand rule syntax, operators, functions, and best practices
+   - Practice writing simple rules in test environment
+   - Document common rule patterns you observe (reusable logic)
+
+2. **Analyze and optimize existing TM1 cube rules**
+   - Audit top 10 cubes for rule complexity and performance
+   - Identify slow-running rules causing user issues
+   - Learn optimization techniques (skip checks, feeders, consolidated rules)
+   - Propose rule improvements for poorly performing cubes
+   - Measure before/after performance for optimization projects
+
+3. **Troubleshoot rule-related issues systematically**
+   - Build troubleshooting framework for rule problems
+   - Learn to read TM1 logs related to rule execution
+   - Develop test cases to isolate rule bugs
+   - Document common rule errors and solutions
+   - Reduce average time to resolve rule issues by 50%
+
+4. **Collaborate with TM1 developers on rule design**
+   - Shadow TM1 developers during rule development projects
+   - Provide user perspective on rule impacts (performance, usability)
+   - Participate in rule design reviews for new cubes
+   - Suggest rule alternatives based on business requirements
+   - Learn governance and change management for rule updates
+
+5. **Document and share TM1 rules knowledge**
+   - Create internal rules guide for support team (common patterns, troubleshooting)
+   - Build rules repository with examples and explanations
+   - Write case studies of successful rule optimizations
+   - Train team on basic rule reading and troubleshooting
+   - Establish yourself as rules expert on support team
+
+---
+
+### MEASURES OF SUCCESS:
+
+1. **Technical Proficiency**
+   - Can read and understand 90% of existing cube rules independently
+   - Write simple to moderate rules for test cubes
+   - Identify rule performance issues within 15 minutes of investigating
+   - Propose 3-5 successful rule optimizations (approved and implemented)
+   - Troubleshoot rule errors 50% faster than before
+
+2. **Problem Resolution**
+   - Resolve rule-related support tickets 40% faster
+   - Reduce escalations to TM1 developers by 30% (fix/triage more yourself)
+   - Proactively identify 5+ rule issues before users report them
+   - Success rate on rule troubleshooting: 85%+ (correct diagnosis)
+   - Zero critical rule errors introduced by your suggestions
+
+3. **Performance Improvements**
+   - Contribute to 3+ cube performance optimization projects
+   - Measurable improvement: queries 20-50% faster on optimized cubes
+   - Reduce month-end calculation time by 15% through rule optimization
+   - Identify and eliminate redundant rules in 5+ cubes
+   - Document performance gains (before/after metrics)
+
+4. **Knowledge Sharing**
+   - Create comprehensive TM1 rules guide used by team
+   - Train 5+ colleagues on rule basics and troubleshooting
+   - Present 2-3 brown bags on rule topics (optimization, common errors)
+   - Internal documentation referenced 30+ times by team
+   - Recognized as team's rules SME (subject matter expert)
+
+5. **Strategic Contribution**
+   - Influence cube design decisions based on rule complexity analysis
+   - Participate in 3+ TM1 development projects (requirements, testing)
+   - Provide business-driven rule requirements to developers
+   - Bridge gap between business users and TM1 technical team
+   - Position yourself for TM1 developer or architect track
+
+---
+
+### REQUIRED SUPPORT:
+
+1. **Access & Permissions**
+   - Read access to cube rules in TM1 environment
+   - Test/sandbox TM1 environment for rule experimentation
+   - Access to TM1 performance logs and monitoring tools
+   - Ability to propose rule changes (review process in place)
+   - Documentation of current cube architectures and rule logic
+
+2. **TM1 Developer Collaboration**
+   - Regular sessions with TM1 developers (shadow, ask questions)
+   - Code review participation (learn from experienced developers)
+   - Mentorship from senior TM1 developer
+   - Joint troubleshooting sessions on complex rule issues
+   - Invitation to TM1 development meetings
+
+3. **Learning Resources**
+   - IBM TM1 rules documentation and tutorials
+   - Access to TM1 community forums (cubewise, planning analytics)
+   - Internal TM1 knowledge base and best practices
+   - Time allocation: 3-4 hours/week for rules learning and practice
+   - Budget for TM1 training course if available
+
+4. **Testing & Experimentation**
+   - Safe environment to test rule changes without impacting users
+   - Sample data sets for rule testing
+   - Performance monitoring tools to measure optimization impact
+   - Rollback process if rule changes cause issues
+   - Peer review before implementing rule suggestions
+
+5. **Manager Support**
+   - Approval to invest time in TM1 rules mastery
+   - Recognition for rule optimization contributions
+   - Support in collaborating with development team
+   - Career path discussion (support → developer track)
+   - Protection from BAU to dedicate time to complex rule analysis
+
+---
+
+### LINKED SKILLS:
+
+1. **SQL (Alternative Data Access & Validation)**
+   - Query TM1 database to understand underlying data for rules
+   - Validate rule outputs against source data
+   - Compare rule-calculated values vs SQL aggregations
+   - Understand when to solve in rules vs SQL/Power Query
+   - Use SQL to test rule logic before implementing
+
+2. **Business Analytics (Understand Business Logic)**
+   - Rules implement business logic - must understand requirements
+   - Analyze whether rules correctly represent business needs
+   - Identify rule errors by understanding expected business outcomes
+   - Propose rule improvements based on business process knowledge
+   - Translate business requirements into rule specifications
+
+3. **VBA (TM1-Excel Integration)**
+   - Automate TM1 rule testing from Excel
+   - Build VBA tools to analyze rule performance
+   - Extract rule definitions programmatically for documentation
+   - Create Excel-based rule validation tools
+   - Integrate rule troubleshooting into VBA automation workflows
+
+4. **Python (Advanced Rule Analysis)**
+   - Parse TM1 rule files programmatically (rules analysis at scale)
+   - Build scripts to audit all cubes for rule complexity
+   - Automate rule performance testing
+   - Create rule documentation generator (Python reads rules, generates docs)
+   - Statistical analysis of rule performance patterns
+
+5. **Process Mapping (Understand Business Context)**
+   - Map business processes to TM1 cubes and rules
+   - Document how rules support business workflows
+   - Identify where rule complexity creates business process bottlenecks
+   - Propose simplified business processes → simplified rules
+   - Align rule optimization to business priorities
+
+---
+
+## GOAL 5: READING & APPLYING LEARNINGS FROM BOOK "MOJO" BY MARSHALL GOLDSMITH
+
+### DEFINITION:
+Read and internalize Marshall Goldsmith's "Mojo" principles to enhance professional engagement, build positive perception with stakeholders, and maintain sustainable high performance throughout 2026 transformation journey.
+
+---
+
+### DEVELOPMENT ACTIONS:
+
+1. **Structured reading and reflection schedule**
+   - Read "Mojo" systematically: 20-30 pages per week (complete in 2-3 months)
+   - Take notes on key concepts and how they apply to your situation
+   - Reflect weekly: journal on 1-2 concepts most relevant to current challenges
+   - Discuss key insights with mentor or manager monthly
+   - Reread critical sections when facing specific challenges
+
+2. **Apply Mojo framework to daily work**
+   - Identity: Define who you are becoming (automation leader, business partner)
+   - Achievement: Track wins daily (impact log aligned to Mojo principles)
+   - Reputation: Intentionally build positive perception through visible contributions
+   - Acceptance: Acknowledge support from others, show gratitude regularly
+   - Practice Mojo equation: Happiness in what you do + Meaning from doing it = Mojo
+
+3. **Implement "What got you here won't get you there" mindset**
+   - Identify 3 behaviors that worked before but won't for next level
+   - Monthly self-assessment: Am I demonstrating new-level behaviors?
+   - Seek feedback: Ask colleagues "What should I stop/start/continue?"
+   - Let go of being "just technical support" identity
+   - Embrace discomfort of networking and visibility (growth edge)
+
+4. **Build and sustain positive professional relationships**
+   - Apply Goldsmith's relationship principles to your 20-person network goal
+   - Practice "feedforward" not just feedback (future-focused improvement)
+   - Express gratitude weekly to colleagues who help you
+   - Be the connector (introduce people, share credit generously)
+   - Manage up effectively (help your manager succeed)
+
+5. **Maintain sustainable high performance**
+   - Monitor your "Mojo score" monthly (happiness + meaning in work)
+   - Recognize when Mojo drops, address root cause immediately
+   - Celebrate small wins to maintain motivation (Goldsmith's advice)
+   - Balance ambition with sustainability (avoid burnout)
+   - Use Mojo principles during setbacks (reframe, refocus, re-engage)
+
+---
+
+### MEASURES OF SUCCESS:
+
+1. **Reading Completion & Understanding**
+   - Finish "Mojo" by end of Q1 2026 (March 31)
+   - Complete reflection journal with 20+ entries applying concepts
+   - Summarize top 10 takeaways in 1-page personal guide
+   - Discuss book insights in 3+ conversations with mentor/manager
+   - Can articulate how Mojo principles guide your development plan
+
+2. **Behavioral Change Demonstration**
+   - Identify and stop 3 limiting behaviors by mid-year
+   - Start 3 new high-impact behaviors aligned to next-level role
+   - Receive feedback from 5+ colleagues on positive behavior changes
+   - Manager notes improved stakeholder engagement in performance review
+   - Self-assessment shows consistent application of Mojo principles
+
+3. **Professional Relationships & Reputation**
+   - Network of 20 people includes advocates who champion your work
+   - Reputation shifts from "technical support" to "strategic contributor"
+   - Unprompted recognition for both technical skill AND business impact
+   - Testimonials reference not just what you deliver but how you engage
+   - Invited to strategic discussions (sign of elevated reputation)
+
+4. **Sustainable Performance & Engagement**
+   - Maintain high energy and motivation throughout 2026 (avoid burnout)
+   - Monthly Mojo self-score averages 8/10 or higher
+   - Successfully navigate 3+ challenging situations using Mojo principles
+   - Work remains meaningful even during difficult periods
+   - Balance achievement with wellbeing (sustainable pace)
+
+5. **Integration with Other Goals**
+   - Mojo principles visibly applied in automation projects (identity, achievement)
+   - Networking approach reflects Goldsmith's relationship guidance
+   - Performance reviews cite both results AND how you achieved them
+   - Recognized for positive attitude and constructive engagement
+   - Mojo concepts inform your leadership style as you mentor others
+
+---
+
+### REQUIRED SUPPORT:
+
+1. **Time & Resources**
+   - Book purchase (or library access to "Mojo")
+   - 2-3 hours/week reading time (can be personal time)
+   - Journal or note-taking tool for reflections
+   - Quiet space for focused reading and reflection
+   - Optional: Audiobook version for commute learning
+
+2. **Mentor/Coach Discussions**
+   - Monthly 30-min conversations about book applications
+   - Safe space to discuss behavioral change challenges
+   - Feedback on perception shifts (reputation changes)
+   - Accountability partner for implementing changes
+   - Celebrate Mojo wins (recognition for growth)
+
+3. **Feedback Mechanisms**
+   - 360-degree feedback (or informal colleague feedback) at 6 and 12 months
+   - Manager check-ins on engagement and sustainability
+   - Peer observations on behavioral changes
+   - Stakeholder perception surveys (reputation building)
+   - Self-reflection prompts from mentor
+
+4. **Application Opportunities**
+   - Challenging assignments to practice Mojo principles
+   - Visibility opportunities to build positive reputation
+   - Relationship-building situations (networking events, cross-team projects)
+   - Leadership opportunities to apply "feedforward" concept
+   - Safe environment to experiment with new behaviors
+
+5. **Supportive Environment**
+   - Psychological safety to try new approaches and potentially fail
+   - Recognition for both results and behavior improvements
+   - Culture that values relationships and engagement (not just output)
+   - Manager who models similar principles
+   - Team environment that supports growth and change
+
+---
+
+### LINKED SKILLS:
+
+1. **Stakeholder Management & Networking (Direct Application)**
+   - Mojo principles guide how you build 20-person network
+   - Relationship chapter informs networking approach for introverts
+   - Reputation management concepts shape visibility strategy
+   - "What got you here won't get you there" mindset shifts networking approach
+   - Feedforward concept improves stakeholder conversations
+
+2. **Business Analytics (Identity & Achievement)**
+   - Define identity as "business analyst" not just "technical support"
+   - Achievement tracking (impact log) reinforces Mojo
+   - Meaningful work comes from business impact, not just technical delivery
+   - Reputation built through insights, not just reports
+   - Sustained Mojo from solving real business problems
+
+3. **All Technical Skills (Sustainable Performance)**
+   - Mojo framework prevents burnout during intensive learning year
+   - Celebration of small wins maintains motivation for skill building
+   - Meaningful application of skills (not just learning for sake of it)
+   - Balance happiness (enjoying learning) with meaning (business impact)
+   - Reputation enhanced by both skill mastery AND positive engagement
+
+4. **Process Mapping & Documentation (Acceptance & Gratitude)**
+   - Acknowledge others' processes before suggesting improvements
+   - Show gratitude when stakeholders share their workflows
+   - Accept that change is hard, approach with empathy
+   - Build reputation through respectful process improvement
+   - Mojo comes from helping others, not just personal wins
+
+5. **Self-Leadership & Career Management (Core Mojo Principles)**
+   - Identity: Who are you becoming? (Define it clearly)
+   - Achievement: What are you accomplishing? (Track and celebrate)
+   - Reputation: How do others perceive you? (Intentionally shape it)
+   - Acceptance: Who supports you? (Acknowledge and reciprocate)
+   - Mojo score guides career decisions and priority tradeoffs
+
+---
+
+## INTEGRATED IMPLEMENTATION PLAN
+
+### QUARTERLY FOCUS (HOW GOALS COME TOGETHER):
+
+**Q1 (Jan-Mar): FOUNDATION**
+- Business Analytics: Learn frameworks, shadow Finance users
+- VBA: Deploy 3-5 simple automations, master fundamentals
+- Power Query/SQL: Complete training, build first 5 solutions
+- TM1 Rules: Study existing rules, basic troubleshooting
+- Mojo: Read book, complete reflection journal, identify behavior changes
+
+**Q2 (Apr-Jun): BUILDING**
+- Business Analytics: Monthly insights reports, 3 dashboards
+- VBA: 5 more automations with user forms, TM1 integration
+- Power Query/SQL: 10 more solutions, train first users
+- TM1 Rules: Propose first optimizations, join developer meetings
+- Mojo: Implement behavior changes, build network using principles
+
+**Q3 (Jul-Sep): MASTERY**
+- Business Analytics: Quarterly business reviews, strategic insights
+- VBA: Complex integrated solutions, teach others
+- Power Query/SQL: Self-service model fully deployed
+- TM1 Rules: Lead optimization projects, rules SME recognized
+- Mojo: Sustain high performance, reputation clearly shifted
+
+**Q4 (Oct-Dec): CONSOLIDATION**
+- All Goals: Document impact, celebrate wins, plan 2027
+- Business Analytics: Positioned for analyst role
+- VBA: 15+ solutions deployed, team capability built
+- Power Query/SQL: 40% reduction in support tickets achieved
+- TM1 Rules: 3+ optimizations delivered, developer collaboration established
+- Mojo: Sustainable high performance demonstrated, strong reputation confirmed
+
+---
+
+## WEEKLY INTEGRATED ROUTINE:
+
+**MONDAY:**
+- Review week's priorities across all 5 goals
+- Check impact log (Mojo: achievement tracking)
+- Plan 1 networking touchpoint (Mojo: relationship building)
+
+**TUESDAY-THURSDAY:**
+- SQL practice: 20 min/day
+- Power Query work: 20 min/day (Q1-Q2 intensive)
+- VBA development: 30 min/day
+- TM1 rules study: 20 min/day
+- Business analytics application: in daily work
+- Mojo reflection: 10 min/day
+
+**FRIDAY:**
+- Update impact log (all goals)
+- Reflect on Mojo score (happiness + meaning)
+- Document week's learnings
+- Celebrate wins (Mojo principle)
+- Plan next week
+
+**TOTAL DAILY TIME: ~2 hours learning + application in work**
+
+---
+
+## SUCCESS DASHBOARD (TRACK MONTHLY):
+
+```
+GOAL                    | Q1 Target | Q2 Target | Q3 Target | Q4 Target
+------------------------|-----------|-----------|-----------|----------
+Business Analytics      |           |           |           |
+- Insights reports      | 3         | 6         | 9         | 12
+- Dashboards deployed   | 1         | 3         | 5         | 5+
+- Business impact cases | 1         | 2         | 4         | 5+
+
+VBA Automation          |           |           |           |
+- Automations deployed  | 3-5       | 8-10      | 12-15     | 15+
+- Hours saved (total)   | 50        | 150       | 250       | 300+
+- Users enabled         | 2         | 5         | 8         | 10+
+
+Power Query & SQL       |           |           |           |
+- PQ solutions deployed | 5         | 10        | 15        | 20
+- SQL queries (prod)    | 10        | 25        | 40        | 50+
+- Self-service users    | 0         | 3         | 7         | 10+
+- Ticket reduction %    | 10%       | 20%       | 30%       | 40%
+
+TM1 Cube Rules          |           |           |           |
+- Rules understood      | 50%       | 70%       | 85%       | 90%
+- Optimizations proposed| 0         | 1         | 2-3       | 3-5
+- Resolution time ↓     | 10%       | 25%       | 40%       | 50%
+
+Mojo Application        |           |           |           |
+- Book completed        | ✓         | -         | -         | -
+- Behaviors changed     | 1         | 2         | 3         | 3
+- Network size          | 5         | 10        | 15        | 20
+- Mojo score (avg)      | 7/10      | 7.5/10    | 8/10      | 8.5/10
+- Reputation shift      | Starting  | Noticed   | Clear     | Confirmed
+```
+
+---
+
+## FINAL INTEGRATION NOTES:
+
+**All 5 Goals Support Your Core Objective:**
+- Secure your position through demonstrated impact
+- Transform from support to strategic contributor
+- Build skills and relationships for long-term career success
+
+**They Work Together:**
+- Business Analytics gives your technical work business meaning
+- VBA + Power Query + SQL are your delivery tools
+- TM1 Rules deepens your domain expertise
+- Mojo ensures you execute sustainably with positive impact
+
+**Measure What Matters:**
+- Not just skills learned, but impact delivered
+- Not just automations built, but time/cost saved
+- Not just books read, but behaviors changed
+- Not just connections made, but relationships built
+
+**Stay Flexible:**
+- Adjust based on business priorities
+- Focus where you get most traction
+- Don't sacrifice depth for breadth
+- Sustainable pace beats sprint then burnout
+
+**You Have Everything You Need:**
+This plan + your discipline + 365 days = transformation
+
+Now execute. Track progress weekly. Adjust monthly. Celebrate quarterly.
+
+Your 2026 success story starts with Day 1 action.
+
+**Go build something. Today.**
+```
+
+---
+
+This comprehensive goal breakdown is ready to copy, save, and use as your 2026 execution guide. Print the success dashboard and track it monthly. You have clarity, structure, and measurable outcomes for each goal.
