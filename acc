@@ -1,18 +1,16 @@
-Sub RunPythonScript()
+Sub RunPythonGUI()
     Dim shell As Object
     Dim command As String
     
-    ' Create shell object
     Set shell = CreateObject("WScript.Shell")
     
-    ' Build command - adjust paths as needed
-    command = "python C:\path\to\your\script.py"
+    ' Keep command window open with /k instead of /c
+    command = "cmd /k python C:\path\to\your\script.py"
     
-    ' Run the command
-    shell.Run command, 1, True
+    ' Or run directly with full Python path
+    ' command = "C:\Python311\pythonw.exe C:\path\to\your\script.py"
     
-    ' Clean up
+    shell.Run command, 1, False
+    
     Set shell = Nothing
-    
-    MsgBox "Python script completed!", vbInformation
 End Sub
