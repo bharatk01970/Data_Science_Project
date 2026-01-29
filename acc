@@ -1,16 +1,605 @@
-Sub RunPythonGUI()
-    Dim shell As Object
-    Dim command As String
+"""
+═══════════════════════════════════════════════════════════════════════════════
+AUTOMATED DATA EXTRACTOR - Configuration-Driven File Processor
+═══════════════════════════════════════════════════════════════════════════════
+
+DESCRIPTION:
+    Monitors a network folder for incoming Excel/CSV files, automatically extracts
+    specified columns and rows from configured sheets, and saves output files to
+    a designated output folder.
+
+FEATURES:
+    ✓ Configuration-driven (edit CONFIG section below)
+    ✓ Automatic file detection and processing
+    ✓ Multi-sheet support
+    ✓ Flexible column/row selection
+    ✓ Preserves exact numeric precision (no rounding)
+    ✓ Comprehensive error handling and logging
+    ✓ No code changes needed for different sheets/columns
+
+REQUIREMENTS:
+    pip install pandas openpyxl xlrd
+
+QUICK START:
+    1. Edit the CONFIG section below with your settings
+    2. Run: python data_extractor.py
+    3. Place files in input folder - they'll be processed automatically
+
+CONFIGURATION GUIDE:
     
-    Set shell = CreateObject("WScript.Shell")
+    INPUT_FOLDER / OUTPUT_FOLDER:
+        - Network paths: "//server/share/folder" or "\\\\server\\share\\folder"
+        - Local paths: "C:/data/input" or "./input"
     
-    ' Keep command window open with /k instead of /c
-    command = "cmd /k python C:\path\to\your\script.py"
+    SHEETS_CONFIG:
+        Each dictionary defines one sheet to process:
+        {
+            'sheet_name': 'A',              # Exact sheet name (case-sensitive)
+            'columns': ['P', 'Q', 'R'],     # Columns to extract (letters or numbers)
+            'row_start': 2,                 # First row (1-based, use 2 to skip header)
+            'row_end': 100,                 # Last row (1-based, inclusive)
+            'output_file': 'SheetA.csv',    # Output filename
+            'output_format': 'csv'          # 'csv' or 'xlsx'
+        }
     
-    ' Or run directly with full Python path
-    ' command = "C:\Python311\pythonw.exe C:\path\to\your\script.py"
+    COLUMN SPECIFICATION:
+        - Use Excel letters: ['A', 'B', 'C'] or ['P', 'Q', 'R']
+        - Use numbers (0-based): [0, 1, 2] or [15, 16, 17]
+        - Can mix: ['A', 5, 'Z']
     
-    shell.Run command, 1, False
+    POST_PROCESS_ACTION:
+        - 'none': Leave file in input folder
+        - 'move': Move to ARCHIVE_FOLDER
+        - 'delete': Delete file (be careful!)
+
+EXAMPLES:
+
+    Example 1: Extract columns A,B,C from Sheet1 (rows 2-100)
+    {
+        'sheet_name': 'Sheet1',
+        'columns': ['A', 'B', 'C'],
+        'row_start': 2,
+        'row_end': 100,
+        'output_file': 'extracted_data.csv',
+        'output_format': 'csv'
+    }
     
-    Set shell = Nothing
-End Sub
+    Example 2: Extract columns P,Q,R,S,T from multiple sheets
+    SHEETS_CONFIG = [
+        {
+            'sheet_name': 'A',
+            'columns': ['P', 'Q', 'R', 'S', 'T'],
+            'row_start': 1,
+            'row_end': 500,
+            'output_file': 'SheetA_output.xlsx',
+            'output_format': 'xlsx'
+        },
+        {
+            'sheet_name': 'B',
+            'columns': ['P', 'Q', 'R', 'S', 'T'],
+            'row_start': 1,
+            'row_end': 500,
+            'output_file': 'SheetB_output.xlsx',
+            'output_format': 'xlsx'
+        }
+    ]
+
+TROUBLESHOOTING:
+    
+    Problem: "Input folder does not exist"
+    → Check folder path is correct and accessible
+    
+    Problem: "Sheet 'A' not found"
+    → Verify sheet name matches exactly (case-sensitive)
+    → Open Excel file to check actual sheet names
+    
+    Problem: "Column out of range"
+    → Verify columns exist in the sheet
+    → Check column letters are correct
+    
+    Problem: Files not detected
+    → Check FILE_PATTERNS includes your file extension
+    → Ensure file is completely copied (not in progress)
+    → Verify file is not locked/open in Excel
+    
+    Problem: Numbers look different
+    → Script preserves exact precision
+    → Excel may display fewer decimals by default
+    → Use "Increase Decimal Places" in Excel to see full precision
+
+═══════════════════════════════════════════════════════════════════════════════
+"""
+
+import os
+import time
+import logging
+from datetime import datetime
+from pathlib import Path
+import pandas as pd
+from typing import Dict, List, Optional
+import sys
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIGURATION SECTION - EDIT THIS TO CUSTOMIZE BEHAVIOR
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Input and Output Folders
+INPUT_FOLDER = "//server/share/FolderX"  # Where input files arrive
+OUTPUT_FOLDER = "//server/share/FolderY"  # Where output files are saved
+
+# File Detection Settings
+FILE_PATTERNS = ['.csv', '.xlsx', '.xls']  # File types to monitor
+POLL_INTERVAL = 5  # Seconds between checks for new files
+
+# Post-Processing Action
+POST_PROCESS_ACTION = 'move'  # Options: 'none', 'move', 'delete'
+ARCHIVE_FOLDER = "//server/share/archive"  # Where to move processed files
+
+# Sheet Processing Configuration
+# Add as many sheets as needed - each becomes a separate output file
+SHEETS_CONFIG = [
+    {
+        'sheet_name': 'A',
+        'columns': ['P', 'Q', 'R'],
+        'row_start': 2,
+        'row_end': 100,
+        'output_file': 'SheetA_output.csv',
+        'output_format': 'csv'
+    },
+    {
+        'sheet_name': 'B',
+        'columns': ['A', 'D', 'E', 'F'],
+        'row_start': 1,
+        'row_end': 50,
+        'output_file': 'SheetB_output.xlsx',
+        'output_format': 'xlsx'
+    },
+    {
+        'sheet_name': 'C',
+        'columns': ['B', 'C', 'G', 'H', 'I'],
+        'row_start': 5,
+        'row_end': 200,
+        'output_file': 'SheetC_output.csv',
+        'output_format': 'csv'
+    },
+]
+
+# Logging Configuration
+LOG_DIRECTORY = 'logs'
+LOG_LEVEL = 'INFO'  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# ═══════════════════════════════════════════════════════════════════════════
+# END OF CONFIGURATION - DO NOT MODIFY BELOW THIS LINE
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class DataExtractor:
+    """Main class for automated data extraction from Excel/CSV files."""
+    
+    def __init__(self):
+        """Initialize the DataExtractor with configured settings."""
+        self._setup_logging()
+        self.logger.info("="*80)
+        self.logger.info("Data Extractor initialized successfully")
+        self.logger.info("="*80)
+    
+    def _setup_logging(self):
+        """Configure logging to file and console."""
+        # Create log directory if it doesn't exist
+        Path(LOG_DIRECTORY).mkdir(parents=True, exist_ok=True)
+        
+        # Generate log filename with timestamp
+        log_filename = f"data_extractor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = os.path.join(LOG_DIRECTORY, log_filename)
+        
+        # Configure logging format
+        logging.basicConfig(
+            level=getattr(logging, LOG_LEVEL.upper()),
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_path),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        self.logger = logging.getLogger(__name__)
+    
+    def _validate_folders(self) -> bool:
+        """
+        Validate that input and output folders exist and are accessible.
+        
+        Returns:
+            True if folders are valid, False otherwise
+        """
+        # Check input folder exists
+        if not os.path.exists(INPUT_FOLDER):
+            self.logger.error(f"Input folder does not exist: {INPUT_FOLDER}")
+            return False
+        
+        # Check read permission on input folder
+        if not os.access(INPUT_FOLDER, os.R_OK):
+            self.logger.error(f"No read permission for input folder: {INPUT_FOLDER}")
+            return False
+        
+        # Create output folder if it doesn't exist
+        try:
+            Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"Output folder ready: {OUTPUT_FOLDER}")
+        except PermissionError:
+            self.logger.error(f"No write permission for output folder: {OUTPUT_FOLDER}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error creating output folder: {e}")
+            return False
+        
+        self.logger.info(f"Input folder validated: {INPUT_FOLDER}")
+        return True
+    
+    def _detect_new_file(self) -> Optional[str]:
+        """
+        Monitor input folder and detect new files matching configured patterns.
+        
+        Returns:
+            Full path to detected file, or None if no file found
+        """
+        try:
+            # List all files in input folder
+            for file in os.listdir(INPUT_FOLDER):
+                file_path = os.path.join(INPUT_FOLDER, file)
+                
+                # Skip directories
+                if os.path.isdir(file_path):
+                    continue
+                
+                # Check if file matches any configured pattern
+                file_lower = file.lower()
+                for pattern in FILE_PATTERNS:
+                    if file_lower.endswith(pattern.lower()):
+                        self.logger.info(f"New file detected: {file}")
+                        return file_path
+            
+            return None
+        
+        except PermissionError:
+            self.logger.error(f"Permission denied accessing input folder: {INPUT_FOLDER}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error detecting files: {e}")
+            return None
+    
+    def _read_file(self, file_path: str) -> Optional[Dict[str, pd.DataFrame]]:
+        """
+        Read input file (Excel or CSV) in read-only mode.
+        
+        Args:
+            file_path: Full path to input file
+            
+        Returns:
+            Dictionary mapping sheet names to DataFrames, or None on error
+        """
+        self.logger.info(f"Reading file: {file_path}")
+        
+        try:
+            # Determine file type by extension
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext in ['.xlsx', '.xls', '.xlsm']:
+                # Read Excel file - all sheets
+                engine = 'openpyxl' if file_ext == '.xlsx' else None
+                sheets_dict = pd.read_excel(file_path, sheet_name=None, engine=engine)
+                self.logger.info(f"Excel file read successfully. Sheets: {list(sheets_dict.keys())}")
+                return sheets_dict
+            
+            elif file_ext == '.csv':
+                # Read CSV file - treat as single sheet
+                df = pd.read_csv(file_path)
+                sheets_dict = {'Sheet1': df}
+                self.logger.info(f"CSV file read successfully. Rows: {len(df)}")
+                return sheets_dict
+            
+            else:
+                self.logger.error(f"Unsupported file format: {file_ext}")
+                return None
+        
+        except FileNotFoundError:
+            self.logger.error(f"File not found: {file_path}")
+            return None
+        except PermissionError:
+            self.logger.error(f"Permission denied reading file: {file_path}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error reading file: {e}")
+            return None
+    
+    def _convert_column_letter_to_index(self, column_letter: str) -> int:
+        """
+        Convert Excel column letter (e.g., 'A', 'AB') to zero-based index.
+        
+        Args:
+            column_letter: Column letter (e.g., 'A', 'B', 'AA')
+            
+        Returns:
+            Zero-based column index
+        """
+        column_letter = column_letter.upper()
+        index = 0
+        for i, char in enumerate(reversed(column_letter)):
+            index += (ord(char) - ord('A') + 1) * (26 ** i)
+        return index - 1
+    
+    def _extract_data_from_sheet(self, df: pd.DataFrame, sheet_config: Dict) -> Optional[pd.DataFrame]:
+        """
+        Extract specific columns and rows from a DataFrame based on configuration.
+        Preserves numeric precision exactly as in source.
+        
+        Args:
+            df: Source DataFrame
+            sheet_config: Configuration for this sheet (columns, rows)
+            
+        Returns:
+            Extracted DataFrame, or None on error
+        """
+        try:
+            # Get column configuration
+            columns = sheet_config.get('columns', [])
+            if not columns:
+                self.logger.error("No columns specified in configuration")
+                return None
+            
+            # Convert column letters to indices
+            column_indices = []
+            for col in columns:
+                if isinstance(col, str):
+                    # Column specified as letter (e.g., 'A', 'B')
+                    col_index = self._convert_column_letter_to_index(col)
+                else:
+                    # Column specified as number (0-based)
+                    col_index = col
+                
+                column_indices.append(col_index)
+            
+            # Validate column indices
+            max_col = df.shape[1]
+            for idx in column_indices:
+                if idx >= max_col:
+                    self.logger.error(f"Column index {idx} out of range (max: {max_col-1})")
+                    return None
+            
+            # Extract columns by position
+            extracted_df = df.iloc[:, column_indices].copy()
+            
+            # Get row range configuration
+            row_start = sheet_config.get('row_start', 1)  # 1-based in config
+            row_end = sheet_config.get('row_end', len(df))  # 1-based in config
+            
+            # Convert to 0-based indexing for pandas
+            row_start_idx = row_start - 1
+            row_end_idx = row_end
+            
+            # Validate row range
+            if row_start_idx < 0:
+                self.logger.warning(f"row_start < 1, using 1")
+                row_start_idx = 0
+            
+            if row_end_idx > len(df):
+                self.logger.warning(f"row_end exceeds data length, using {len(df)}")
+                row_end_idx = len(df)
+            
+            # Extract rows
+            extracted_df = extracted_df.iloc[row_start_idx:row_end_idx]
+            
+            self.logger.info(f"Extracted data: {extracted_df.shape[0]} rows, {extracted_df.shape[1]} columns")
+            
+            return extracted_df
+        
+        except Exception as e:
+            self.logger.error(f"Error extracting data from sheet: {e}")
+            return None
+    
+    def _generate_output_filename(self, config_filename: str, original_filename: str) -> str:
+        """
+        Generate output filename with timestamp if needed.
+        
+        Args:
+            config_filename: Filename from configuration
+            original_filename: Original input filename
+            
+        Returns:
+            Generated filename with timestamp
+        """
+        # Get timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Get original filename without extension
+        original_name_only = os.path.splitext(os.path.basename(original_filename))[0]
+        
+        # If filename contains placeholders, replace them
+        filename = config_filename
+        if '{timestamp}' in filename:
+            filename = filename.replace('{timestamp}', timestamp)
+        elif not any(x in filename for x in ['.csv', '.xlsx']):
+            # If no extension and no timestamp placeholder, add timestamp
+            name, ext = os.path.splitext(filename)
+            filename = f"{name}_{timestamp}{ext if ext else '.csv'}"
+        
+        return filename
+    
+    def _save_output_file(self, df: pd.DataFrame, output_path: str, file_format: str):
+        """
+        Save extracted data to output file with exact numeric precision.
+        
+        Args:
+            df: DataFrame to save
+            output_path: Full path for output file
+            file_format: Format to save ('csv', 'xlsx', etc.)
+        """
+        try:
+            if file_format.lower() == 'csv':
+                # Save as CSV with full float precision
+                df.to_csv(output_path, index=False, float_format='%.15g')
+                self.logger.info(f"CSV file saved: {output_path}")
+            
+            elif file_format.lower() in ['xlsx', 'excel']:
+                # Save as Excel with full numeric precision
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Data')
+                self.logger.info(f"Excel file saved: {output_path}")
+            
+            else:
+                self.logger.error(f"Unsupported output format: {file_format}")
+        
+        except PermissionError:
+            self.logger.error(f"Permission denied writing to: {output_path}")
+        except Exception as e:
+            self.logger.error(f"Error saving output file: {e}")
+    
+    def _process_file(self, file_path: str):
+        """
+        Main processing logic: read file, extract data, generate outputs.
+        
+        Args:
+            file_path: Full path to input file
+        """
+        self.logger.info("="*80)
+        self.logger.info(f"Starting file processing: {os.path.basename(file_path)}")
+        self.logger.info("="*80)
+        
+        # Read input file
+        sheets_dict = self._read_file(file_path)
+        if sheets_dict is None:
+            self.logger.error("Failed to read input file. Aborting processing.")
+            return
+        
+        # Process each configured sheet
+        for sheet_config in SHEETS_CONFIG:
+            sheet_name = sheet_config.get('sheet_name')
+            
+            self.logger.info(f"\nProcessing sheet: {sheet_name}")
+            
+            # Check if sheet exists in file
+            if sheet_name not in sheets_dict:
+                self.logger.error(f"Sheet '{sheet_name}' not found in file. Available sheets: {list(sheets_dict.keys())}")
+                continue
+            
+            # Get DataFrame for this sheet
+            df = sheets_dict[sheet_name]
+            
+            # Extract data based on configuration
+            extracted_df = self._extract_data_from_sheet(df, sheet_config)
+            if extracted_df is None or extracted_df.empty:
+                self.logger.error(f"No data extracted from sheet '{sheet_name}'")
+                continue
+            
+            # Generate output filename
+            output_filename = self._generate_output_filename(
+                sheet_config.get('output_file', 'output.csv'),
+                os.path.basename(file_path)
+            )
+            
+            # Get output format
+            output_format = sheet_config.get('output_format', 'csv')
+            
+            # Ensure output filename has correct extension
+            if not output_filename.endswith(f'.{output_format}'):
+                output_filename = f"{os.path.splitext(output_filename)[0]}.{output_format}"
+            
+            # Create full output path
+            output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+            
+            # Save output file
+            self._save_output_file(extracted_df, output_path, output_format)
+        
+        self.logger.info("="*80)
+        self.logger.info(f"File processing completed: {os.path.basename(file_path)}")
+        self.logger.info("="*80)
+    
+    def _move_processed_file(self, file_path: str):
+        """
+        Move or delete processed file based on configuration.
+        
+        Args:
+            file_path: Path to processed file
+        """
+        if POST_PROCESS_ACTION == 'delete':
+            try:
+                os.remove(file_path)
+                self.logger.info(f"Deleted processed file: {file_path}")
+            except Exception as e:
+                self.logger.error(f"Error deleting file: {e}")
+        
+        elif POST_PROCESS_ACTION == 'move':
+            try:
+                # Create archive folder if it doesn't exist
+                Path(ARCHIVE_FOLDER).mkdir(parents=True, exist_ok=True)
+                
+                # Generate archive filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = os.path.basename(file_path)
+                name, ext = os.path.splitext(filename)
+                archive_filename = f"{name}_{timestamp}{ext}"
+                archive_path = os.path.join(ARCHIVE_FOLDER, archive_filename)
+                
+                # Move file
+                os.rename(file_path, archive_path)
+                self.logger.info(f"Moved processed file to: {archive_path}")
+            except Exception as e:
+                self.logger.error(f"Error moving file to archive: {e}")
+        
+        else:
+            # 'none' - leave file in place
+            self.logger.info(f"File left in place: {file_path}")
+    
+    def run(self):
+        """
+        Main execution loop: monitor input folder and process files as they arrive.
+        """
+        # Validate folders before starting
+        if not self._validate_folders():
+            self.logger.error("Folder validation failed. Exiting.")
+            return
+        
+        self.logger.info(f"Starting monitoring loop (polling every {POLL_INTERVAL} seconds)")
+        self.logger.info("Press Ctrl+C to stop")
+        
+        try:
+            while True:
+                # Check for new file
+                file_path = self._detect_new_file()
+                
+                if file_path:
+                    # Process the detected file
+                    self._process_file(file_path)
+                    
+                    # Handle processed file (move/delete/leave)
+                    self._move_processed_file(file_path)
+                
+                # Wait before next check
+                time.sleep(POLL_INTERVAL)
+        
+        except KeyboardInterrupt:
+            self.logger.info("\nMonitoring stopped by user")
+        except Exception as e:
+            self.logger.error(f"Unexpected error in main loop: {e}")
+
+
+def main():
+    """Entry point for the script."""
+    print("\n" + "="*80)
+    print("DATA EXTRACTOR - Automated File Processing")
+    print("="*80)
+    print(f"\nConfiguration:")
+    print(f"  Input Folder:  {INPUT_FOLDER}")
+    print(f"  Output Folder: {OUTPUT_FOLDER}")
+    print(f"  Sheets to Process: {len(SHEETS_CONFIG)}")
+    print(f"  Poll Interval: {POLL_INTERVAL} seconds")
+    print(f"  Post-Process: {POST_PROCESS_ACTION}")
+    print("\n" + "="*80 + "\n")
+    
+    # Create and run extractor
+    extractor = DataExtractor()
+    extractor.run()
+
+
+if __name__ == "__main__":
+    main()
