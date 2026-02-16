@@ -1,1339 +1,700 @@
-Option Explicit
+"""
+═══════════════════════════════════════════════════════════════════════════════
+AUTOMATED DATA EXTRACTOR - Configuration-Driven File Processor
+═══════════════════════════════════════════════════════════════════════════════
 
-' ========== CONFIGURATION ==========
-' Change these constants to customize behavior without modifying code
+DESCRIPTION:
+    Monitors a network folder for incoming Excel/CSV files, automatically extracts
+    specified columns and rows from configured sheets, and saves output files to
+    a designated output folder.
 
-' Maximum number of keywords (regenerate dashboard after changing)
-Const MAX_KEYWORDS As Integer = 8
+FEATURES:
+    ✓ Configuration-driven (edit CONFIG section below)
+    ✓ Automatic file detection and processing
+    ✓ Multi-sheet support
+    ✓ Flexible column/row selection
+    ✓ Configurable header handling (include/exclude headers)
+    ✓ Preserves exact decimal precision (no scientific notation)
+    ✓ Preserves exact numeric format from source
+    ✓ Comprehensive error handling and logging
+    ✓ No code changes needed for different sheets/columns
 
-' Result Display Mode: "SIDE_BY_SIDE" or "SEPARATE_SHEET"
-' SIDE_BY_SIDE: Results appear to the right of the dashboard (columns E onwards)
-' SEPARATE_SHEET: Results appear in a new worksheet
-Const RESULT_DISPLAY_MODE As String = "SIDE_BY_SIDE"
+REQUIREMENTS:
+    pip install pandas openpyxl xlrd
 
-' Name of the separate results sheet (only used if RESULT_DISPLAY_MODE = "SEPARATE_SHEET")
-Const RESULT_SHEET_NAME As String = "Search Results"
+QUICK START:
+    1. Edit the CONFIG section below with your settings
+    2. Run: python data_extractor_single.py
+    3. Place files in input folder - they'll be processed automatically
 
-' ========== HELPER FUNCTIONS FOR OUTPUT ==========
-
-Function GetOutputWorksheet() As Worksheet
-    ' Returns the worksheet where results should be displayed based on configuration
-    Dim ws As Worksheet
+CONFIGURATION GUIDE:
     
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        ' Check if results sheet exists
-        On Error Resume Next
-        Set ws = ThisWorkbook.Sheets(RESULT_SHEET_NAME)
-        On Error GoTo 0
+    INPUT_FOLDER / OUTPUT_FOLDER:
+        - Network paths: "//server/share/folder" or "\\\\server\\share\\folder"
+        - Local paths: "C:/data/input" or "./input"
+    
+    SHEETS_CONFIG:
+        Each dictionary defines one sheet to process:
+        {
+            'sheet_name': 'A',              # Exact sheet name (case-sensitive)
+            'columns': ['P', 'Q', 'R'],     # Columns to extract (letters or numbers)
+            'row_start': 2,                 # First row (1-based)
+            'row_end': 100,                 # Last row (1-based, inclusive)
+            'input_has_header': False,      # Does INPUT file have header row?
+            'output_has_header': False,     # Should OUTPUT file include header?
+            'output_file': 'SheetA.csv',    # Output filename
+            'output_format': 'csv'          # 'csv' or 'xlsx'
+        }
+    
+    HEADER HANDLING:
+        input_has_header:
+            - True: First row of input is treated as header (will be skipped in data)
+            - False: First row of input contains data (no header row exists)
         
-        ' Create if doesn't exist
-        If ws Is Nothing Then
-            Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-            ws.Name = RESULT_SHEET_NAME
-            ws.Tab.Color = RGB(200, 200, 200)
-        Else
-            ' Clear existing content
-            ws.Cells.Clear
-        End If
-    Else
-        ' Use Search sheet (side-by-side mode)
-        Set ws = ThisWorkbook.Sheets("Search")
-    End If
-    
-    Set GetOutputWorksheet = ws
-End Function
-
-Function GetOutputStartColumn() As String
-    ' Returns the starting column letter for results
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        GetOutputStartColumn = "A"
-    Else
-        GetOutputStartColumn = "E"  ' Side-by-side starts at column E
-    End If
-End Function
-
-Function GetOutputStartRow() As Integer
-    ' Returns the starting row for results
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        GetOutputStartRow = 2  ' Row 1 for title, row 2 for headers
-    Else
-        GetOutputStartRow = 3  ' Start at row 3 for side-by-side
-    End If
-End Function
-
-Function ColumnLetter(colNum As Integer) As String
-    ' Convert column number to letter (1=A, 2=B, etc.)
-    Dim temp As Integer
-    Dim letter As String
-    temp = colNum
-    Do While temp > 0
-        letter = Chr(65 + ((temp - 1) Mod 26)) & letter
-        temp = (temp - 1) \ 26
-    Loop
-    ColumnLetter = letter
-End Function
-
-Function ColumnNumber(colLetter As String) As Integer
-    ' Convert column letter to number (A=1, B=2, etc.)
-    Dim i As Integer
-    Dim result As Integer
-    result = 0
-    For i = 1 To Len(colLetter)
-        result = result * 26 + (Asc(Mid(colLetter, i, 1)) - 64)
-    Next i
-    ColumnNumber = result
-End Function
-
-' ========== MAIN SEARCH FUNCTIONS ==========
-
-Function SearchFilesForKeywords(folderPath As String, keywords() As String, keywordCount As Integer, searchContent As Boolean) As Variant
-    Dim fso As Object
-    Dim folder As Object
-    Dim file As Object
-    Dim results As Object
-    Dim candidateFiles As Object
-    Dim fileName As String
-    Dim i As Integer
-    Dim currentLevel As Integer
-    
-    ' Create FileSystemObject
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set results = CreateObject("System.Collections.ArrayList")
-    Set candidateFiles = CreateObject("System.Collections.ArrayList")
-    
-    ' Check if folder exists
-    If Not fso.FolderExists(folderPath) Then
-        SearchFilesForKeywords = Array("Error: Folder not found")
-        Exit Function
-    End If
-    
-    Set folder = fso.GetFolder(folderPath)
-    
-    ' Level 0: Get all files as initial candidates
-    For Each file In folder.Files
-        candidateFiles.Add file.Path
-    Next file
-    
-    ' Progressive filtering: Apply each keyword as a filter level
-    Dim tempFiles As Object
-    For currentLevel = 0 To keywordCount - 1
-        If candidateFiles.Count = 0 Then Exit For ' No candidates left
+        output_has_header:
+            - True: Output file will have a header row
+            - False: Output file will have NO header row (pure data only)
         
-        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount, searchContent)
-        Set candidateFiles = tempFiles
-    Next currentLevel
-    
-    ' Convert final candidates to results array
-    If candidateFiles.Count > 0 Then
-        Dim arr() As Variant
-        ReDim arr(0 To candidateFiles.Count - 1)
-        Dim j As Long
-        For j = 0 To candidateFiles.Count - 1
-            Dim filePath As String
-            filePath = candidateFiles(j)
-            fileName = fso.GetFileName(filePath)
-            arr(j) = fileName & "|" & filePath
-        Next j
-        SearchFilesForKeywords = arr
-    Else
-        SearchFilesForKeywords = Array("No matches found")
-    End If
-    
-    Set fso = Nothing
-    Set folder = Nothing
-    Set results = Nothing
-    Set candidateFiles = Nothing
-End Function
-
-Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, level As Integer, totalLevels As Integer, searchContent As Boolean) As Object
-    Dim filteredFiles As Object
-    Dim i As Long
-    Dim filePath As String
-    Dim fileName As String
-    Dim fso As Object
-    Dim matchFound As Boolean
-    
-    Set filteredFiles = CreateObject("System.Collections.ArrayList")
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    keyword = LCase(Trim(keyword))
-    
-    ' Skip empty keywords
-    If keyword = "" Then
-        Set FilterFilesByKeyword = candidateFiles
-        Exit Function
-    End If
-    
-    ' Filter candidates by current keyword
-    For i = 0 To candidateFiles.Count - 1
-        filePath = candidateFiles(i)
-        fileName = fso.GetFileName(filePath)
-        matchFound = False
-        
-        ' Check if keyword is in file name
-        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
-            matchFound = True
-        End If
-        
-        ' Check file contents if not found in name AND searchContent is enabled
-        If Not matchFound And searchContent Then
-            matchFound = SearchFileContent(filePath, keyword)
-        End If
-        
-        ' Add to filtered list if match found
-        If matchFound Then
-            filteredFiles.Add filePath
-        End If
-    Next i
-    
-    Set FilterFilesByKeyword = filteredFiles
-    Set fso = Nothing
-End Function
-
-Function SearchFileContent(filePath As String, keyword As String) As Boolean
-    Dim fileNum As Integer
-    Dim fileContent As String
-    Dim textStream As Object
-    Dim fso As Object
-    
-    On Error Resume Next
-    
-    SearchFileContent = False
-    
-    ' Check if it's an Excel file
-    If IsExcelFile(filePath) Then
-        SearchFileContent = SearchExcelContent(filePath, keyword)
-        Exit Function
-    End If
-    
-    ' Only search text-based files
-    If IsTextFile(filePath) Then
-        Set fso = CreateObject("Scripting.FileSystemObject")
-        Set textStream = fso.OpenTextFile(filePath, 1, False) ' 1 = ForReading
-        
-        If Err.Number = 0 Then
-            fileContent = textStream.ReadAll
-            textStream.Close
+        Examples:
+            # Input has header, output should also have header
+            'input_has_header': True, 'output_has_header': True
             
-            If InStr(1, LCase(fileContent), keyword, vbTextCompare) > 0 Then
-                SearchFileContent = True
-            End If
-        End If
-        
-        Set textStream = Nothing
-        Set fso = Nothing
-    End If
-    
-    On Error GoTo 0
-End Function
-
-Function SearchExcelContent(filePath As String, keyword As String) As Boolean
-    ' Search content within Excel files
-    Dim xlApp As Object
-    Dim xlBook As Object
-    Dim xlSheet As Object
-    Dim cell As Object
-    Dim found As Boolean
-    
-    On Error Resume Next
-    
-    SearchExcelContent = False
-    found = False
-    
-    ' Create Excel application (late binding for compatibility)
-    Set xlApp = CreateObject("Excel.Application")
-    If xlApp Is Nothing Then Exit Function
-    
-    xlApp.Visible = False
-    xlApp.DisplayAlerts = False
-    xlApp.ScreenUpdating = False
-    
-    ' Open workbook
-    Set xlBook = xlApp.Workbooks.Open(filePath, ReadOnly:=True)
-    If Err.Number <> 0 Then
-        xlApp.Quit
-        Set xlApp = Nothing
-        Exit Function
-    End If
-    
-    ' Search all sheets
-    For Each xlSheet In xlBook.Worksheets
-        If found Then Exit For
-        
-        ' Search in used range
-        On Error Resume Next
-        Set cell = xlSheet.UsedRange.Find(What:=keyword, LookIn:=-4163, LookAt:=2, _
-                                          SearchOrder:=1, SearchDirection:=1, MatchCase:=False)
-        
-        If Not cell Is Nothing Then
-            found = True
-            Exit For
-        End If
-    Next xlSheet
-    
-    ' Clean up
-    xlBook.Close SaveChanges:=False
-    xlApp.Quit
-    
-    Set xlSheet = Nothing
-    Set xlBook = Nothing
-    Set xlApp = Nothing
-    
-    SearchExcelContent = found
-    
-    On Error GoTo 0
-End Function
-
-Function IsTextFile(filePath As String) As Boolean
-    Dim ext As String
-    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
-    
-    ' Text-based and Excel files
-    Select Case ext
-        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", "sql", "vbs", "bat", _
-             "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
-            IsTextFile = True
-        Case Else
-            IsTextFile = False
-    End Select
-End Function
-
-Function IsExcelFile(filePath As String) As Boolean
-    Dim ext As String
-    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
-    
-    Select Case ext
-        Case "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
-            IsExcelFile = True
-        Case Else
-            IsExcelFile = False
-    End Select
-End Function
-
-' ========== USER-FACING SEARCH MACROS ==========
-
-Sub RunSearch()
-    Dim folderPath As String
-    Dim keywords(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordCount As Integer
-    Dim results As Variant
-    Dim ws As Worksheet
-    Dim outputWs As Worksheet
-    Dim i As Long
-    Dim resultParts() As String
-    Dim fileName As String
-    Dim filePath As String
-    Dim keywordList As String
-    Dim startCol As String
-    Dim startRow As Integer
-    Dim col1 As String, col2 As String
-    
-    Set ws = ThisWorkbook.Sheets("Search")
-    
-    ' Get folder path
-    folderPath = ws.Range("B2").Value
-    
-    ' Get keywords
-    keywordCount = 0
-    keywordList = ""
-    
-    For i = 0 To MAX_KEYWORDS - 1
-        keywords(i) = Trim(ws.Range("B" & (3 + i)).Value)
-        If keywords(i) <> "" Then
-            keywordCount = keywordCount + 1
-            If keywordList <> "" Then keywordList = keywordList & ", "
-            keywordList = keywordList & """" & keywords(i) & """"
-        End If
-    Next i
-    
-    ' Validation
-    If folderPath = "" Then
-        MsgBox "Please enter folder path in cell B2", vbExclamation
-        Exit Sub
-    End If
-    
-    If keywordCount = 0 Then
-        MsgBox "Please enter at least one keyword (cells B3 onwards)", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Get output worksheet and positions
-    Set outputWs = GetOutputWorksheet()
-    startCol = GetOutputStartColumn()
-    startRow = GetOutputStartRow()
-    
-    ' Clear previous results
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Cells.Clear
-        ' Add title
-        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
-        outputWs.Range("A1").Font.Bold = True
-        outputWs.Range("A1").Font.Size = 12
-    Else
-        Dim clearCol As Integer
-        clearCol = ColumnNumber(startCol)
-        outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & ColumnLetter(clearCol + 2) & "1000").ClearContents
-    End If
-    
-    ' Run search
-    Application.ScreenUpdating = False
-    Application.StatusBar = "Searching file names and content for " & keywordCount & " keyword(s)..."
-    
-    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
-    
-    ' Calculate column letters
-    col1 = ColumnLetter(ColumnNumber(startCol))
-    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
-    
-    ' Output results with headers
-    outputWs.Range(col1 & startRow).Value = "File Name"
-    outputWs.Range(col2 & startRow).Value = "File Path"
-    
-    ' Format headers
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Bold = True
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Size = 10
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Interior.Color = RGB(217, 217, 217)
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).HorizontalAlignment = xlCenter
-    
-    ' Check if results contain error or no matches
-    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox results(0), vbExclamation
-        Exit Sub
-    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
-        Exit Sub
-    End If
-    
-    ' Output results with hyperlinks
-    For i = LBound(results) To UBound(results)
-        resultParts = Split(results(i), "|")
-        fileName = resultParts(0)
-        filePath = resultParts(1)
-        
-        ' Add file name as clickable hyperlink
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-                          Address:=filePath, _
-                          TextToDisplay:=fileName
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
-        
-        ' Add full path in column 2
-        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-        
-        ' Add alternating row colors
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
-        End If
-    Next i
-    
-    ' Add borders to results
-    Dim lastResultRow As Integer
-    lastResultRow = startRow + UBound(results) + 1
-    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
-    
-    ' Set column widths
-    outputWs.Columns(col1).ColumnWidth = 35
-    outputWs.Columns(col2).ColumnWidth = 55
-    
-    ' Add back button if separate sheet
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Range("D1").Value = "← Back to Search"
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
-                          Address:="", _
-                          SubAddress:="'Search'!A1", _
-                          TextToDisplay:="← Back to Search"
-        outputWs.Range("D1").Font.Bold = True
-        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
-        outputWs.Activate
-    End If
-    
-    Application.ScreenUpdating = True
-    Application.StatusBar = False
-    
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Search Type: File Name + Content" & vbCrLf & _
-           "Keywords used: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1), vbInformation
-End Sub
-
-Sub RunSearchByNameOnly()
-    Dim folderPath As String
-    Dim keywords(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordCount As Integer
-    Dim results As Variant
-    Dim ws As Worksheet
-    Dim outputWs As Worksheet
-    Dim i As Long
-    Dim resultParts() As String
-    Dim fileName As String
-    Dim filePath As String
-    Dim keywordList As String
-    Dim startCol As String
-    Dim startRow As Integer
-    Dim col1 As String, col2 As String
-    
-    Set ws = ThisWorkbook.Sheets("Search")
-    
-    ' Get folder path
-    folderPath = ws.Range("B2").Value
-    
-    ' Get keywords
-    keywordCount = 0
-    keywordList = ""
-    
-    For i = 0 To MAX_KEYWORDS - 1
-        keywords(i) = Trim(ws.Range("B" & (3 + i)).Value)
-        If keywords(i) <> "" Then
-            keywordCount = keywordCount + 1
-            If keywordList <> "" Then keywordList = keywordList & ", "
-            keywordList = keywordList & """" & keywords(i) & """"
-        End If
-    Next i
-    
-    ' Validation
-    If folderPath = "" Then
-        MsgBox "Please enter folder path in cell B2", vbExclamation
-        Exit Sub
-    End If
-    
-    If keywordCount = 0 Then
-        MsgBox "Please enter at least one keyword (cells B3 onwards)", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Get output worksheet and positions
-    Set outputWs = GetOutputWorksheet()
-    startCol = GetOutputStartColumn()
-    startRow = GetOutputStartRow()
-    
-    ' Clear previous results
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Cells.Clear
-        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
-        outputWs.Range("A1").Font.Bold = True
-        outputWs.Range("A1").Font.Size = 12
-    Else
-        Dim clearCol As Integer
-        clearCol = ColumnNumber(startCol)
-        outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & ColumnLetter(clearCol + 2) & "1000").ClearContents
-    End If
-    
-    ' Run search
-    Application.ScreenUpdating = False
-    Application.StatusBar = "Searching file names only for " & keywordCount & " keyword(s)..."
-    
-    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, False)
-    
-    ' Calculate column letters
-    col1 = ColumnLetter(ColumnNumber(startCol))
-    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
-    
-    ' Output results with headers
-    outputWs.Range(col1 & startRow).Value = "File Name"
-    outputWs.Range(col2 & startRow).Value = "File Path"
-    
-    ' Format headers
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Bold = True
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Size = 10
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Interior.Color = RGB(217, 217, 217)
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col2 & startRow).HorizontalAlignment = xlCenter
-    
-    ' Check if results contain error or no matches
-    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox results(0), vbExclamation
-        Exit Sub
-    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox "No matches found in file names for all " & keywordCount & " keyword(s)", vbInformation
-        Exit Sub
-    End If
-    
-    ' Output results with hyperlinks
-    For i = LBound(results) To UBound(results)
-        resultParts = Split(results(i), "|")
-        fileName = resultParts(0)
-        filePath = resultParts(1)
-        
-        ' Add file name as clickable hyperlink
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-                          Address:=filePath, _
-                          TextToDisplay:=fileName
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
-        
-        ' Add full path
-        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-        
-        ' Add alternating row colors
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
-        End If
-    Next i
-    
-    ' Add borders to results
-    Dim lastResultRow As Integer
-    lastResultRow = startRow + UBound(results) + 1
-    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
-    
-    ' Set column widths
-    outputWs.Columns(col1).ColumnWidth = 35
-    outputWs.Columns(col2).ColumnWidth = 55
-    
-    ' Add back button if separate sheet
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Range("D1").Value = "← Back to Search"
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
-                          Address:="", _
-                          SubAddress:="'Search'!A1", _
-                          TextToDisplay:="← Back to Search"
-        outputWs.Range("D1").Font.Bold = True
-        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
-        outputWs.Activate
-    End If
-    
-    Application.ScreenUpdating = True
-    Application.StatusBar = False
-    
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Search Type: File Name Only" & vbCrLf & _
-           "Keywords used: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1), vbInformation
-End Sub
-
-Sub RunSearchWithContentPreview()
-    Dim folderPath As String
-    Dim keywords(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordCount As Integer
-    Dim results As Variant
-    Dim ws As Worksheet
-    Dim outputWs As Worksheet
-    Dim i As Long
-    Dim resultParts() As String
-    Dim fileName As String
-    Dim filePath As String
-    Dim keywordList As String
-    Dim startCol As String
-    Dim startRow As Integer
-    Dim col1 As String, col2 As String, col3 As String
-    
-    Set ws = ThisWorkbook.Sheets("Search")
-    
-    ' Get folder path
-    folderPath = ws.Range("B2").Value
-    
-    ' Get keywords and logic operators
-    keywordCount = 0
-    keywordList = ""
-    
-    For i = 0 To MAX_KEYWORDS - 1
-        keywords(i) = Trim(ws.Range("B" & (3 + i)).Value)
-        keywordLogic(i) = UCase(Trim(ws.Range("C" & (3 + i)).Value))
-        
-        If keywordLogic(i) = "" Then keywordLogic(i) = "AND"
-        
-        If keywordLogic(i) <> "AND" And keywordLogic(i) <> "OR" Then
-            MsgBox "Invalid logic operator in row " & (3 + i) & ". Use 'AND' or 'OR' only.", vbExclamation
-            Exit Sub
-        End If
-        
-        If keywords(i) <> "" Then
-            keywordCount = keywordCount + 1
-            If keywordList <> "" Then keywordList = keywordList & ", "
-            keywordList = keywordList & """" & keywords(i) & """ (" & keywordLogic(i) & ")"
-        End If
-    Next i
-    
-    ' Validation
-    If folderPath = "" Then
-        MsgBox "Please enter folder path in cell B2", vbExclamation
-        Exit Sub
-    End If
-    
-    If keywordCount = 0 Then
-        MsgBox "Please enter at least one keyword (cells B3 onwards)", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Get output worksheet and positions
-    Set outputWs = GetOutputWorksheet()
-    startCol = GetOutputStartColumn()
-    startRow = GetOutputStartRow()
-    
-    ' Clear previous results
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Cells.Clear
-        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
-        outputWs.Range("A1").Font.Bold = True
-        outputWs.Range("A1").Font.Size = 12
-    Else
-        Dim clearCol As Integer
-        clearCol = ColumnNumber(startCol)
-        outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & ColumnLetter(clearCol + 3) & "1000").ClearContents
-    End If
-    
-    ' Run search
-    Application.ScreenUpdating = False
-    Application.StatusBar = "Searching for " & keywordCount & " keyword(s)..."
-    
-    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
-    
-    ' Calculate column letters
-    col1 = ColumnLetter(ColumnNumber(startCol))
-    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
-    col3 = ColumnLetter(ColumnNumber(startCol) + 2)
-    
-    ' Output results with headers
-    outputWs.Range(col1 & startRow).Value = "File Name"
-    outputWs.Range(col2 & startRow).Value = "File Path"
-    outputWs.Range(col3 & startRow).Value = "Filtered Content"
-    
-    ' Format headers
-    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Font.Bold = True
-    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Font.Size = 10
-    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Interior.Color = RGB(217, 217, 217)
-    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col3 & startRow).HorizontalAlignment = xlCenter
-    
-    ' Check if results contain error or no matches
-    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox results(0), vbExclamation
-        Exit Sub
-    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
-        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
-        Application.ScreenUpdating = True
-        Application.StatusBar = False
-        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
-        Exit Sub
-    End If
-    
-    ' Output results with hyperlinks and create filtered content sheets
-    For i = LBound(results) To UBound(results)
-        resultParts = Split(results(i), "|")
-        fileName = resultParts(0)
-        filePath = resultParts(1)
-        
-        ' Add file name as clickable hyperlink
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-                          Address:=filePath, _
-                          TextToDisplay:=fileName
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
-        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
-        
-        ' Add full path
-        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-        
-        ' Create filtered content view
-        Application.StatusBar = "Creating filtered view for " & fileName & "..."
-        Dim filterSheetName As String
-        filterSheetName = CreateFilteredContentSheet(filePath, keywords, keywordLogic, keywordCount, i + 1)
-        
-        If filterSheetName <> "" Then
-            outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col3 & (startRow + 1 + i)), _
-                              Address:="", _
-                              SubAddress:="'" & filterSheetName & "'!A1", _
-                              TextToDisplay:="View Filtered Rows"
-            outputWs.Range(col3 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
-            outputWs.Range(col3 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
-            outputWs.Range(col3 & (startRow + 1 + i)).HorizontalAlignment = xlCenter
-        Else
-            outputWs.Range(col3 & (startRow + 1 + i)).Value = "N/A (Binary)"
-            outputWs.Range(col3 & (startRow + 1 + i)).Font.Color = RGB(128, 128, 128)
-            outputWs.Range(col3 & (startRow + 1 + i)).Font.Italic = True
-            outputWs.Range(col3 & (startRow + 1 + i)).HorizontalAlignment = xlCenter
-        End If
-        
-        ' Add alternating row colors
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col3 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
-        End If
-    Next i
-    
-    ' Add borders to results
-    Dim lastResultRow As Integer
-    lastResultRow = startRow + UBound(results) + 1
-    outputWs.Range(col1 & startRow & ":" & col3 & lastResultRow).Borders.LineStyle = xlContinuous
-    outputWs.Range(col1 & startRow & ":" & col3 & lastResultRow).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
-    
-    ' Set column widths
-    outputWs.Columns(col1).ColumnWidth = 30
-    outputWs.Columns(col2).ColumnWidth = 50
-    outputWs.Columns(col3).ColumnWidth = 18
-    
-    ' Add back button if separate sheet
-    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        outputWs.Range("D1").Value = "← Back to Search"
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
-                          Address:="", _
-                          SubAddress:="'Search'!A1", _
-                          TextToDisplay:="← Back to Search"
-        outputWs.Range("D1").Font.Bold = True
-        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
-        outputWs.Activate
-    End If
-    
-    Application.ScreenUpdating = True
-    Application.StatusBar = False
-    
-    MsgBox "Search complete with filtered content views!" & vbCrLf & vbCrLf & _
-           "Keywords used: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
-           "• Click file names to open original files" & vbCrLf & _
-           "• Click 'View Filtered Rows' to see matching content only", vbInformation
-End Sub
-
-' ========== FILTERED CONTENT VIEW FUNCTIONALITY ==========
-
-Function CreateFilteredContentSheet(filePath As String, keywords() As String, keywordLogic() As String, keywordCount As Integer, fileIndex As Integer) As String
-    Dim fso As Object
-    Dim textStream As Object
-    Dim fileContent As String
-    Dim lines() As String
-    Dim filteredLines As Object
-    Dim i As Long
-    Dim j As Integer
-    Dim ws As Worksheet
-    Dim sheetName As String
-    Dim fileName As String
-    Dim rowNum As Long
-    Dim maxSheetNameLength As Integer
-    Dim andKeywords As Object
-    Dim orKeywords As Object
-    Dim lineMatchesAnd As Boolean
-    Dim lineMatchesOr As Boolean
-    Dim hasAndKeywords As Boolean
-    Dim hasOrKeywords As Boolean
-    
-    CreateFilteredContentSheet = ""
-    
-    ' Only process text files (exclude Excel for row extraction)
-    If Not IsTextFile(filePath) Or IsExcelFile(filePath) Then
-        Exit Function
-    End If
-    
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set filteredLines = CreateObject("System.Collections.ArrayList")
-    Set andKeywords = CreateObject("System.Collections.ArrayList")
-    Set orKeywords = CreateObject("System.Collections.ArrayList")
-    
-    ' Separate keywords into AND and OR lists
-    hasAndKeywords = False
-    hasOrKeywords = False
-    
-    For j = 0 To keywordCount - 1
-        If keywords(j) <> "" Then
-            If keywordLogic(j) = "AND" Then
-                andKeywords.Add keywords(j)
-                hasAndKeywords = True
-            ElseIf keywordLogic(j) = "OR" Then
-                orKeywords.Add keywords(j)
-                hasOrKeywords = True
-            End If
-        End If
-    Next j
-    
-    On Error Resume Next
-    
-    ' Read file content
-    Set textStream = fso.OpenTextFile(filePath, 1, False)
-    If Err.Number <> 0 Then Exit Function
-    
-    fileContent = textStream.ReadAll
-    textStream.Close
-    
-    ' Split into lines
-    lines = Split(fileContent, vbCrLf)
-    If UBound(lines) = 0 Then lines = Split(fileContent, vbLf)
-    If UBound(lines) = 0 Then lines = Split(fileContent, vbCr)
-    
-    ' Filter lines based on AND/OR logic
-    For i = LBound(lines) To UBound(lines)
-        If Trim(lines(i)) = "" Then GoTo NextLine
-        
-        lineMatchesAnd = True
-        lineMatchesOr = False
-        
-        ' Check AND keywords
-        If hasAndKeywords Then
-            For j = 0 To andKeywords.Count - 1
-                If InStr(1, LCase(lines(i)), LCase(andKeywords(j)), vbTextCompare) = 0 Then
-                    lineMatchesAnd = False
-                    Exit For
-                End If
-            Next j
-        End If
-        
-        ' Check OR keywords
-        If hasOrKeywords Then
-            For j = 0 To orKeywords.Count - 1
-                If InStr(1, LCase(lines(i)), LCase(orKeywords(j)), vbTextCompare) > 0 Then
-                    lineMatchesOr = True
-                    Exit For
-                End If
-            Next j
-        Else
-            lineMatchesOr = True
-        End If
-        
-        ' Add line if matches logic
-        If lineMatchesAnd And lineMatchesOr Then
-            filteredLines.Add "Line " & (i + 1) & ": " & lines(i)
-        End If
-        
-NextLine:
-    Next i
-    
-    ' Create worksheet for filtered content
-    If filteredLines.Count > 0 Then
-        fileName = fso.GetFileName(filePath)
-        
-        ' Create safe sheet name
-        maxSheetNameLength = 31
-        sheetName = "Filter_" & fileIndex & "_" & Left(fileName, maxSheetNameLength - 10)
-        sheetName = Replace(sheetName, ":", "")
-        sheetName = Replace(sheetName, "\", "")
-        sheetName = Replace(sheetName, "/", "")
-        sheetName = Replace(sheetName, "?", "")
-        sheetName = Replace(sheetName, "*", "")
-        sheetName = Replace(sheetName, "[", "")
-        sheetName = Replace(sheetName, "]", "")
-        
-        ' Delete sheet if exists
-        On Error Resume Next
-        Application.DisplayAlerts = False
-        ThisWorkbook.Sheets(sheetName).Delete
-        Application.DisplayAlerts = True
-        On Error GoTo 0
-        
-        ' Create new sheet
-        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-        ws.Name = sheetName
-        
-        ' Add header information
-        ws.Range("A1").Value = "Filtered Content View"
-        ws.Range("A1").Font.Bold = True
-        ws.Range("A1").Font.Size = 14
-        
-        ws.Range("A2").Value = "File:"
-        ws.Range("A2").Font.Bold = True
-        ws.Range("B2").Value = fileName
-        
-        ws.Range("A3").Value = "Full Path:"
-        ws.Range("A3").Font.Bold = True
-        ws.Range("B3").Value = filePath
-        
-        ws.Range("A4").Value = "Filter Logic:"
-        ws.Range("A4").Font.Bold = True
-        Dim logicDescription As String
-        logicDescription = ""
-        
-        If hasAndKeywords Then
-            logicDescription = "AND Keywords: "
-            For j = 0 To andKeywords.Count - 1
-                If j > 0 Then logicDescription = logicDescription & " + "
-                logicDescription = logicDescription & andKeywords(j)
-            Next j
-        End If
-        
-        If hasOrKeywords Then
-            If logicDescription <> "" Then logicDescription = logicDescription & " | "
-            logicDescription = logicDescription & "OR Keywords: "
-            For j = 0 To orKeywords.Count - 1
-                If j > 0 Then logicDescription = logicDescription & " / "
-                logicDescription = logicDescription & orKeywords(j)
-            Next j
-        End If
-        
-        ws.Range("B4").Value = logicDescription
-        
-        ws.Range("A5").Value = "Matching Lines:"
-        ws.Range("A5").Font.Bold = True
-        ws.Range("B5").Value = filteredLines.Count
-        
-        ' Add column header
-        ws.Range("A7").Value = "Matching Rows (with line numbers)"
-        ws.Range("A7").Font.Bold = True
-        ws.Range("A7").Interior.Color = RGB(200, 200, 200)
-        
-        ' Add filtered lines with highlighting
-        rowNum = 8
-        For i = 0 To filteredLines.Count - 1
-            ws.Range("A" & rowNum).Value = filteredLines(i)
+            # Input has NO header, output should also have NO header
+            'input_has_header': False, 'output_has_header': False
             
-            Dim cellText As String
-            cellText = ws.Range("A" & rowNum).Value
+            # Input has header but you want output without header
+            'input_has_header': True, 'output_has_header': False
+    
+    COLUMN SPECIFICATION:
+        - Use Excel letters: ['A', 'B', 'C'] or ['P', 'Q', 'R']
+        - Use numbers (0-based): [0, 1, 2] or [15, 16, 17]
+        - Can mix: ['A', 5, 'Z']
+    
+    ROW RANGE:
+        - row_start and row_end are 1-based (first row = 1)
+        - Counts ONLY data rows (excludes header if input_has_header=True)
+        - Example: If input has header, row_start=1 means first data row after header
+    
+    POST_PROCESS_ACTION:
+        - 'none': Leave file in input folder
+        - 'move': Move to ARCHIVE_FOLDER
+        - 'delete': Delete file (be careful!)
+
+DECIMAL PRECISION:
+    The script preserves EXACT decimal representation:
+    - Input: 0.0000000000673849 → Output: 0.0000000000673849 (NOT 6.73849e-11)
+    - Input: 123.456789012345678 → Output: 123.456789012345678
+    - No rounding, no scientific notation, exact format preserved
+
+EXAMPLES:
+
+    Example 1: Input has NO header, extract all rows as-is with NO header in output
+    {
+        'sheet_name': 'Sheet1',
+        'columns': ['A', 'B', 'C'],
+        'row_start': 1,
+        'row_end': 100,
+        'input_has_header': False,    # Input file has NO header row
+        'output_has_header': False,   # Output file should have NO header
+        'output_file': 'data_no_header.csv',
+        'output_format': 'csv'
+    }
+    
+    Example 2: Input has header in row 1, extract data rows 1-99, no header in output
+    {
+        'sheet_name': 'Sheet1',
+        'columns': ['A', 'B', 'C'],
+        'row_start': 1,
+        'row_end': 99,
+        'input_has_header': True,     # Row 1 is header (will skip it)
+        'output_has_header': False,   # Output should NOT have header
+        'output_file': 'data_only.csv',
+        'output_format': 'csv'
+    }
+    
+    Example 3: Input has header, output should also have header
+    {
+        'sheet_name': 'Sheet1',
+        'columns': ['P', 'Q', 'R'],
+        'row_start': 1,
+        'row_end': 50,
+        'input_has_header': True,     # Row 1 is header
+        'output_has_header': True,    # Output should include header
+        'output_file': 'data_with_header.csv',
+        'output_format': 'csv'
+    }
+
+TROUBLESHOOTING:
+    
+    Problem: "Input folder does not exist"
+    → Check folder path is correct and accessible
+    
+    Problem: "Sheet 'A' not found"
+    → Verify sheet name matches exactly (case-sensitive)
+    → Open Excel file to check actual sheet names
+    
+    Problem: "Column out of range"
+    → Verify columns exist in the sheet
+    → Check column letters are correct
+    
+    Problem: Files not detected
+    → Check FILE_PATTERNS includes your file extension
+    → Ensure file is completely copied (not in progress)
+    → Verify file is not locked/open in Excel
+    
+    Problem: First row missing in output
+    → Check input_has_header setting - if True, first row is treated as header
+    → Set input_has_header=False if your input has no header
+    
+    Problem: Output has "Unnamed" headers
+    → Set output_has_header=False to remove all headers from output
+    
+    Problem: Numbers appear in scientific notation
+    → This is now fixed - exact decimal format is preserved
+    → Check output file in text editor to verify
+
+═══════════════════════════════════════════════════════════════════════════════
+"""
+
+import os
+import time
+import logging
+from datetime import datetime
+from pathlib import Path
+import pandas as pd
+from typing import Dict, List, Optional
+import sys
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIGURATION SECTION - EDIT THIS TO CUSTOMIZE BEHAVIOR
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Input and Output Folders
+INPUT_FOLDER = "//server/share/FolderX"  # Where input files arrive
+OUTPUT_FOLDER = "//server/share/FolderY"  # Where output files are saved
+
+# File Detection Settings
+FILE_PATTERNS = ['.csv', '.xlsx', '.xls']  # File types to monitor
+POLL_INTERVAL = 5  # Seconds between checks for new files
+
+# Post-Processing Action
+POST_PROCESS_ACTION = 'move'  # Options: 'none', 'move', 'delete'
+ARCHIVE_FOLDER = "//server/share/archive"  # Where to move processed files
+
+# Sheet Processing Configuration
+# Add as many sheets as needed - each becomes a separate output file
+SHEETS_CONFIG = [
+    {
+        'sheet_name': 'A',
+        'columns': ['P', 'Q', 'R'],
+        'row_start': 1,              # First data row to extract (1-based)
+        'row_end': 100,              # Last data row to extract (1-based)
+        'input_has_header': False,   # Does the INPUT file have a header row?
+        'output_has_header': False,  # Should the OUTPUT file include a header row?
+        'output_file': 'SheetA_output.csv',
+        'output_format': 'csv'
+    },
+    {
+        'sheet_name': 'B',
+        'columns': ['A', 'D', 'E', 'F'],
+        'row_start': 1,
+        'row_end': 50,
+        'input_has_header': False,
+        'output_has_header': False,
+        'output_file': 'SheetB_output.xlsx',
+        'output_format': 'xlsx'
+    },
+    {
+        'sheet_name': 'C',
+        'columns': ['B', 'C', 'G', 'H', 'I'],
+        'row_start': 1,
+        'row_end': 200,
+        'input_has_header': True,    # This sheet has header in row 1
+        'output_has_header': False,  # But we don't want header in output
+        'output_file': 'SheetC_output.csv',
+        'output_format': 'csv'
+    },
+]
+
+# Logging Configuration
+LOG_DIRECTORY = 'logs'
+LOG_LEVEL = 'INFO'  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# ═══════════════════════════════════════════════════════════════════════════
+# END OF CONFIGURATION - DO NOT MODIFY BELOW THIS LINE
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class DataExtractor:
+    """Main class for automated data extraction from Excel/CSV files."""
+    
+    def __init__(self):
+        """Initialize the DataExtractor with configured settings."""
+        self._setup_logging()
+        self.logger.info("="*80)
+        self.logger.info("Data Extractor initialized successfully")
+        self.logger.info("="*80)
+    
+    def _setup_logging(self):
+        """Configure logging to file and console."""
+        # Create log directory if it doesn't exist
+        Path(LOG_DIRECTORY).mkdir(parents=True, exist_ok=True)
+        
+        # Generate log filename with timestamp
+        log_filename = f"data_extractor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = os.path.join(LOG_DIRECTORY, log_filename)
+        
+        # Configure logging format
+        logging.basicConfig(
+            level=getattr(logging, LOG_LEVEL.upper()),
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_path),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        self.logger = logging.getLogger(__name__)
+    
+    def _validate_folders(self) -> bool:
+        """
+        Validate that input and output folders exist and are accessible.
+        
+        Returns:
+            True if folders are valid, False otherwise
+        """
+        # Check input folder exists
+        if not os.path.exists(INPUT_FOLDER):
+            self.logger.error(f"Input folder does not exist: {INPUT_FOLDER}")
+            return False
+        
+        # Check read permission on input folder
+        if not os.access(INPUT_FOLDER, os.R_OK):
+            self.logger.error(f"No read permission for input folder: {INPUT_FOLDER}")
+            return False
+        
+        # Create output folder if it doesn't exist
+        try:
+            Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
+            self.logger.info(f"Output folder ready: {OUTPUT_FOLDER}")
+        except PermissionError:
+            self.logger.error(f"No write permission for output folder: {OUTPUT_FOLDER}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error creating output folder: {e}")
+            return False
+        
+        self.logger.info(f"Input folder validated: {INPUT_FOLDER}")
+        return True
+    
+    def _detect_new_file(self) -> Optional[str]:
+        """
+        Monitor input folder and detect new files matching configured patterns.
+        
+        Returns:
+            Full path to detected file, or None if no file found
+        """
+        try:
+            # List all files in input folder
+            for file in os.listdir(INPUT_FOLDER):
+                file_path = os.path.join(INPUT_FOLDER, file)
+                
+                # Skip directories
+                if os.path.isdir(file_path):
+                    continue
+                
+                # Check if file matches any configured pattern
+                file_lower = file.lower()
+                for pattern in FILE_PATTERNS:
+                    if file_lower.endswith(pattern.lower()):
+                        self.logger.info(f"New file detected: {file}")
+                        return file_path
             
-            ' Highlight AND keywords in GREEN
-            If hasAndKeywords Then
-                For j = 0 To andKeywords.Count - 1
-                    Dim kwPos As Long
-                    Dim searchStart As Long
-                    searchStart = 1
+            return None
+        
+        except PermissionError:
+            self.logger.error(f"Permission denied accessing input folder: {INPUT_FOLDER}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error detecting files: {e}")
+            return None
+    
+    def _read_file(self, file_path: str, has_header: bool) -> Optional[Dict[str, pd.DataFrame]]:
+        """
+        Read input file (Excel or CSV) in read-only mode.
+        
+        Args:
+            file_path: Full path to input file
+            has_header: Whether the file has a header row
+            
+        Returns:
+            Dictionary mapping sheet names to DataFrames, or None on error
+        """
+        self.logger.info(f"Reading file: {file_path}")
+        
+        try:
+            # Determine file type by extension
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            # Set header parameter based on configuration
+            # If has_header=True, header=0 (use first row as header)
+            # If has_header=False, header=None (no header, all rows are data)
+            header_param = 0 if has_header else None
+            
+            if file_ext in ['.xlsx', '.xls', '.xlsm']:
+                # Read Excel file - all sheets
+                engine = 'openpyxl' if file_ext == '.xlsx' else None
+                sheets_dict = pd.read_excel(
+                    file_path, 
+                    sheet_name=None, 
+                    engine=engine,
+                    header=header_param,  # Control header reading
+                    dtype=str  # Read all data as strings to preserve exact format
+                )
+                self.logger.info(f"Excel file read successfully. Sheets: {list(sheets_dict.keys())}")
+                return sheets_dict
+            
+            elif file_ext == '.csv':
+                # Read CSV file - treat as single sheet
+                df = pd.read_csv(
+                    file_path,
+                    header=header_param,  # Control header reading
+                    dtype=str  # Read all data as strings to preserve exact format
+                )
+                sheets_dict = {'Sheet1': df}
+                self.logger.info(f"CSV file read successfully. Rows: {len(df)}")
+                return sheets_dict
+            
+            else:
+                self.logger.error(f"Unsupported file format: {file_ext}")
+                return None
+        
+        except FileNotFoundError:
+            self.logger.error(f"File not found: {file_path}")
+            return None
+        except PermissionError:
+            self.logger.error(f"Permission denied reading file: {file_path}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error reading file: {e}")
+            return None
+    
+    def _convert_column_letter_to_index(self, column_letter: str) -> int:
+        """
+        Convert Excel column letter (e.g., 'A', 'AB') to zero-based index.
+        
+        Args:
+            column_letter: Column letter (e.g., 'A', 'B', 'AA')
+            
+        Returns:
+            Zero-based column index
+        """
+        column_letter = column_letter.upper()
+        index = 0
+        for i, char in enumerate(reversed(column_letter)):
+            index += (ord(char) - ord('A') + 1) * (26 ** i)
+        return index - 1
+    
+    def _extract_data_from_sheet(self, df: pd.DataFrame, sheet_config: Dict) -> Optional[pd.DataFrame]:
+        """
+        Extract specific columns and rows from a DataFrame based on configuration.
+        Preserves exact format from source (no scientific notation).
+        
+        Args:
+            df: Source DataFrame
+            sheet_config: Configuration for this sheet (columns, rows)
+            
+        Returns:
+            Extracted DataFrame, or None on error
+        """
+        try:
+            # Get column configuration
+            columns = sheet_config.get('columns', [])
+            if not columns:
+                self.logger.error("No columns specified in configuration")
+                return None
+            
+            # Convert column letters to indices
+            column_indices = []
+            for col in columns:
+                if isinstance(col, str):
+                    # Column specified as letter (e.g., 'A', 'B')
+                    col_index = self._convert_column_letter_to_index(col)
+                else:
+                    # Column specified as number (0-based)
+                    col_index = col
+                
+                column_indices.append(col_index)
+            
+            # Validate column indices
+            max_col = df.shape[1]
+            for idx in column_indices:
+                if idx >= max_col:
+                    self.logger.error(f"Column index {idx} out of range (max: {max_col-1})")
+                    return None
+            
+            # Extract columns by position
+            extracted_df = df.iloc[:, column_indices].copy()
+            
+            # Get row range configuration
+            row_start = sheet_config.get('row_start', 1)  # 1-based in config
+            row_end = sheet_config.get('row_end', len(df))  # 1-based in config
+            
+            # Convert to 0-based indexing for pandas
+            # Note: If input had header, pandas already removed it, so row 1 = index 0
+            row_start_idx = row_start - 1
+            row_end_idx = row_end
+            
+            # Validate row range
+            if row_start_idx < 0:
+                self.logger.warning(f"row_start < 1, using 1")
+                row_start_idx = 0
+            
+            if row_end_idx > len(df):
+                self.logger.warning(f"row_end exceeds data length, using {len(df)}")
+                row_end_idx = len(df)
+            
+            # Extract rows
+            extracted_df = extracted_df.iloc[row_start_idx:row_end_idx]
+            
+            self.logger.info(f"Extracted data: {extracted_df.shape[0]} rows, {extracted_df.shape[1]} columns")
+            
+            return extracted_df
+        
+        except Exception as e:
+            self.logger.error(f"Error extracting data from sheet: {e}")
+            return None
+    
+    def _generate_output_filename(self, config_filename: str, original_filename: str) -> str:
+        """
+        Generate output filename with timestamp if needed.
+        
+        Args:
+            config_filename: Filename from configuration
+            original_filename: Original input filename
+            
+        Returns:
+            Generated filename with timestamp
+        """
+        # Get timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Get original filename without extension
+        original_name_only = os.path.splitext(os.path.basename(original_filename))[0]
+        
+        # If filename contains placeholders, replace them
+        filename = config_filename
+        if '{timestamp}' in filename:
+            filename = filename.replace('{timestamp}', timestamp)
+        elif not any(x in filename for x in ['.csv', '.xlsx']):
+            # If no extension and no timestamp placeholder, add timestamp
+            name, ext = os.path.splitext(filename)
+            filename = f"{name}_{timestamp}{ext if ext else '.csv'}"
+        
+        return filename
+    
+    def _save_output_file(self, df: pd.DataFrame, output_path: str, file_format: str, include_header: bool):
+        """
+        Save extracted data to output file preserving exact decimal format.
+        
+        Args:
+            df: DataFrame to save (all values are strings preserving exact format)
+            output_path: Full path for output file
+            file_format: Format to save ('csv', 'xlsx', etc.)
+            include_header: Whether to include header row in output
+        """
+        try:
+            if file_format.lower() == 'csv':
+                # Save as CSV with exact string representation (no formatting)
+                # Data is already in string format, so it will preserve exact decimals
+                df.to_csv(
+                    output_path, 
+                    index=False, 
+                    header=include_header,  # Control header output
+                    quoting=1  # Quote non-numeric fields only
+                )
+                self.logger.info(f"CSV file saved: {output_path}")
+                if not include_header:
+                    self.logger.info("  Output file has NO header row (pure data only)")
+            
+            elif file_format.lower() in ['xlsx', 'excel']:
+                # Save as Excel preserving exact string representation
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    df.to_excel(
+                        writer, 
+                        index=False, 
+                        header=include_header,  # Control header output
+                        sheet_name='Data'
+                    )
+                self.logger.info(f"Excel file saved: {output_path}")
+                if not include_header:
+                    self.logger.info("  Output file has NO header row (pure data only)")
+            
+            else:
+                self.logger.error(f"Unsupported output format: {file_format}")
+        
+        except PermissionError:
+            self.logger.error(f"Permission denied writing to: {output_path}")
+        except Exception as e:
+            self.logger.error(f"Error saving output file: {e}")
+    
+    def _process_file(self, file_path: str):
+        """
+        Main processing logic: read file, extract data, generate outputs.
+        
+        Args:
+            file_path: Full path to input file
+        """
+        self.logger.info("="*80)
+        self.logger.info(f"Starting file processing: {os.path.basename(file_path)}")
+        self.logger.info("="*80)
+        
+        # Process each configured sheet
+        for sheet_config in SHEETS_CONFIG:
+            sheet_name = sheet_config.get('sheet_name')
+            input_has_header = sheet_config.get('input_has_header', False)
+            output_has_header = sheet_config.get('output_has_header', False)
+            
+            self.logger.info(f"\nProcessing sheet: {sheet_name}")
+            self.logger.info(f"  Input has header: {input_has_header}")
+            self.logger.info(f"  Output should have header: {output_has_header}")
+            
+            # Read input file with appropriate header setting for this sheet
+            sheets_dict = self._read_file(file_path, input_has_header)
+            if sheets_dict is None:
+                self.logger.error("Failed to read input file. Skipping this sheet.")
+                continue
+            
+            # Check if sheet exists in file
+            if sheet_name not in sheets_dict:
+                self.logger.error(f"Sheet '{sheet_name}' not found in file. Available sheets: {list(sheets_dict.keys())}")
+                continue
+            
+            # Get DataFrame for this sheet
+            df = sheets_dict[sheet_name]
+            
+            # Extract data based on configuration
+            extracted_df = self._extract_data_from_sheet(df, sheet_config)
+            if extracted_df is None or extracted_df.empty:
+                self.logger.error(f"No data extracted from sheet '{sheet_name}'")
+                continue
+            
+            # Generate output filename
+            output_filename = self._generate_output_filename(
+                sheet_config.get('output_file', 'output.csv'),
+                os.path.basename(file_path)
+            )
+            
+            # Get output format
+            output_format = sheet_config.get('output_format', 'csv')
+            
+            # Ensure output filename has correct extension
+            if not output_filename.endswith(f'.{output_format}'):
+                output_filename = f"{os.path.splitext(output_filename)[0]}.{output_format}"
+            
+            # Create full output path
+            output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+            
+            # Save output file with header control
+            self._save_output_file(extracted_df, output_path, output_format, output_has_header)
+        
+        self.logger.info("="*80)
+        self.logger.info(f"File processing completed: {os.path.basename(file_path)}")
+        self.logger.info("="*80)
+    
+    def _move_processed_file(self, file_path: str):
+        """
+        Move or delete processed file based on configuration.
+        
+        Args:
+            file_path: Path to processed file
+        """
+        if POST_PROCESS_ACTION == 'delete':
+            try:
+                os.remove(file_path)
+                self.logger.info(f"Deleted processed file: {file_path}")
+            except Exception as e:
+                self.logger.error(f"Error deleting file: {e}")
+        
+        elif POST_PROCESS_ACTION == 'move':
+            try:
+                # Create archive folder if it doesn't exist
+                Path(ARCHIVE_FOLDER).mkdir(parents=True, exist_ok=True)
+                
+                # Generate archive filename with timestamp
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = os.path.basename(file_path)
+                name, ext = os.path.splitext(filename)
+                archive_filename = f"{name}_{timestamp}{ext}"
+                archive_path = os.path.join(ARCHIVE_FOLDER, archive_filename)
+                
+                # Move file
+                os.rename(file_path, archive_path)
+                self.logger.info(f"Moved processed file to: {archive_path}")
+            except Exception as e:
+                self.logger.error(f"Error moving file to archive: {e}")
+        
+        else:
+            # 'none' - leave file in place
+            self.logger.info(f"File left in place: {file_path}")
+    
+    def run(self):
+        """
+        Main execution loop: monitor input folder and process files as they arrive.
+        """
+        # Validate folders before starting
+        if not self._validate_folders():
+            self.logger.error("Folder validation failed. Exiting.")
+            return
+        
+        self.logger.info(f"Starting monitoring loop (polling every {POLL_INTERVAL} seconds)")
+        self.logger.info("Press Ctrl+C to stop")
+        
+        try:
+            while True:
+                # Check for new file
+                file_path = self._detect_new_file()
+                
+                if file_path:
+                    # Process the detected file
+                    self._process_file(file_path)
                     
-                    Do
-                        kwPos = InStr(searchStart, cellText, andKeywords(j), vbTextCompare)
-                        If kwPos > 0 Then
-                            ws.Range("A" & rowNum).Characters(kwPos, Len(andKeywords(j))).Font.Color = RGB(0, 128, 0)
-                            ws.Range("A" & rowNum).Characters(kwPos, Len(andKeywords(j))).Font.Bold = True
-                            searchStart = kwPos + Len(andKeywords(j))
-                        End If
-                    Loop While kwPos > 0 And searchStart < Len(cellText)
-                Next j
-            End If
-            
-            ' Highlight OR keywords in BLUE
-            If hasOrKeywords Then
-                For j = 0 To orKeywords.Count - 1
-                    searchStart = 1
-                    
-                    Do
-                        kwPos = InStr(searchStart, cellText, orKeywords(j), vbTextCompare)
-                        If kwPos > 0 Then
-                            ws.Range("A" & rowNum).Characters(kwPos, Len(orKeywords(j))).Font.Color = RGB(0, 0, 255)
-                            ws.Range("A" & rowNum).Characters(kwPos, Len(orKeywords(j))).Font.Bold = True
-                            searchStart = kwPos + Len(orKeywords(j))
-                        End If
-                    Loop While kwPos > 0 And searchStart < Len(cellText)
-                Next j
-            End If
-            
-            rowNum = rowNum + 1
-            
-            If rowNum > 10000 Then
-                ws.Range("A" & rowNum).Value = "... (More results truncated for performance)"
-                Exit For
-            End If
-        Next i
+                    # Handle processed file (move/delete/leave)
+                    self._move_processed_file(file_path)
+                
+                # Wait before next check
+                time.sleep(POLL_INTERVAL)
         
-        ' Add legend
-        ws.Range("A" & (rowNum + 2)).Value = "Legend:"
-        ws.Range("A" & (rowNum + 2)).Font.Bold = True
-        
-        If hasAndKeywords Then
-            ws.Range("A" & (rowNum + 3)).Value = "AND Keywords (all must be present)"
-            ws.Range("A" & (rowNum + 3)).Font.Color = RGB(0, 128, 0)
-            ws.Range("A" & (rowNum + 3)).Font.Bold = True
-        End If
-        
-        If hasOrKeywords Then
-            Dim legendRow As Integer
-            legendRow = IIf(hasAndKeywords, rowNum + 4, rowNum + 3)
-            ws.Range("A" & legendRow).Value = "OR Keywords (at least one must be present)"
-            ws.Range("A" & legendRow).Font.Color = RGB(0, 0, 255)
-            ws.Range("A" & legendRow).Font.Bold = True
-        End If
-        
-        ' Format columns
-        ws.Columns("A").ColumnWidth = 150
-        ws.Columns("A").WrapText = True
-        ws.Columns("B").ColumnWidth = 50
-        
-        ' Add back button
-        ws.Range("A" & (rowNum + 6)).Value = "← Back to Search Results"
-        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (rowNum + 6)), _
-                          Address:="", _
-                          SubAddress:="'Search'!A1", _
-                          TextToDisplay:="← Back to Search Results"
-        ws.Range("A" & (rowNum + 6)).Font.Bold = True
-        ws.Range("A" & (rowNum + 6)).Font.Color = RGB(0, 0, 255)
-        
-        CreateFilteredContentSheet = sheetName
-    End If
-    
-    On Error GoTo 0
-    Set fso = Nothing
-    Set textStream = Nothing
-    Set filteredLines = Nothing
-    Set andKeywords = Nothing
-    Set orKeywords = Nothing
-End Function
+        except KeyboardInterrupt:
+            self.logger.info("\nMonitoring stopped by user")
+        except Exception as e:
+            self.logger.error(f"Unexpected error in main loop: {e}")
 
-Sub ClearFilteredContentSheets()
-    Dim ws As Worksheet
-    Dim sheetsDeleted As Integer
-    
-    sheetsDeleted = 0
-    Application.DisplayAlerts = False
-    
-    For Each ws In ThisWorkbook.Sheets
-        If Left(ws.Name, 7) = "Filter_" Then
-            ws.Delete
-            sheetsDeleted = sheetsDeleted + 1
-        End If
-    Next ws
-    
-    Application.DisplayAlerts = True
-    
-    MsgBox "Cleared " & sheetsDeleted & " filtered content sheet(s)", vbInformation
-End Sub
 
-' ========== DASHBOARD SETUP ==========
+def main():
+    """Entry point for the script."""
+    print("\n" + "="*80)
+    print("DATA EXTRACTOR - Automated File Processing")
+    print("="*80)
+    print(f"\nConfiguration:")
+    print(f"  Input Folder:  {INPUT_FOLDER}")
+    print(f"  Output Folder: {OUTPUT_FOLDER}")
+    print(f"  Sheets to Process: {len(SHEETS_CONFIG)}")
+    for i, config in enumerate(SHEETS_CONFIG, 1):
+        print(f"\n  Sheet {i}: {config['sheet_name']}")
+        print(f"    - Input has header: {config.get('input_has_header', False)}")
+        print(f"    - Output has header: {config.get('output_has_header', False)}")
+        print(f"    - Columns: {config['columns']}")
+        print(f"    - Rows: {config['row_start']} to {config['row_end']}")
+    print(f"\n  Poll Interval: {POLL_INTERVAL} seconds")
+    print(f"  Post-Process: {POST_PROCESS_ACTION}")
+    print("\n" + "="*80 + "\n")
+    
+    # Create and run extractor
+    extractor = DataExtractor()
+    extractor.run()
 
-Sub SetupSearchSheet()
-    Dim ws As Worksheet
-    Dim i As Integer
-    Dim btn As Button
-    
-    On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("Search")
-    On Error GoTo 0
-    
-    If ws Is Nothing Then
-        Set ws = ThisWorkbook.Sheets.Add
-        ws.Name = "Search"
-    End If
-    
-    Application.ScreenUpdating = False
-    
-    ' Clear existing content
-    ws.Cells.Clear
-    ws.Buttons.Delete  ' Remove any existing buttons
-    
-    ' ========== SECTION 1: HEADER ==========
-    ws.Range("A1:D1").Merge
-    ws.Range("A1").Value = "📁 MULTI-LEVEL FILE SEARCH TOOL"
-    ws.Range("A1").Font.Bold = True
-    ws.Range("A1").Font.Size = 16
-    ws.Range("A1").Font.Color = RGB(255, 255, 255)
-    ws.Range("A1").Interior.Color = RGB(68, 114, 196)
-    ws.Range("A1").HorizontalAlignment = xlCenter
-    ws.Range("A1").VerticalAlignment = xlCenter
-    ws.Range("A1").RowHeight = 35
-    
-    ' ========== SECTION 2: FOLDER PATH ==========
-    Dim folderSection As Integer
-    folderSection = 3
-    
-    ws.Range("A" & folderSection & ":D" & folderSection).Merge
-    ws.Range("A" & folderSection).Value = "📂 FOLDER LOCATION"
-    ws.Range("A" & folderSection).Font.Bold = True
-    ws.Range("A" & folderSection).Font.Size = 11
-    ws.Range("A" & folderSection).Font.Color = RGB(255, 255, 255)
-    ws.Range("A" & folderSection).Interior.Color = RGB(91, 155, 213)
-    ws.Range("A" & folderSection).HorizontalAlignment = xlLeft
-    ws.Range("A" & folderSection).VerticalAlignment = xlCenter
-    ws.Range("A" & folderSection).RowHeight = 25
-    
-    ws.Range("A" & (folderSection + 1)).Value = "Folder Path:"
-    ws.Range("A" & (folderSection + 1)).Font.Bold = True
-    ws.Range("A" & (folderSection + 1)).Font.Size = 10
-    ws.Range("B" & (folderSection + 1) & ":D" & (folderSection + 1)).Merge
-    ws.Range("B" & (folderSection + 1)).Value = "C:\Your\Folder\Path"
-    ws.Range("B" & (folderSection + 1)).Font.Italic = True
-    ws.Range("B" & (folderSection + 1)).Font.Color = RGB(128, 128, 128)
-    ws.Range("B" & (folderSection + 1)).Interior.Color = RGB(242, 242, 242)
-    ws.Range("B" & (folderSection + 1)).Borders.LineStyle = xlContinuous
-    ws.Range("B" & (folderSection + 1)).Borders.Color = RGB(191, 191, 191)
-    
-    ws.Range("A" & folderSection & ":D" & (folderSection + 1)).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(68, 114, 196)
-    
-    ' ========== SECTION 3: PARAMETERS ==========
-    Dim paramSection As Integer
-    paramSection = folderSection + 3
-    
-    ws.Range("A" & paramSection & ":C" & paramSection).Merge
-    ws.Range("A" & paramSection).Value = "🔍 SEARCH PARAMETERS (Keywords)"
-    ws.Range("A" & paramSection).Font.Bold = True
-    ws.Range("A" & paramSection).Font.Size = 11
-    ws.Range("A" & paramSection).Font.Color = RGB(255, 255, 255)
-    ws.Range("A" & paramSection).Interior.Color = RGB(112, 173, 71)
-    ws.Range("A" & paramSection).HorizontalAlignment = xlLeft
-    ws.Range("A" & paramSection).VerticalAlignment = xlCenter
-    ws.Range("A" & paramSection).RowHeight = 25
-    
-    ' Column headers
-    ws.Range("A" & (paramSection + 1)).Value = "Keyword"
-    ws.Range("B" & (paramSection + 1)).Value = "Search Term"
-    ws.Range("C" & (paramSection + 1)).Value = "Logic (AND/OR)"
-    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Font.Bold = True
-    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Interior.Color = RGB(169, 208, 142)
-    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).HorizontalAlignment = xlCenter
-    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Borders.LineStyle = xlContinuous
-    
-    ' Keyword input fields
-    For i = 1 To MAX_KEYWORDS
-        Dim currentRow As Integer
-        currentRow = paramSection + 1 + i
-        
-        ws.Range("A" & currentRow).Value = "Keyword " & i
-        ws.Range("A" & currentRow).Font.Bold = True
-        ws.Range("A" & currentRow).HorizontalAlignment = xlCenter
-        ws.Range("A" & currentRow).Interior.Color = RGB(226, 239, 218)
-        
-        ws.Range("B" & currentRow).Value = ""
-        ws.Range("B" & currentRow).Interior.Color = RGB(255, 255, 255)
-        ws.Range("B" & currentRow).Borders.LineStyle = xlContinuous
-        ws.Range("B" & currentRow).Borders.Color = RGB(191, 191, 191)
-        
-        ws.Range("C" & currentRow).Value = "AND"
-        ws.Range("C" & currentRow).Font.Color = RGB(0, 128, 0)
-        ws.Range("C" & currentRow).Font.Bold = True
-        ws.Range("C" & currentRow).HorizontalAlignment = xlCenter
-        ws.Range("C" & currentRow).Interior.Color = RGB(226, 239, 218)
-        ws.Range("C" & currentRow).Borders.LineStyle = xlContinuous
-        ws.Range("C" & currentRow).Borders.Color = RGB(191, 191, 191)
-    Next i
-    
-    ws.Range("A" & paramSection & ":C" & (paramSection + 1 + MAX_KEYWORDS)).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(112, 173, 71)
-    
-    ' ========== SECTION 4: MACRO CONTROLS ==========
-    Dim controlSection As Integer
-    controlSection = paramSection + MAX_KEYWORDS + 3
-    
-    ws.Range("A" & controlSection & ":D" & controlSection).Merge
-    ws.Range("A" & controlSection).Value = "⚙️ MACRO CONTROLS"
-    ws.Range("A" & controlSection).Font.Bold = True
-    ws.Range("A" & controlSection).Font.Size = 11
-    ws.Range("A" & controlSection).Font.Color = RGB(255, 255, 255)
-    ws.Range("A" & controlSection).Interior.Color = RGB(112, 48, 160)
-    ws.Range("A" & controlSection).HorizontalAlignment = xlLeft
-    ws.Range("A" & controlSection).VerticalAlignment = xlCenter
-    ws.Range("A" & controlSection).RowHeight = 25
-    
-    ' Create buttons
-    Dim btnTop As Long
-    Dim btnLeft As Long
-    Dim btnWidth As Long
-    Dim btnHeight As Long
-    Dim btnSpacing As Long
-    
-    btnTop = ws.Range("A" & (controlSection + 1)).Top
-    btnLeft = ws.Range("A" & (controlSection + 1)).Left
-    btnWidth = 140
-    btnHeight = 30
-    btnSpacing = 10
-    
-    ' Button 1: Search Name Only
-    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
-    btn.OnAction = "RunSearchByNameOnly"
-    btn.Caption = "Search: Name Only"
-    btn.Font.Bold = True
-    btn.Font.Size = 9
-    
-    ' Button 2: Search Name + Content
-    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
-    btn.OnAction = "RunSearch"
-    btn.Caption = "Search: Name + Content"
-    btn.Font.Bold = True
-    btn.Font.Size = 9
-    
-    ' Button 3: Search with Preview
-    btnTop = btnTop + btnHeight + btnSpacing
-    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
-    btn.OnAction = "RunSearchWithContentPreview"
-    btn.Caption = "Search: With Preview"
-    btn.Font.Bold = True
-    btn.Font.Size = 9
-    
-    ' Button 4: Clear Filtered Sheets
-    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
-    btn.OnAction = "ClearFilteredContentSheets"
-    btn.Caption = "Clear Filtered Sheets"
-    btn.Font.Bold = True
-    btn.Font.Size = 9
-    
-    ' Button 5: Reset Dashboard
-    btnTop = btnTop + btnHeight + btnSpacing
-    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
-    btn.OnAction = "SetupSearchSheet"
-    btn.Caption = "Reset Dashboard"
-    btn.Font.Bold = True
-    btn.Font.Size = 9
-    
-    ' Background for button area
-    Dim btnEndRow As Integer
-    btnEndRow = controlSection + 7
-    ws.Range("A" & (controlSection + 1) & ":D" & btnEndRow).Interior.Color = RGB(221, 217, 245)
-    
-    ws.Range("A" & controlSection & ":D" & btnEndRow).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(112, 48, 160)
-    
-    ' ========== SECTION 5: INSTRUCTIONS ==========
-    Dim instructionSection As Integer
-    instructionSection = btnEndRow + 2
-    
-    ws.Range("A" & instructionSection & ":D" & instructionSection).Merge
-    ws.Range("A" & instructionSection).Value = "📋 HOW TO USE"
-    ws.Range("A" & instructionSection).Font.Bold = True
-    ws.Range("A" & instructionSection).Font.Size = 11
-    ws.Range("A" & instructionSection).Font.Color = RGB(255, 255, 255)
-    ws.Range("A" & instructionSection).Interior.Color = RGB(237, 125, 49)
-    ws.Range("A" & instructionSection).HorizontalAlignment = xlLeft
-    ws.Range("A" & instructionSection).VerticalAlignment = xlCenter
-    ws.Range("A" & instructionSection).RowHeight = 25
-    
-    Dim instrRow As Integer
-    instrRow = instructionSection + 1
-    
-    ws.Range("A" & instrRow & ":D" & instrRow).Merge
-    ws.Range("A" & instrRow).Value = "1. Enter folder path in the Folder Location section"
-    ws.Range("A" & instrRow).WrapText = True
-    instrRow = instrRow + 1
-    
-    ws.Range("A" & instrRow & ":D" & instrRow).Merge
-    ws.Range("A" & instrRow).Value = "2. Enter 1-" & MAX_KEYWORDS & " keywords. Set AND/OR logic (for row filtering only)"
-    ws.Range("A" & instrRow).WrapText = True
-    instrRow = instrRow + 1
-    
-    ws.Range("A" & instrRow & ":D" & instrRow).Merge
-    ws.Range("A" & instrRow).Value = "3. Click a button in Macro Controls to run search"
-    ws.Range("A" & instrRow).WrapText = True
-    instrRow = instrRow + 1
-    
-    ws.Range("A" & instrRow & ":D" & instrRow).Merge
-    ws.Range("A" & instrRow).Value = "4. Results appear " & IIf(UCase(RESULT_DISPLAY_MODE) = "SIDE_BY_SIDE", "to the right →", "in '" & RESULT_SHEET_NAME & "' sheet")
-    ws.Range("A" & instrRow).WrapText = True
-    ws.Range("A" & instrRow).Font.Italic = True
-    ws.Range("A" & instrRow).Font.Color = RGB(192, 0, 0)
-    instrRow = instrRow + 1
-    
-    Dim instrEndRow As Integer
-    instrEndRow = instrRow - 1
-    
-    ws.Range("A" & (instructionSection + 1) & ":D" & instrEndRow).Interior.Color = RGB(252, 228, 214)
-    ws.Range("A" & instructionSection & ":D" & instrEndRow).BorderAround _
-        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(237, 125, 49)
-    
-    ' Format columns
-    ws.Columns("A").ColumnWidth = 18
-    ws.Columns("B").ColumnWidth = 32
-    ws.Columns("C").ColumnWidth = 15
-    ws.Columns("D").ColumnWidth = 5
-    
-    ' Select first input
-    ws.Range("B" & (folderSection + 1)).Select
-    
-    Application.ScreenUpdating = True
-    
-    MsgBox "✅ Dashboard Setup Complete!" & vbCrLf & vbCrLf & _
-           "Result Display Mode: " & RESULT_DISPLAY_MODE & vbCrLf & _
-           "Maximum Keywords: " & MAX_KEYWORDS & vbCrLf & vbCrLf & _
-           "Use the buttons in the Macro Controls section to run searches!" & vbCrLf & vbCrLf & _
-           "Supported Excel formats: xls, xlsx, xlsm, xlsb, xltx, xltm", vbInformation, "Dashboard Ready"
-End Sub
+
+if __name__ == "__main__":
+    main()
