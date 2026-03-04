@@ -1,3353 +1,1756 @@
-# Data Extraction Tool - Comprehensive Documentation
-
-**Version:** 1.0  
-**Last Updated:** January 2026  
-**Document Type:** Technical & Operational Documentation
-
----
-
-## Table of Contents
-
-1. [Executive Summary](#1-executive-summary)
-2. [System Overview](#2-system-overview)
-3. [Architecture & Design](#3-architecture--design)
-4. [Installation Guide](#4-installation-guide)
-5. [Configuration Guide](#5-configuration-guide)
-6. [Operation Manual](#6-operation-manual)
-7. [Technical Specifications](#7-technical-specifications)
-8. [Data Processing Logic](#8-data-processing-logic)
-9. [Error Handling & Recovery](#9-error-handling--recovery)
-10. [Troubleshooting Guide](#10-troubleshooting-guide)
-11. [Performance Tuning](#11-performance-tuning)
-12. [Security Considerations](#12-security-considerations)
-13. [Maintenance Procedures](#13-maintenance-procedures)
-14. [Edge Cases & Known Limitations](#14-edge-cases--known-limitations)
-15. [Best Practices](#15-best-practices)
-16. [Appendices](#16-appendices)
-
----
-
-## 1. Executive Summary
-
-### 1.1 Purpose
-The Data Extraction Tool is an automated Python-based solution designed to monitor network folders, detect incoming Excel/CSV files, extract specified data ranges, and generate output files with configurable formatting. The tool operates autonomously with comprehensive error handling and logging capabilities.
-
-### 1.2 Key Features
-- **Zero-Touch Operation**: Fully automated file detection and processing
-- **Configuration-Driven**: No code changes required for different data requirements
-- **Data Integrity**: Preserves exact numeric precision without rounding or scientific notation
-- **Multi-Sheet Support**: Process multiple sheets from a single input file
-- **Flexible Extraction**: Configurable column and row selection
-- **Header Control**: Independent control of input and output header handling
-- **Enterprise-Ready**: Comprehensive logging, error handling, and recovery mechanisms
-
-### 1.3 Use Cases
-- Automated ETL (Extract, Transform, Load) operations
-- Scheduled data extraction from shared network drives
-- Data preprocessing for downstream analytics systems
-- Compliance reporting with audit trails
-- Multi-tenant data processing with isolated configurations
-
-### 1.4 System Requirements
-- **Python Version**: 3.7 or higher
-- **Operating System**: Windows, Linux, or macOS
-- **Network Access**: Read/write permissions on network shares
-- **Dependencies**: pandas, openpyxl, xlrd
-- **Disk Space**: Minimum 100MB for application and logs
-- **Memory**: 512MB minimum (scales with file size)
-
----
-
-## 2. System Overview
-
-### 2.1 High-Level Architecture
-
-```
-┌─────────────────────┐
-│   Input Folder      │
-│  (Network Share)    │
-└──────────┬──────────┘
-           │
-           │ File Detection (Polling)
-           ▼
-┌─────────────────────┐
-│  Data Extractor     │
-│  - File Reader      │
-│  - Data Processor   │
-│  - Output Generator │
-└──────────┬──────────┘
-           │
-           ├──────────────────┬──────────────────┐
-           ▼                  ▼                  ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│ Output Folder   │  │  Archive Folder │  │   Log Files     │
-│ (Extracted Data)│  │ (Processed Files)│  │  (Audit Trail)  │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-### 2.2 Component Description
-
-#### 2.2.1 File Detection Module
-- Monitors input folder at configurable intervals
-- Filters files by extension patterns
-- Handles concurrent file access scenarios
-- Implements file lock detection
-
-#### 2.2.2 Data Processing Engine
-- Reads Excel (.xlsx, .xls, .xlsm) and CSV files
-- Preserves exact data representation (strings)
-- Extracts specified columns and row ranges
-- Maintains data type integrity
-
-#### 2.2.3 Output Generation Module
-- Creates output files in CSV or Excel format
-- Controls header presence independently
-- Implements timestamp-based naming
-- Ensures atomic file operations
-
-#### 2.2.4 Logging & Audit System
-- Records all operations with timestamps
-- Captures errors with full stack traces
-- Provides operational metrics
-- Supports compliance requirements
-
-### 2.3 Data Flow
-
-```
-Input File Arrives
-    ↓
-File Detected by Polling Mechanism
-    ↓
-File Validated (extension, accessibility)
-    ↓
-File Read with Header Configuration
-    ↓
-Data Extracted (columns + rows)
-    ↓
-Output File Generated
-    ↓
-Input File Archived/Deleted/Retained
-    ↓
-Log Entry Created
-    ↓
-Return to Monitoring State
-```
-
----
-
-## 3. Architecture & Design
-
-### 3.1 Design Principles
-
-#### 3.1.1 Single Responsibility
-Each method handles one specific task:
-- `_read_file()`: File I/O operations only
-- `_extract_data_from_sheet()`: Data slicing only
-- `_save_output_file()`: File writing only
-
-#### 3.1.2 Configuration Over Code
-All operational parameters externalized:
-- Folder paths
-- Sheet specifications
-- Column/row ranges
-- Header handling
-- Post-processing actions
-
-#### 3.1.3 Fail-Safe Operation
-- Graceful degradation on errors
-- Partial success handling (process available sheets)
-- No data corruption on failure
-- Comprehensive error logging
-
-#### 3.1.4 Data Integrity First
-- Read-only mode for input files
-- String-based data handling (no type coercion)
-- Atomic file operations
-- Verification logging
-
-### 3.2 Class Structure
-
-```python
-DataExtractor
-├── __init__()                          # Initialize logging
-├── _setup_logging()                    # Configure log handlers
-├── _validate_folders()                 # Pre-flight checks
-├── _detect_new_file()                  # File system monitoring
-├── _read_file(path, has_header)        # File ingestion
-├── _convert_column_letter_to_index()   # Column mapping
-├── _extract_data_from_sheet(df, config)# Data slicing
-├── _generate_output_filename()         # Naming logic
-├── _save_output_file(df, path, fmt)    # File writing
-├── _process_file(path)                 # Orchestration
-├── _move_processed_file(path)          # Post-processing
-└── run()                               # Main loop
-```
-
-### 3.3 State Machine
-
-```
-┌─────────────┐
-│  STARTUP    │
-│  - Validate │
-│  - Init Log │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  MONITORING │◄──────────────────┐
-│  - Poll     │                   │
-│  - Detect   │                   │
-└──────┬──────┘                   │
-       │ File Found               │
-       ▼                          │
-┌─────────────┐                   │
-│ PROCESSING  │                   │
-│  - Read     │                   │
-│  - Extract  │                   │
-│  - Write    │                   │
-└──────┬──────┘                   │
-       │                          │
-       ▼                          │
-┌─────────────┐                   │
-│POST-PROCESS │                   │
-│  - Archive  │                   │
-│  - Log      │                   │
-└──────┬──────┘                   │
-       │                          │
-       └──────────────────────────┘
-```
-
----
-
-## 4. Installation Guide
-
-### 4.1 Prerequisites Verification
-
-#### 4.1.1 Check Python Installation
-```bash
-python --version
-# Expected: Python 3.7.x or higher
-```
-
-If Python is not installed:
-- **Windows**: Download from python.org, ensure "Add to PATH" is checked
-- **Linux**: `sudo apt-get install python3 python3-pip`
-- **macOS**: `brew install python3`
-
-#### 4.1.2 Verify pip Installation
-```bash
-pip --version
-# Expected: pip 20.x or higher
-```
-
-#### 4.1.3 Check Network Access
-```bash
-# Windows
-dir \\server\share\FolderX
-
-# Linux/macOS
-ls //server/share/FolderX
-```
-
-### 4.2 Dependency Installation
-
-#### 4.2.1 Using requirements.txt
-Create `requirements.txt`:
-```
-pandas>=1.3.0
-openpyxl>=3.0.0
-xlrd>=2.0.0
-```
-
-Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-#### 4.2.2 Manual Installation
-```bash
-pip install pandas
-pip install openpyxl
-pip install xlrd
-```
-
-#### 4.2.3 Verify Installation
-```python
-python -c "import pandas; print(pandas.__version__)"
-python -c "import openpyxl; print(openpyxl.__version__)"
-python -c "import xlrd; print(xlrd.__version__)"
-```
-
-### 4.3 Script Deployment
-
-#### 4.3.1 Standard Deployment
-```bash
-# Create application directory
-mkdir /opt/data-extractor
-cd /opt/data-extractor
-
-# Copy script
-cp data_extractor_final.py /opt/data-extractor/
-
-# Set permissions
-chmod +x data_extractor_final.py
-```
-
-#### 4.3.2 Windows Deployment
-```cmd
-# Create application directory
-mkdir C:\DataExtractor
-cd C:\DataExtractor
-
-# Copy script
-copy data_extractor_final.py C:\DataExtractor\
-
-# Create shortcuts if needed
-```
-
-### 4.4 Folder Structure Setup
-
-```
-/opt/data-extractor/
-├── data_extractor_final.py    # Main script
-├── logs/                        # Log files (auto-created)
-├── config_backup/               # Configuration backups (optional)
-└── docs/                        # Documentation (optional)
-```
-
-### 4.5 Initial Configuration
-
-1. Open `data_extractor_final.py` in text editor
-2. Locate configuration section (lines 170-223)
-3. Update folder paths:
-```python
-INPUT_FOLDER = "//server/share/FolderX"
-OUTPUT_FOLDER = "//server/share/FolderY"
-ARCHIVE_FOLDER = "//server/share/archive"
-```
-
-### 4.6 Test Installation
-
-#### 4.6.1 Syntax Check
-```bash
-python -m py_compile data_extractor_final.py
-# No output = success
-```
-
-#### 4.6.2 Dry Run Test
-```bash
-# Create test folders
-mkdir -p test_input test_output test_archive
-
-# Update config to use test folders temporarily
-# Run script
-python data_extractor_final.py
-# Ctrl+C to stop after verification
-```
-
-#### 4.6.3 Validation Checklist
-- [ ] Python version correct
-- [ ] All dependencies installed
-- [ ] Script syntax valid
-- [ ] Folders accessible
-- [ ] Permissions sufficient
-- [ ] Logs being created
-
----
-
-## 5. Configuration Guide
-
-### 5.1 Configuration Overview
-
-All configuration is contained within the script file between lines 170-223. This section controls all operational parameters without requiring code changes.
-
-### 5.2 Folder Configuration
-
-#### 5.2.1 INPUT_FOLDER
-**Purpose**: Location where incoming files are detected  
-**Format**: Network UNC path or local path  
-**Examples**:
-```python
-# Windows network share
-INPUT_FOLDER = "\\\\server\\share\\FolderX"
-INPUT_FOLDER = "//server/share/FolderX"
-
-# Windows mapped drive
-INPUT_FOLDER = "Z:\\incoming"
-
-# Linux mounted share
-INPUT_FOLDER = "/mnt/network/input"
-
-# Local folder (testing)
-INPUT_FOLDER = "./input"
-INPUT_FOLDER = "C:/data/input"
-```
-
-**Validation**:
-- Must exist before script starts
-- Requires READ permission
-- Must be accessible from execution environment
-
-#### 5.2.2 OUTPUT_FOLDER
-**Purpose**: Destination for generated output files  
-**Format**: Network UNC path or local path  
-**Examples**:
-```python
-OUTPUT_FOLDER = "\\\\server\\share\\FolderY"
-OUTPUT_FOLDER = "/mnt/network/output"
-OUTPUT_FOLDER = "./output"
-```
-
-**Validation**:
-- Created automatically if missing
-- Requires WRITE permission
-- Must have sufficient disk space
-
-#### 5.2.3 ARCHIVE_FOLDER
-**Purpose**: Storage location for processed input files  
-**Format**: Network UNC path or local path  
-**Usage**: Only relevant if `POST_PROCESS_ACTION = 'move'`
-```python
-ARCHIVE_FOLDER = "\\\\server\\share\\archive"
-```
-
-### 5.3 File Detection Settings
-
-#### 5.3.1 FILE_PATTERNS
-**Purpose**: Define which file types to process  
-**Format**: List of file extensions  
-**Default**: `['.csv', '.xlsx', '.xls']`
-
-```python
-# Process only Excel files
-FILE_PATTERNS = ['.xlsx', '.xls']
-
-# Process only CSV files
-FILE_PATTERNS = ['.csv']
-
-# Process Excel, CSV, and text files
-FILE_PATTERNS = ['.csv', '.xlsx', '.xls', '.txt']
-```
-
-**Behavior**:
-- Case-insensitive matching
-- First matching file is processed
-- Other files ignored until current file completes
-
-#### 5.3.2 POLL_INTERVAL
-**Purpose**: Seconds between folder checks  
-**Format**: Integer (seconds)  
-**Default**: `5`
-
-```python
-# Check every 2 seconds (high frequency)
-POLL_INTERVAL = 2
-
-# Check every 30 seconds (low frequency)
-POLL_INTERVAL = 30
-
-# Check every minute
-POLL_INTERVAL = 60
-```
-
-**Considerations**:
-- Lower values = faster detection, higher CPU usage
-- Higher values = slower detection, lower CPU usage
-- Network latency affects optimal value
-- Recommended: 5-10 seconds for network drives
-
-#### 5.3.3 POST_PROCESS_ACTION
-**Purpose**: What to do with input file after processing  
-**Format**: String ('none', 'move', 'delete')  
-**Default**: `'move'`
-
-```python
-# Leave file in input folder
-POST_PROCESS_ACTION = 'none'
-
-# Move to archive folder (recommended)
-POST_PROCESS_ACTION = 'move'
-
-# Delete file permanently (use with caution!)
-POST_PROCESS_ACTION = 'delete'
-```
-
-**Security Note**: Use 'move' in production to maintain audit trail
-
-### 5.4 Sheet Configuration
-
-#### 5.4.1 SHEETS_CONFIG Structure
-**Format**: List of dictionaries, one per sheet to process
-
-```python
-SHEETS_CONFIG = [
-    {
-        'sheet_name': 'SheetName',
-        'columns': ['A', 'B', 'C'],
-        'row_start': 1,
-        'row_end': 100,
-        'input_has_header': False,
-        'output_has_header': False,
-        'output_file': 'output.csv',
-        'output_format': 'csv'
-    },
-    # Add more sheets as needed
-]
-```
-
-#### 5.4.2 sheet_name
-**Purpose**: Exact name of sheet to process  
-**Format**: String (case-sensitive)  
-**Examples**:
-```python
-'sheet_name': 'Sheet1'        # Default Excel sheet
-'sheet_name': 'A'             # Single-letter sheet name
-'sheet_name': 'Sales Data'    # Sheet with spaces
-'sheet_name': 'Q4_2024'       # Sheet with special characters
-```
-
-**Important**: Must match exactly (including case and spaces)
-
-#### 5.4.3 columns
-**Purpose**: Which columns to extract  
-**Format**: List of column identifiers  
-**Methods**:
-
-**Method 1: Excel Letter Notation**
-```python
-'columns': ['A', 'B', 'C']              # First 3 columns
-'columns': ['P', 'Q', 'R']              # Columns 16-18
-'columns': ['A', 'D', 'G', 'Z']         # Non-contiguous
-'columns': ['AA', 'AB', 'AC']           # Beyond column Z
-```
-
-**Method 2: Zero-Based Index**
-```python
-'columns': [0, 1, 2]                    # First 3 columns
-'columns': [15, 16, 17]                 # Columns P, Q, R
-```
-
-**Method 3: Mixed**
-```python
-'columns': ['A', 5, 'G', 20]            # Mix letters and numbers
-```
-
-**Column Reference Chart**:
-```
-A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9
-K=10, L=11, M=12, N=13, O=14, P=15, Q=16, R=17, S=18, T=19
-U=20, V=21, W=22, X=23, Y=24, Z=25
-AA=26, AB=27, AC=28...
-```
-
-#### 5.4.4 row_start & row_end
-**Purpose**: Define row range to extract  
-**Format**: Integer (1-based indexing)  
-**Behavior**: Depends on `input_has_header` setting
-
-**When input_has_header = False** (No header in input):
-```python
-'row_start': 1,    # First row of file
-'row_end': 100,    # 100th row of file
-# Extracts rows 1-100 inclusive
-```
-
-**When input_has_header = True** (Header exists in input):
-```python
-'row_start': 1,    # First DATA row (after header)
-'row_end': 100,    # 100th DATA row (after header)
-# If file has header in row 1, extracts rows 2-101 of actual file
-```
-
-**Examples**:
-```python
-# Extract first 50 data rows
-'row_start': 1,
-'row_end': 50,
-
-# Extract rows 10-100
-'row_start': 10,
-'row_end': 100,
-
-# Extract all rows (use large number)
-'row_start': 1,
-'row_end': 999999,
-
-# Extract single row
-'row_start': 5,
-'row_end': 5,
-```
-
-#### 5.4.5 input_has_header
-**Purpose**: Does the input file have a header row?  
-**Format**: Boolean (True/False)  
-**Default**: False
-
-```python
-# Input file has NO header row (all rows are data)
-'input_has_header': False,
-
-# Input file HAS a header row in first line
-'input_has_header': True,
-```
-
-**Behavior**:
-- `True`: First row read as column names, excluded from data
-- `False`: First row is data, all rows processed
-
-**Decision Tree**:
-```
-Open input file in Excel
-├─ Row 1 contains column names? → input_has_header: True
-└─ Row 1 contains data? → input_has_header: False
-```
-
-#### 5.4.6 output_has_header
-**Purpose**: Should output file include a header row?  
-**Format**: Boolean (True/False)  
-**Default**: False
-
-```python
-# Output file will NOT have header row (pure data)
-'output_has_header': False,
-
-# Output file WILL have header row
-'output_has_header': True,
-```
-
-**Common Combinations**:
-```python
-# Input has no header, output should have no header
-'input_has_header': False,
-'output_has_header': False,
-
-# Input has header, but don't want it in output
-'input_has_header': True,
-'output_has_header': False,
-
-# Input has header, keep header in output
-'input_has_header': True,
-'output_has_header': True,
-
-# Input has no header, but generate generic header in output
-'input_has_header': False,
-'output_has_header': True,  # Will create generic headers (0, 1, 2...)
-```
-
-#### 5.4.7 output_file
-**Purpose**: Name of generated output file  
-**Format**: String with optional placeholders  
-**Placeholders**:
-- `{timestamp}`: YYYYMMDD_HHMMSS format
-- `{sheet_name}`: Name of processed sheet
-- `{original_filename}`: Input filename without extension
-
-```python
-# Simple filename
-'output_file': 'extracted_data.csv',
-
-# With timestamp
-'output_file': 'report_{timestamp}.csv',
-
-# With sheet name
-'output_file': '{sheet_name}_output.csv',
-
-# With multiple placeholders
-'output_file': '{original_filename}_{sheet_name}_{timestamp}.csv',
-```
-
-**Examples**:
-```python
-# Input: sales_2024.xlsx, Sheet: A, Timestamp: 20240129_143022
-'output_file': 'data.csv'
-# Result: data_20240129_143022.csv (auto timestamp added)
-
-'output_file': 'report_{timestamp}.csv'
-# Result: report_20240129_143022.csv
-
-'output_file': '{sheet_name}_extract.csv'
-# Result: A_extract_20240129_143022.csv
-```
-
-#### 5.4.8 output_format
-**Purpose**: Format of output file  
-**Format**: String ('csv' or 'xlsx')  
-**Default**: 'csv'
-
-```python
-# CSV format (recommended for data files)
-'output_format': 'csv',
-
-# Excel format
-'output_format': 'xlsx',
-```
-
-**Considerations**:
-- CSV: Faster, smaller files, universal compatibility
-- XLSX: Better for sharing with Excel users, preserves formatting
-
-### 5.5 Logging Configuration
-
-#### 5.5.1 LOG_DIRECTORY
-**Purpose**: Where to store log files  
-**Format**: Path (relative or absolute)  
-**Default**: `'logs'`
-
-```python
-LOG_DIRECTORY = 'logs'                      # Relative path
-LOG_DIRECTORY = '/var/log/data-extractor'   # Absolute (Linux)
-LOG_DIRECTORY = 'C:/logs/extractor'         # Absolute (Windows)
-LOG_DIRECTORY = '\\\\server\\logs'          # Network share
-```
-
-#### 5.5.2 LOG_LEVEL
-**Purpose**: Level of detail in logs  
-**Format**: String (DEBUG, INFO, WARNING, ERROR, CRITICAL)  
-**Default**: 'INFO'
-
-```python
-# Maximum detail (includes all operations)
-LOG_LEVEL = 'DEBUG'
-
-# Standard operations (recommended)
-LOG_LEVEL = 'INFO'
-
-# Only warnings and errors
-LOG_LEVEL = 'WARNING'
-
-# Only errors
-LOG_LEVEL = 'ERROR'
-
-# Only critical failures
-LOG_LEVEL = 'CRITICAL'
-```
-
-**Level Descriptions**:
-- **DEBUG**: Every operation, variable values, detailed flow
-- **INFO**: File detected, processing started, file saved
-- **WARNING**: Recoverable issues, validation warnings
-- **ERROR**: Failed operations, exceptions
-- **CRITICAL**: System-level failures
-
-### 5.6 Configuration Examples
-
-#### 5.6.1 Example 1: Simple CSV Extraction
-```python
-INPUT_FOLDER = "./input"
-OUTPUT_FOLDER = "./output"
-FILE_PATTERNS = ['.csv']
-POLL_INTERVAL = 5
-POST_PROCESS_ACTION = 'move'
-ARCHIVE_FOLDER = "./archive"
-
-SHEETS_CONFIG = [
-    {
-        'sheet_name': 'Sheet1',
-        'columns': ['A', 'B', 'C'],
-        'row_start': 1,
-        'row_end': 100,
-        'input_has_header': False,
-        'output_has_header': False,
-        'output_file': 'extracted_data.csv',
-        'output_format': 'csv'
-    },
-]
-
-LOG_DIRECTORY = 'logs'
-LOG_LEVEL = 'INFO'
-```
-
-#### 5.6.2 Example 2: Multi-Sheet Excel Processing
-```python
-INPUT_FOLDER = "\\\\server\\share\\input"
-OUTPUT_FOLDER = "\\\\server\\share\\output"
-FILE_PATTERNS = ['.xlsx']
-POLL_INTERVAL = 10
-POST_PROCESS_ACTION = 'move'
-ARCHIVE_FOLDER = "\\\\server\\share\\archive"
-
-SHEETS_CONFIG = [
-    {
-        'sheet_name': 'Sales',
-        'columns': ['A', 'D', 'E', 'F', 'G'],
-        'row_start': 2,          # Skip header
-        'row_end': 1000,
-        'input_has_header': True,
-        'output_has_header': False,
-        'output_file': 'sales_data_{timestamp}.csv',
-        'output_format': 'csv'
-    },
-    {
-        'sheet_name': 'Inventory',
-        'columns': ['B', 'C', 'H', 'I'],
-        'row_start': 1,
-        'row_end': 500,
-        'input_has_header': True,
-        'output_has_header': False,
-        'output_file': 'inventory_{timestamp}.xlsx',
-        'output_format': 'xlsx'
-    },
-    {
-        'sheet_name': 'Customers',
-        'columns': ['A', 'B', 'E', 'F', 'J'],
-        'row_start': 1,
-        'row_end': 10000,
-        'input_has_header': False,
-        'output_has_header': False,
-        'output_file': 'customers_{timestamp}.csv',
-        'output_format': 'csv'
-    },
-]
-
-LOG_DIRECTORY = '\\\\server\\share\\logs'
-LOG_LEVEL = 'INFO'
-```
-
-#### 5.6.3 Example 3: High-Precision Financial Data
-```python
-INPUT_FOLDER = "/mnt/finance/incoming"
-OUTPUT_FOLDER = "/mnt/finance/processed"
-FILE_PATTERNS = ['.xlsx', '.csv']
-POLL_INTERVAL = 5
-POST_PROCESS_ACTION = 'move'
-ARCHIVE_FOLDER = "/mnt/finance/archive"
-
-SHEETS_CONFIG = [
-    {
-        'sheet_name': 'Transactions',
-        'columns': ['A', 'B', 'C', 'P', 'Q', 'R'],  # ID, Date, Amount columns
-        'row_start': 1,
-        'row_end': 999999,       # Process all rows
-        'input_has_header': False,
-        'output_has_header': False,
-        'output_file': 'transactions_{original_filename}_{timestamp}.csv',
-        'output_format': 'csv'   # CSV preserves exact decimal format
-    },
-]
-
-LOG_DIRECTORY = '/var/log/finance-extractor'
-LOG_LEVEL = 'DEBUG'              # Maximum detail for compliance
-```
-
-### 5.7 Configuration Validation
-
-Before running, validate configuration:
-
-```python
-# Required fields checklist
-✓ INPUT_FOLDER exists and is accessible
-✓ OUTPUT_FOLDER is writable
-✓ ARCHIVE_FOLDER is writable (if POST_PROCESS_ACTION = 'move')
-✓ At least one sheet in SHEETS_CONFIG
-✓ Each sheet has: sheet_name, columns, row_start, row_end
-✓ FILE_PATTERNS is not empty
-✓ POLL_INTERVAL > 0
-✓ LOG_DIRECTORY is writable
-```
-
----
-
-## 6. Operation Manual
-
-### 6.1 Starting the Tool
-
-#### 6.1.1 Command Line Start
-```bash
-# Standard start
-python data_extractor_final.py
-
-# With output redirection
-python data_extractor_final.py > console.log 2>&1
-
-# Background process (Linux)
-nohup python data_extractor_final.py &
-
-# Background process (Windows)
-start /B python data_extractor_final.py
-```
-
-#### 6.1.2 Startup Sequence
-1. Configuration loaded
-2. Logging initialized
-3. Folders validated
-4. Startup summary displayed
-5. Monitoring loop begins
-
-#### 6.1.3 Startup Output
-```
-================================================================================
-DATA EXTRACTOR - Automated File Processing
-================================================================================
-
-Configuration:
-  Input Folder:  //server/share/FolderX
-  Output Folder: //server/share/FolderY
-  Sheets to Process: 3
-
-  Sheet 1: A
-    - Input has header: False
-    - Output has header: False
-    - Columns: ['P', 'Q', 'R']
-    - Rows: 1 to 100
-
-  Sheet 2: B
-    - Input has header: False
-    - Output has header: False
-    - Columns: ['A', 'D', 'E', 'F']
-    - Rows: 1 to 50
-
-  Sheet 3: C
-    - Input has header: True
-    - Output has header: False
-    - Columns: ['B', 'C', 'G', 'H', 'I']
-    - Rows: 1 to 200
-
-  Poll Interval: 5 seconds
-  Post-Process: move
-
-================================================================================
-
-2026-01-29 14:30:15 - INFO - ================================================================================
-2026-01-29 14:30:15 - INFO - Data Extractor initialized successfully
-2026-01-29 14:30:15 - INFO - ================================================================================
-2026-01-29 14:30:15 - INFO - Output folder ready: //server/share/FolderY
-2026-01-29 14:30:15 - INFO - Input folder validated: //server/share/FolderX
-2026-01-29 14:30:15 - INFO - Starting monitoring loop (polling every 5 seconds)
-2026-01-29 14:30:15 - INFO - Press Ctrl+C to stop
-```
-
-### 6.2 Normal Operation
-
-#### 6.2.1 File Processing Workflow
-1. **Detection**: File appears in INPUT_FOLDER
-2. **Validation**: File extension matches FILE_PATTERNS
-3. **Reading**: File opened in read-only mode
-4. **Extraction**: Data extracted per configuration
-5. **Writing**: Output files created in OUTPUT_FOLDER
-6. **Post-Processing**: Input file moved/deleted/retained
-7. **Logging**: All operations recorded
-
-#### 6.2.2 Log Output During Processing
-```
-2026-01-29 14:32:10 - INFO - New file detected: data_20240129.xlsx
-2026-01-29 14:32:10 - INFO - ================================================================================
-2026-01-29 14:32:10 - INFO - Starting file processing: data_20240129.xlsx
-2026-01-29 14:32:10 - INFO - ================================================================================
-2026-01-29 14:32:10 - INFO - Processing sheet: A
-2026-01-29 14:32:10 - INFO -   Input has header: False
-2026-01-29 14:32:10 - INFO -   Output should have header: False
-2026-01-29 14:32:10 - INFO - Reading file: //server/share/FolderX/data_20240129.xlsx
-2026-01-29 14:32:11 - INFO - Excel file read successfully. Sheets: ['A', 'B', 'C', 'D']
-2026-01-29 14:32:11 - INFO - Extracted data: 100 rows, 3 columns
-2026-01-29 14:32:11 - INFO - CSV file saved: //server/share/FolderY/SheetA_output_20240129_143211.csv
-2026-01-29 14:32:11 - INFO -   Output file has NO header row (pure data only)
-2026-01-29 14:32:11 - INFO - Processing sheet: B
-2026-01-29 14:32:11 - INFO -   Input has header: False
-2026-01-29 14:32:11 - INFO -   Output should have header: False
-2026-01-29 14:32:11 - INFO - Reading file: //server/share/FolderX/data_20240129.xlsx
-2026-01-29 14:32:12 - INFO - Excel file read successfully. Sheets: ['A', 'B', 'C', 'D']
-2026-01-29 14:32:12 - INFO - Extracted data: 50 rows, 4 columns
-2026-01-29 14:32:12 - INFO - Excel file saved: //server/share/FolderY/SheetB_output_20240129_143212.xlsx
-2026-01-29 14:32:12 - INFO -   Output file has NO header row (pure data only)
-2026-01-29 14:32:12 - INFO - ================================================================================
-2026-01-29 14:32:12 - INFO - File processing completed: data_20240129.xlsx
-2026-01-29 14:32:12 - INFO - ================================================================================
-2026-01-29 14:32:12 - INFO - Moved processed file to: //server/share/archive/data_20240129_20240129_143212.xlsx
-```
-
-### 6.3 Stopping the Tool
-
-#### 6.3.1 Graceful Shutdown
-```bash
-# Press Ctrl+C in terminal
-^C
-```
-
-Output:
-```
-2026-01-29 14:35:00 - INFO - 
-Monitoring stopped by user
-```
-
-#### 6.3.2 Process Termination (Linux)
-```bash
-# Find process ID
-ps aux | grep data_extractor_final.py
-
-# Graceful termination
-kill <PID>
-
-# Force termination (if needed)
-kill -9 <PID>
-```
-
-#### 6.3.3 Process Termination (Windows)
-```cmd
-# Find process
-tasklist | findstr python
-
-# Terminate
-taskkill /PID <PID> /F
-```
-
-### 6.4 Monitoring Operations
-
-#### 6.4.1 Real-Time Monitoring
-```bash
-# Watch log file (Linux)
-tail -f logs/data_extractor_*.log
-
-# Watch log file (Windows PowerShell)
-Get-Content logs\data_extractor_*.log -Wait -Tail 10
-```
-
-#### 6.4.2 Check Process Status
-```bash
-# Linux
-ps aux | grep data_extractor_final.py
-
-# Windows
-tasklist | findstr python
-```
-
-#### 6.4.3 Verify Output Files
-```bash
-# List recent output files
-ls -lt /path/to/OUTPUT_FOLDER | head -10
-
-# Count output files created today
-find /path/to/OUTPUT_FOLDER -name "*.csv" -mtime -1 | wc -l
-```
-
-### 6.5 Scheduled Operation
-
-#### 6.5.1 Linux Cron Job
-```bash
-# Edit crontab
-crontab -e
-
-# Run Monday-Friday at 8 AM
-0 8 * * 1-5 /usr/bin/python3 /opt/data-extractor/data_extractor_final.py >> /var/log/extractor_cron.log 2>&1
-
-# Run every hour
-0 * * * * /usr/bin/python3 /opt/data-extractor/data_extractor_final.py >> /var/log/extractor_cron.log 2>&1
-```
-
-#### 6.5.2 Windows Task Scheduler
-1. Open Task Scheduler
-2. Create Basic Task
-3. Name: "Data Extractor"
-4. Trigger: Daily at 8:00 AM
-5. Action: Start a program
-6. Program: `C:\Python39\python.exe`
-7. Arguments: `C:\DataExtractor\data_extractor_final.py`
-8. Start in: `C:\DataExtractor`
-
-#### 6.5.3 SystemD Service (Linux)
-Create `/etc/systemd/system/data-extractor.service`:
-```ini
-[Unit]
-Description=Data Extraction Service
-After=network.target
-
-[Service]
-Type=simple
-User=datauser
-WorkingDirectory=/opt/data-extractor
-ExecStart=/usr/bin/python3 /opt/data-extractor/data_extractor_final.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl enable data-extractor
-sudo systemctl start data-extractor
-sudo systemctl status data-extractor
-```
-
----
-
-## 7. Technical Specifications
-
-### 7.1 File Format Support
-
-#### 7.1.1 Supported Input Formats
-| Format | Extension | Engine | Notes |
-|--------|-----------|--------|-------|
-| Excel 2007+ | .xlsx | openpyxl | Full support, recommended |
-| Excel 97-2003 | .xls | xlrd | Limited support, legacy |
-| Excel Macro | .xlsm | openpyxl | Macros ignored, data extracted |
-| CSV | .csv | pandas | UTF-8 encoding assumed |
-
-#### 7.1.2 Supported Output Formats
-| Format | Extension | Use Case |
-|--------|-----------|----------|
-| CSV | .csv | Universal compatibility, smaller size |
-| Excel | .xlsx | Excel integration, formatting preserved |
-
-### 7.2 Data Type Handling
-
-#### 7.2.1 String-Based Processing
-All data is read and processed as strings (`dtype=str`):
-- **Benefit**: Preserves exact representation from source
-- **Impact**: No automatic type inference
-- **Result**: No rounding, no scientific notation
-
-#### 7.2.2 Decimal Precision
-```
-Input:  0.0000000000673849
-Output: 0.0000000000673849
-(NOT: 6.73849e-11)
-
-Input:  123.456789012345678
-Output: 123.456789012345678
-(NOT: 123.45678901234568)
-```
-
-### 7.3 Performance Characteristics
-
-#### 7.3.1 Processing Speed
-| Operation | Time (approximate) |
-|-----------|-------------------|
-| File detection | <1 second |
-| Read small file (<1MB) | 1-2 seconds |
-| Read large file (10MB) | 5-10 seconds |
-| Extract data | <1 second |
-| Write CSV output | 1-2 seconds |
-| Write Excel output | 2-5 seconds |
-
-#### 7.3.2 Memory Usage
-| File Size | RAM Required | Notes |
-|-----------|--------------|-------|
-| <1MB | ~50MB | Minimal overhead |
-| 1-10MB | ~100-200MB | Linear scaling |
-| 10-50MB | ~200-500MB | Consider optimization |
-| >50MB | ~500MB+ | Monitor system resources |
-
-#### 7.3.3 Scalability Limits
-- **Max rows per sheet**: ~1 million (pandas limit)
-- **Max columns**: ~16,000 (Excel limit)
-- **Max file size**: 100MB recommended, 500MB maximum
-- **Concurrent files**: 1 (sequential processing)
-
-### 7.4 System Resource Requirements
-
-#### 7.4.1 Minimum Requirements
-- **CPU**: 1 core, 1 GHz
-- **RAM**: 512MB
-- **Disk**: 100MB for application
-- **Network**: 1 Mbps (for network shares)
-
-#### 7.4.2 Recommended Requirements
-- **CPU**: 2 cores, 2 GHz
-- **RAM**: 2GB
-- **Disk**: 1GB for application and logs
-- **Network**: 10 Mbps or higher
-
-### 7.5 File Locking Behavior
-
-#### 7.5.1 Input File Access
-- Opens in **read-only mode**
-- Does not lock file
-- Safe for concurrent reading by other processes
-
-#### 7.5.2 Output File Creation
-- Atomic write operations
-- Creates new file each time
-- No overwrite risk (timestamp in filename)
-
-### 7.6 Network Considerations
-
-#### 7.6.1 Network Share Access
-- Uses OS-level network authentication
-- Inherits user permissions
-- Subject to network latency
-- Affected by SMB/CIFS protocol limitations
-
-#### 7.6.2 Recommended Network Configuration
-- Stable connection required
-- Low latency preferred (<50ms)
-- Sufficient bandwidth (10 Mbps minimum)
-- UNC path support (Windows) or proper mounts (Linux)
-
----
-
-## 8. Data Processing Logic
-
-### 8.1 File Reading Logic
-
-#### 8.1.1 Header Handling Decision Tree
-```
-Read File
-    │
-    ├─ input_has_header = True
-    │   │
-    │   ├─ Pandas reads row 1 as column names
-    │   ├─ Row 1 excluded from data
-    │   └─ row_start=1 means first DATA row (actual row 2)
-    │
-    └─ input_has_header = False
-        │
-        ├─ Pandas treats all rows as data
-        ├─ No column names assigned
-        └─ row_start=1 means first FILE row
-```
-
-#### 8.1.2 Read Operation Pseudo-code
-```python
-IF file_extension in ['.xlsx', '.xls', '.xlsm']:
-    IF input_has_header:
-        dataframe = read_excel(file, header=0, dtype=str)
-    ELSE:
-        dataframe = read_excel(file, header=None, dtype=str)
-ELIF file_extension == '.csv':
-    IF input_has_header:
-        dataframe = read_csv(file, header=0, dtype=str)
-    ELSE:
-        dataframe = read_csv(file, header=None, dtype=str)
-```
-
-### 8.2 Data Extraction Logic
-
-#### 8.2.1 Column Selection
-```python
-# Input columns: ['P', 'Q', 'R']
-# Converted to indices: [15, 16, 17]
-
-extracted_df = source_df.iloc[:, [15, 16, 17]]
-# Result: DataFrame with only columns P, Q, R
-```
-
-#### 8.2.2 Row Selection
-```python
-# Configuration: row_start=10, row_end=100
-
-# Convert to 0-based indexing
-start_idx = 10 - 1  # = 9
-end_idx = 100       # = 100 (pandas slicing is exclusive at end)
-
-extracted_df = extracted_df.iloc[9:100]
-# Result: Rows 10-100 (inclusive), which is indices 9-99
-```
-
-#### 8.2.3 Complete Extraction Example
-```
-Original DataFrame (input_has_header=False):
-     0    1    2    ...  15       16       17
-0    A1   B1   C1   ...  P1       Q1       R1
-1    A2   B2   C2   ...  P2       Q2       R2
-...
-99   A100 B100 C100 ...  P100     Q100     R100
-
-Configuration:
-    columns: ['P', 'Q', 'R']  → [15, 16, 17]
-    row_start: 10
-    row_end: 50
-
-Step 1 - Select columns:
-     15   16   17
-0    P1   Q1   R1
-1    P2   Q2   R2
-...
-99   P100 Q100 R100
-
-Step 2 - Select rows 10-50 (indices 9-50):
-     15   16   17
-9    P10  Q10  R10
-10   P11  Q11  R11
-...
-49   P50  Q50  R50
-
-Result: 41 rows, 3 columns
-```
-
-### 8.3 Output Generation Logic
-
-#### 8.3.1 Filename Generation
-```python
-# Configuration
-output_file = 'report_{timestamp}.csv'
-original_filename = 'sales_2024.xlsx'
-sheet_name = 'A'
-current_time = '20240129_143022'
-
-# Processing
-filename = output_file.replace('{timestamp}', '20240129_143022')
-# Result: 'report_20240129_143022.csv'
-
-# If no {timestamp} placeholder and no extension:
-output_file = 'report'
-# Result: 'report_20240129_143022.csv' (auto-added)
-```
-
-#### 8.3.2 CSV Writing
-```python
-dataframe.to_csv(
-    output_path,
-    index=False,           # No row indices
-    header=output_has_header,  # Header control
-    quoting=1              # Quote non-numeric fields
-)
-```
-
-#### 8.3.3 Excel Writing
-```python
-with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-    dataframe.to_excel(
-        writer,
-        index=False,       # No row indices
-        header=output_has_header,  # Header control
-        sheet_name='Data'  # Single sheet named 'Data'
-    )
-```
-
-### 8.4 Post-Processing Logic
-
-#### 8.4.1 File Move Operation
-```python
-# Generate archive filename with timestamp
-archive_filename = f"{original_name}_{timestamp}{extension}"
-# Example: sales_2024_20240129_143022.xlsx
-
-# Move file
-os.rename(input_path, archive_path)
-```
-
-#### 8.4.2 File Delete Operation
-```python
-os.remove(input_path)
-# File permanently deleted
-```
-
----
-
-## 9. Error Handling & Recovery
-
-### 9.1 Error Categories
-
-#### 9.1.1 Configuration Errors
-**Cause**: Invalid configuration parameters  
-**Detection**: Startup validation  
-**Impact**: Script fails to start  
-**Resolution**: Fix configuration and restart
-
-**Examples**:
-- Invalid folder paths
-- Missing required parameters
-- Type mismatches
-
-#### 9.1.2 File System Errors
-**Cause**: File/folder access issues  
-**Detection**: During file operations  
-**Impact**: Single file skipped, monitoring continues  
-**Resolution**: Fix permissions, retry
-
-**Examples**:
-- Permission denied
-- File not found
-- Disk full
-
-#### 9.1.3 Data Errors
-**Cause**: File content issues  
-**Detection**: During reading/processing  
-**Impact**: Current file skipped, monitoring continues  
-**Resolution**: Fix source file, retry
-
-**Examples**:
-- Corrupted file
-- Missing sheets
-- Invalid data ranges
-
-#### 9.1.4 Network Errors
-**Cause**: Network connectivity issues  
-**Detection**: During folder access  
-**Impact**: Polling continues, retries automatically  
-**Resolution**: Restore network connection
-
-**Examples**:
-- Network share disconnected
-- Timeout
-- DNS resolution failure
-
-### 9.2 Error Handling Strategy
-
-#### 9.2.1 Fail-Fast Errors (Script Stops)
-```
-1. Configuration file missing
-2. Python dependencies missing
-3. Invalid configuration syntax
-4. Input folder doesn't exist at startup
-5. No write permission on output folder at startup
-```
-
-#### 9.2.2 Recoverable Errors (Script Continues)
-```
-1. Single file read failure
-2. Sheet not found in file
-3. Column/row out of range
-4. Output file write failure
-5. Temporary network issue
-```
-
-### 9.3 Error Logging
-
-#### 9.3.1 Log Levels by Error Type
-```
-ERROR: Operation failed but script continues
-    - File read failed
-    - Sheet not found
-    - Column out of range
-    - Write permission denied
-
-CRITICAL: System-level failure (rare)
-    - Unexpected exception in main loop
-    - Memory error
-    - System resource exhaustion
-
-WARNING: Potential issue but operation succeeded
-    - Row range adjusted
-    - Using default value
-```
-
-#### 9.3.2 Error Log Format
-```
-2026-01-29 14:32:10 - ERROR - Sheet 'InvalidSheet' not found in file. Available sheets: ['A', 'B', 'C']
-2026-01-29 14:32:11 - ERROR - Column index 25 out of range (max: 10)
-2026-01-29 14:32:12 - ERROR - Permission denied writing to: //server/share/output/file.csv
-```
-
-### 9.4 Recovery Procedures
-
-#### 9.4.1 File Processing Failure
-**Scenario**: Single file fails to process
-
-**Automatic Recovery**:
-1. Error logged
-2. File left in input folder (if POST_PROCESS_ACTION = 'move')
-3. Script continues monitoring
-4. File will be retried on next poll
-
-**Manual Recovery**:
-1. Check log for specific error
-2. Fix underlying issue (permissions, file corruption, etc.)
-3. File will be automatically picked up on next poll
-
-#### 9.4.2 Network Disconnection
-**Scenario**: Network share becomes unavailable
-
-**Automatic Recovery**:
-1. Polling continues
-2. "Permission denied" errors logged
-3. When network restored, normal operation resumes
-
-**Manual Recovery**:
-1. Restore network connectivity
-2. Verify share is accessible
-3. No script restart needed
-
-#### 9.4.3 Disk Full
-**Scenario**: Output folder disk full
-
-**Automatic Recovery**: None (manual intervention required)
-
-**Manual Recovery**:
-1. Free disk space
-2. Unprocessed files remain in input folder
-3. Will be processed on next poll
-
-#### 9.4.4 Script Crash
-**Scenario**: Unexpected script termination
-
-**Recovery Steps**:
-1. Check log for exception details
-2. Fix underlying cause
-3. Restart script
-4. Unprocessed files will be picked up
-
----
-
-## 10. Troubleshooting Guide
-
-### 10.1 Startup Issues
-
-#### 10.1.1 "Python not found" or "python: command not found"
-
-**Symptoms**:
-```
-bash: python: command not found
-'python' is not recognized as an internal or external command
-```
-
-**Diagnosis**:
-```bash
-# Check Python installation
-python --version
-python3 --version
-
-# Check PATH
-echo $PATH  # Linux/macOS
-echo %PATH%  # Windows
-```
-
-**Solutions**:
-1. Install Python from python.org
-2. Add Python to system PATH
-3. Use full path: `/usr/bin/python3 data_extractor_final.py`
-4. Try `python3` instead of `python`
-
-**Prevention**: Verify installation during deployment
-
----
-
-#### 10.1.2 "No module named 'pandas'" or ImportError
-
-**Symptoms**:
-```
-ModuleNotFoundError: No module named 'pandas'
-ImportError: cannot import name 'read_excel' from 'pandas'
-```
-
-**Diagnosis**:
-```bash
-pip list | grep pandas
-python -c "import pandas; print(pandas.__version__)"
-```
-
-**Solutions**:
-```bash
-# Install missing dependencies
-pip install pandas openpyxl xlrd
-
-# Or install all at once
-pip install -r requirements.txt
-
-# Use correct pip for your Python version
-python3 -m pip install pandas
-```
-
-**Prevention**: Run dependency check before first use
-
----
-
-#### 10.1.3 "Input folder does not exist"
-
-**Symptoms**:
-```
-2026-01-29 14:30:15 - ERROR - Input folder does not exist: //server/share/FolderX
-Folder validation failed. Exiting.
-```
-
-**Diagnosis**:
-```bash
-# Test folder access
-ls //server/share/FolderX  # Linux/macOS
-dir \\server\share\FolderX  # Windows
-
-# Check mount status
-mount | grep server  # Linux
-net use  # Windows
-```
-
-**Solutions**:
-1. Verify folder path in configuration
-2. Check network connectivity: `ping server`
-3. Mount network share if needed
-4. Verify VPN connection if required
-5. Use correct path format:
-   - Windows: `\\\\server\\share\\folder` or `//server/share/folder`
-   - Linux: `/mnt/network/folder` (after mounting)
-
-**Common Mistakes**:
-- Wrong server name
-- Missing double slashes: `//` or `\\\\`
-- Path case sensitivity (Linux)
-- VPN not connected
-
----
-
-#### 10.1.4 "No write permission for output folder"
-
-**Symptoms**:
-```
-2026-01-29 14:30:15 - ERROR - No write permission for output folder: //server/share/FolderY
-Folder validation failed. Exiting.
-```
-
-**Diagnosis**:
-```bash
-# Test write permission
-touch //server/share/FolderY/test.txt  # Linux/macOS
-echo test > \\server\share\FolderY\test.txt  # Windows
-
-# Check permissions
-ls -ld //server/share/FolderY  # Linux/macOS
-```
-
-**Solutions**:
-1. Request write permissions from IT/admin
-2. Verify user account has correct access
-3. Check folder is not read-only
-4. Verify disk space available
-5. Test with local folder temporarily
-
-**Workaround**:
-```python
-# Temporarily use local folder for testing
-OUTPUT_FOLDER = "./output_test"
-```
-
----
-
-### 10.2 File Detection Issues
-
-#### 10.2.1 Files in input folder but not detected
-
-**Symptoms**:
-- Files visible in folder
-- No "New file detected" log entries
-- Script running but idle
-
-**Diagnosis Steps**:
-
-**Step 1: Check file extension**
-```bash
-# List file with full details
-ls -la //server/share/FolderX/yourfile.xlsx
-
-# Verify extension matches FILE_PATTERNS
-# Check configuration: FILE_PATTERNS = ['.csv', '.xlsx', '.xls']
-```
-
-**Step 2: Check file is fully copied**
-```bash
-# Monitor file size
-watch -n 1 ls -lh //server/share/FolderX/yourfile.xlsx
-
-# File should not be growing
-```
-
-**Step 3: Check file is not locked**
-```bash
-# Linux: Check if file is open
-lsof //server/share/FolderX/yourfile.xlsx
-
-# Windows: Check in Resource Monitor (resmon.exe)
-```
-
-**Solutions**:
-1. **Wrong extension**: Add to FILE_PATTERNS or rename file
-2. **Still copying**: Wait for transfer to complete
-3. **Hidden extension**: Enable "show file extensions" in Windows
-4. **File locked**: Close in Excel or other applications
-5. **Wrong folder**: Verify INPUT_FOLDER path
-
-**Common Mistakes**:
-```
-File: data.XLSX
-Config: FILE_PATTERNS = ['.xlsx']
-Issue: None - case insensitive, should work
-
-File: data.xlsx.tmp
-Config: FILE_PATTERNS = ['.xlsx']
-Issue: Ends with .tmp, not .xlsx - won't match
-
-File: data.xls
-Config: FILE_PATTERNS = ['.xlsx']
-Issue: Different extension - won't match
-```
-
----
-
-#### 10.2.2 "Permission denied accessing input folder"
-
-**Symptoms**:
-```
-2026-01-29 14:32:10 - ERROR - Permission denied accessing input folder: //server/share/FolderX
-```
-
-**Diagnosis**:
-```bash
-# Test folder access
-ls //server/share/FolderX
-
-# Check authentication
-# Windows: net use \\server\share
-# Linux: mount | grep server
-```
-
-**Solutions**:
-1. Re-authenticate to network share
-2. Check user permissions haven't changed
-3. Verify network connection stable
-4. Restart network service
-5. Contact IT for permission verification
-
-**Quick Fix**:
-```bash
-# Windows: Reconnect share
-net use \\server\share /user:domain\username password
-
-# Linux: Remount share
-sudo mount -t cifs //server/share /mnt/point -o username=user
-```
-
----
-
-### 10.3 File Processing Issues
-
-#### 10.3.1 "Sheet 'A' not found in file"
-
-**Symptoms**:
-```
-2026-01-29 14:32:11 - ERROR - Sheet 'A' not found in file. Available sheets: ['Sheet1', 'Data', 'Summary']
-```
-
-**Diagnosis**:
-1. Open file in Excel
-2. Check sheet tabs at bottom
-3. Note exact sheet names (case-sensitive)
-
-**Solutions**:
-1. Update configuration with correct sheet name:
-```python
-# Wrong
-'sheet_name': 'A',
-
-# Correct (based on actual sheet names)
-'sheet_name': 'Sheet1',
-```
-
-2. Rename sheet in Excel to match configuration
-3. Check for hidden sheets (right-click sheet tab → Unhide)
-
-**Common Mistakes**:
-- Case mismatch: 'sheet1' vs 'Sheet1'
-- Extra spaces: 'Sheet 1' vs 'Sheet1'
-- Special characters: 'Sheet-1' vs 'Sheet_1'
-
----
-
-#### 10.3.2 "Column index X out of range"
-
-**Symptoms**:
-```
-2026-01-29 14:32:11 - ERROR - Column index 25 out of range (max: 10)
-```
-
-**Diagnosis**:
-1. Open file in Excel
-2. Count number of columns with data
-3. Note last column letter
-
-**Root Causes**:
-```python
-# Example 1: File only has columns A-K (11 columns, indices 0-10)
-'columns': ['P', 'Q', 'R']  # P=15, but max is 10
-# ERROR: Column 15 out of range
-
-# Example 2: Column letter typo
-'columns': ['A', 'AA', 'C']  # AA=26, but file only has 10 columns
-# ERROR: Column 26 out of range
-```
-
-**Solutions**:
-1. Verify column letters in configuration match file
-2. Count columns: A=0, B=1, C=2, ..., K=10
-3. Update configuration:
-```python
-# If file has columns A-K, and you want columns 1, 2, 3:
-'columns': ['A', 'B', 'C']  # Correct
-
-# Not:
-'columns': ['P', 'Q', 'R']  # These don't exist
-```
-
-**Verification Command**:
-```python
-# Quick test to see column count
-import pandas as pd
-df = pd.read_excel('yourfile.xlsx', sheet_name='A')
-print(f"Number of columns: {df.shape[1]}")
-print(f"Max column index: {df.shape[1]-1}")
-```
-
----
-
-#### 10.3.3 First row of data missing in output
-
-**Symptoms**:
-- Input file has 100 rows
-- Output file has 99 rows
-- First data row missing
-
-**Diagnosis**:
-Check header configuration:
-```python
-'input_has_header': True,   # ← This is the issue
-'output_has_header': False,
-```
-
-**Cause**:
-When `input_has_header=True`, the first row is treated as column names and excluded from data.
-
-**Solutions**:
-
-**Scenario 1: Input has NO header**
-```python
-# File structure:
-# Row 1: 123, 456, 789  (DATA)
-# Row 2: 234, 567, 890  (DATA)
-# ...
-
-# Configuration should be:
-'input_has_header': False,  # ← No header row exists
-'row_start': 1,             # Start from first row
-```
-
-**Scenario 2: Input HAS header but you want all data rows**
-```python
-# File structure:
-# Row 1: ID, Name, Value  (HEADER)
-# Row 2: 1, John, 100     (DATA - first data row)
-# Row 3: 2, Jane, 200     (DATA - second data row)
-# ...
-
-# Configuration should be:
-'input_has_header': True,   # Header exists in row 1
-'row_start': 1,             # Starts from first DATA row (row 2 in file)
-'row_end': 99,              # Ends at 99th DATA row
-```
-
-**Decision Tree**:
-```
-Does your input file have a header row with column names?
-├─ YES → input_has_header: True
-│        row_start=1 means first DATA row (after header)
-│
-└─ NO  → input_has_header: False
-         row_start=1 means first FILE row
-```
-
----
-
-#### 10.3.4 Output has "Unnamed" or numeric headers (0, 1, 2, ...)
-
-**Symptoms**:
-Output CSV/Excel shows headers like:
-```
-Unnamed: 0,Unnamed: 1,Unnamed: 2
-0,1,2
-```
-
-**Cause**:
-```python
-'input_has_header': False,  # No header in input
-'output_has_header': True,  # But trying to create header in output
-```
-
-When input has no header, pandas creates generic column names (0, 1, 2, ... or Unnamed: 0, etc.)
-
-**Solutions**:
-
-**Option 1: No headers in output (recommended)**
-```python
-'input_has_header': False,
-'output_has_header': False,  # ← Pure data, no headers
-```
-
-**Option 2: Accept generic headers**
-```python
-'input_has_header': False,
-'output_has_header': True,   # Will show: 0,1,2,... as headers
-```
-
-**Option 3: Manually add header to input file**
-1. Open input file in Excel
-2. Insert row at top
-3. Add column names: ID, Name, Value, etc.
-4. Update configuration:
-```python
-'input_has_header': True,
-'output_has_header': True,
-```
-
----
-
-#### 10.3.5 Numbers appear in scientific notation (e.g., 6.73849e-11)
-
-**Symptoms**:
-```
-Input:  0.0000000000673849
-Output: 6.73849e-11
-```
-
-**This Should NOT Happen** in the current version (fixed with `dtype=str`).
-
-**If It Still Occurs**:
-
-**Diagnosis**:
-1. Check script version
-2. Verify `dtype=str` is present in `_read_file()` method
-3. Check if output was opened in Excel (Excel may display scientifically)
-
-**Solutions**:
-
-**Solution 1: Verify script has the fix**
-Check line 353 and 363 in script:
-```python
-dtype=str  # This must be present
-```
-
-If missing, update script.
-
-**Solution 2: Viewing output correctly**
-```bash
-# Don't open CSV in Excel - it may reformat
-# Instead, open in text editor
-cat output.csv  # Linux/macOS
-type output.csv  # Windows
-
-# Or use Excel's import wizard (don't double-click CSV)
-```
-
-**Solution 3: Force text format in Excel**
-1. Open Excel
-2. Data → Get External Data → From Text
-3. Choose CSV file
-4. Select "Text" format for numeric columns
-5. Finish import
-
-**Prevention**:
-The script already handles this with `dtype=str`. If scientific notation appears, it's likely Excel's display formatting, not the data itself.
-
----
-
-### 10.4 Output Issues
-
-#### 10.4.1 "Permission denied writing to output path"
-
-**Symptoms**:
-```
-2026-01-29 14:32:12 - ERROR - Permission denied writing to: //server/share/FolderY/output.csv
-```
-
-**Diagnosis**:
-```bash
-# Test write permission
-echo "test" > //server/share/FolderY/test.txt
-
-# Check disk space
-df -h //server/share/FolderY  # Linux/macOS
-```
-
-**Causes & Solutions**:
-
-**Cause 1: No write permission**
-- Solution: Request write access from IT
-- Workaround: Use local folder temporarily
-
-**Cause 2: Disk full**
-- Check: `df -h` (Linux) or Properties in Windows
-- Solution: Free up space or use different location
-
-**Cause 3: File exists and is locked**
-- Check: File open in Excel or other program
-- Solution: Close file, retry
-
-**Cause 4: Antivirus blocking**
-- Check: Antivirus logs
-- Solution: Add folder to exclusions
-
----
-
-#### 10.4.2 Output files not appearing in OUTPUT_FOLDER
-
-**Symptoms**:
-- Processing completes successfully in logs
-- No output files visible
-
-**Diagnosis Checklist**:
-
-**Check 1: Verify OUTPUT_FOLDER path**
-```python
-# In configuration
-OUTPUT_FOLDER = "//server/share/FolderY"
-
-# Verify in logs
-2026-01-29 14:32:12 - INFO - CSV file saved: //server/share/FolderY/output.csv
-```
-
-**Check 2: Verify file was actually created**
-```bash
-ls -la //server/share/FolderY/
-```
-
-**Check 3: Check for permission issues**
-```bash
-# Look for ERROR logs
-grep ERROR logs/data_extractor_*.log
-```
-
-**Solutions**:
-1. Verify OUTPUT_FOLDER setting
-2. Check write permissions
-3. Verify network connection
-4. Check disk space
-5. Look for specific errors in logs
-
----
-
-#### 10.4.3 Wrong number of rows in output
-
-**Symptoms**:
-- Expected 100 rows, got 98
-- Expected all data, got partial
-
-**Diagnosis**:
-
-**Scenario 1: Header configuration issue**
-```python
-# Input file: 100 rows total (1 header + 99 data)
-'input_has_header': True,   # Correctly identifies header
-'row_start': 1,
-'row_end': 100,             # Asking for 100 data rows
-# Result: Only 99 rows output (because there are only 99 data rows)
-
-# Solution: Adjust row_end to match actual data rows
-'row_end': 99,  # Get all 99 data rows
-```
-
-**Scenario 2: Row range misconfiguration**
-```python
-# Input file: 100 total rows
-'input_has_header': False,
-'row_start': 2,             # Starting from row 2
-'row_end': 100,
-# Result: 99 rows (rows 2-100)
-
-# Solution: Start from row 1 if you want all rows
-'row_start': 1,
-```
-
-**Verification**:
-```python
-# Check actual row counts
-import pandas as pd
-
-# Read file same way script does
-df = pd.read_excel('input.xlsx', sheet_name='A', header=None, dtype=str)
-print(f"Total rows in file: {len(df)}")
-
-# If input_has_header was True:
-df = pd.read_excel('input.xlsx', sheet_name='A', header=0, dtype=str)
-print(f"Data rows (excluding header): {len(df)}")
-```
-
----
-
-### 10.5 Performance Issues
-
-#### 10.5.1 Script is very slow
-
-**Symptoms**:
-- Processing takes minutes instead of seconds
-- High CPU or memory usage
-- System becomes unresponsive
-
-**Diagnosis**:
-
-**Check 1: File size**
-```bash
-ls -lh //server/share/FolderX/input.xlsx
-```
-
-**Check 2: Network speed**
-```bash
-# Test network speed
-time dd if=//server/share/FolderX/testfile of=/dev/null bs=1M count=100
-```
-
-**Check 3: System resources**
-```bash
-# Linux
-top
-htop
-
-# Windows
-Task Manager → Performance
-```
-
-**Solutions by Cause**:
-
-**Large files (>50MB)**:
-1. Increase system RAM
-2. Process files during off-peak hours
-3. Consider splitting large files
-4. Use more specific row ranges to reduce data volume
-
-**Slow network**:
-1. Copy file to local disk first
-2. Process locally
-3. Move output back to network share
-4. Increase POLL_INTERVAL to reduce network checks
-
-**Many sheets configured**:
-1. Process sheets in batches
-2. Run multiple instances with different configs
-3. Prioritize critical sheets
-
-**Optimization Example**:
-```python
-# Instead of processing entire file:
-'row_start': 1,
-'row_end': 999999,
-
-# Be more specific:
-'row_start': 1,
-'row_end': 1000,  # Only process what you need
-```
-
----
-
-#### 10.5.2 High memory usage
-
-**Symptoms**:
-```
-System: Memory usage >80%
-Logs: Slow processing times
-System: Out of memory errors
-```
-
-**Diagnosis**:
-```bash
-# Check memory usage
-free -h  # Linux
-```
-
-**Solutions**:
-
-**Solution 1: Process fewer sheets at once**
-```python
-# Instead of 10 sheets:
-SHEETS_CONFIG = [sheet1, sheet2, sheet3, ..., sheet10]
-
-# Break into 2 config files:
-# config_batch1.py: sheets 1-5
-# config_batch2.py: sheets 6-10
-```
-
-**Solution 2: Reduce row ranges**
-```python
-# Instead of:
-'row_end': 999999,
-
-# Use actual data size:
-'row_end': 5000,
-```
-
-**Solution 3: Increase system RAM**
-- Minimum: 2GB
-- Recommended: 4GB for large files
-
----
-
-### 10.6 Network Issues
-
-#### 10.6.1 "Connection timed out" or "Host is down"
-
-**Symptoms**:
-```
-TimeoutError: [Errno 110] Connection timed out
-OSError: [Errno 113] No route to host
-```
-
-**Diagnosis**:
-```bash
-# Test network connectivity
-ping server
-
-# Test share access
-smbclient -L //server -U username  # Linux
-
-# Test DNS resolution
-nslookup server
-```
-
-**Solutions**:
-1. **Network down**: Wait for restoration, script will retry
-2. **Server down**: Contact IT/server admin
-3. **VPN disconnected**: Reconnect VPN
-4. **DNS issue**: Use IP address instead of hostname:
-```python
-# Instead of:
-INPUT_FOLDER = "//servername/share/folder"
-
-# Use IP:
-INPUT_FOLDER = "//192.168.1.100/share/folder"
-```
-
-5. **Firewall blocking**: Check firewall rules, contact IT
-
----
-
-#### 10.6.2 Intermittent "Permission denied" errors
-
-**Symptoms**:
-- Works sometimes, fails other times
-- Errors appear randomly
-- "Permission denied" in logs
-
-**Causes**:
-1. Network instability
-2. Credential expiration
-3. Share permissions changing
-4. Concurrent access issues
-
-**Solutions**:
-
-**Solution 1: Add retry logic (manual)**
-```python
-# This is not in the script by default
-# Would require code modification
-```
-
-**Solution 2: Increase POLL_INTERVAL**
-```python
-# Give network more time to recover
-POLL_INTERVAL = 30  # Instead of 5
-```
-
-**Solution 3: Refresh credentials**
-```bash
-# Windows
-net use \\server\share /delete
-net use \\server\share /user:domain\username password
-
-# Linux
-sudo umount /mnt/network
-sudo mount -t cifs //server/share /mnt/network -o credentials=/path/to/creds
-```
-
-**Solution 4: Use service account**
-- Request dedicated service account from IT
-- Service accounts don't have password expiration
-- More reliable for automated processes
-
----
-
-### 10.7 Data Integrity Issues
-
-#### 10.7.1 Data missing from output
-
-**Symptoms**:
-- Some cells empty in output
-- Data appears in input but not output
-- Random missing values
-
-**Diagnosis**:
-
-**Check 1: Verify columns are correct**
-```python
-# Open both files in Excel
-# Compare column positions
-# Verify column letters in config match data columns
-```
-
-**Check 2: Check for merged cells**
-```
-Merged cells in Excel may cause issues
-Solution: Unmerge cells before processing
-```
-
-**Check 3: Check row range**
-```python
-# Is data within configured range?
-'row_start': 1,
-'row_end': 100,  # But data is in rows 150-200?
-```
-
-**Solutions**:
-1. Verify column configuration matches data location
-2. Unmerge cells in input file
-3. Adjust row range to cover all data
-4. Check for hidden rows/columns in input
-
----
-
-#### 10.7.2 Extra columns in output
-
-**Symptoms**:
-- Output has more columns than configured
-- Unexpected data in output
-
-**This should not happen** - configuration explicitly controls columns.
-
-**If it occurs**:
-1. Verify configuration:
-```python
-'columns': ['A', 'B', 'C']  # Should produce exactly 3 columns
-```
-
-2. Check output file count:
-```python
-import pandas as pd
-df = pd.read_csv('output.csv')
-print(f"Number of columns: {len(df.columns)}")
-```
-
-3. Check for multiple output files:
-```bash
-ls -la //server/share/OUTPUT_FOLDER/
-# Maybe multiple files were generated?
-```
-
----
-
-### 10.8 Archive/Delete Issues
-
-#### 10.8.1 Input files not being archived
-
-**Symptoms**:
-- Processing completes
-- Files remain in input folder
-- No files in archive folder
-
-**Diagnosis**:
-
-**Check 1: Verify POST_PROCESS_ACTION**
-```python
-POST_PROCESS_ACTION = 'move'  # Must be 'move', not 'none'
-```
-
-**Check 2: Check for errors in logs**
-```bash
-grep "Error moving file" logs/data_extractor_*.log
-```
-
-**Check 3: Verify ARCHIVE_FOLDER permissions**
-```bash
-# Test write permission
-touch //server/share/archive/test.txt
-```
-
-**Solutions**:
-1. Set `POST_PROCESS_ACTION = 'move'`
-2. Create archive folder if missing
-3. Verify write permissions on archive folder
-4. Check disk space
-
----
-
-#### 10.8.2 "Error moving file to archive"
-
-**Symptoms**:
-```
-2026-01-29 14:32:12 - ERROR - Error moving file to archive: [Errno 13] Permission denied
-```
-
-**Causes & Solutions**:
-
-**Cause 1: No permission on archive folder**
-```bash
-# Check permissions
-ls -ld //server/share/archive
-
-# Request access from IT
-```
-
-**Cause 2: Archive folder doesn't exist**
-```bash
-# Create folder
-mkdir -p //server/share/archive
-
-# Or update config to existing folder:
-ARCHIVE_FOLDER = "//server/share/existing_folder"
-```
-
-**Cause 3: File already exists in archive**
-```
-Rare, but possible if timestamp precision issues
-Solution: Script adds timestamp to prevent this
-```
-
-**Cause 4: Cross-device move issue**
-```
-Can't move between different filesystems
-Solution: Use 'delete' or 'none' instead of 'move'
-```
-
----
-
-### 10.9 Logging Issues
-
-#### 10.9.1 No log files created
-
-**Symptoms**:
-- Script runs but no logs appear
-- LOG_DIRECTORY empty
-
-**Diagnosis**:
-```bash
-# Check if directory exists
-ls -la logs/
-
-# Check permissions
-ls -ld logs/
-```
-
-**Solutions**:
-
-**Solution 1: Directory doesn't exist**
-```bash
-# Create manually
-mkdir logs
-```
-Script should create automatically, but manual creation works.
-
-**Solution 2: No write permission**
-```bash
-# Fix permissions
-chmod 755 logs/  # Linux
-```
-
-**Solution 3: Wrong directory path**
-```python
-# Check configuration
-LOG_DIRECTORY = 'logs'  # Relative path - creates in script directory
-
-# Or use absolute path:
-LOG_DIRECTORY = '/var/log/data-extractor'
-```
-
----
-
-#### 10.9.2 Log files too large
-
-**Symptoms**:
-- Log files >100MB
-- Disk space issues
-- Performance degradation
-
-**Diagnosis**:
-```bash
-# Check log sizes
-du -sh logs/*
-```
-
-**Solutions**:
-
-**Solution 1: Reduce log level**
-```python
-# From DEBUG to INFO
-LOG_LEVEL = 'INFO'  # Instead of 'DEBUG'
-```
-
-**Solution 2: Rotate logs manually**
-```bash
-# Archive old logs
-tar -czf logs_archive_$(date +%Y%m%d).tar.gz logs/*.log
-rm logs/*.log
-```
-
-**Solution 3: Implement log rotation (requires modification)**
-```python
-# This would require adding logging.handlers.RotatingFileHandler
-# Not in current version
-```
-
-**Solution 4: Regular cleanup**
-```bash
-# Delete logs older than 30 days
-find logs/ -name "*.log" -mtime +30 -delete
-```
-
----
-
-### 10.10 Edge Cases
-
-#### 10.10.1 Empty input file
-
-**Symptoms**:
-```
-2026-01-29 14:32:11 - ERROR - No data extracted from sheet 'A'
-```
-
-**Cause**: File has no data rows
-
-**Behavior**: Script logs error, skips file, continues monitoring
-
-**Resolution**: Normal behavior, no action needed
-
----
-
-#### 10.10.2 File with only header, no data
-
-**Scenario**:
-```
-File structure:
-Row 1: ID,Name,Value  (HEADER)
-(no more rows)
-```
-
-**Configuration**:
-```python
-'input_has_header': True,
-'row_start': 1,
-'row_end': 100,
-```
-
-**Result**: No data extracted (0 rows)
-
-**Behavior**: Script logs "No data extracted", skips file
-
-**Resolution**: Normal behavior for empty files
-
----
-
-#### 10.10.3 Duplicate filenames
-
-**Scenario**: Two files with same name arrive sequentially
-
-**Behavior**:
-1. First file processed
-2. First file archived with timestamp: `file_20240129_143000.xlsx`
-3. Second file detected
-4. Second file archived with different timestamp: `file_20240129_143015.xlsx`
-
-**Result**: Both files processed, no conflicts
-
----
-
-#### 10.10.4 Very long filename
-
-**Scenario**: Filename >255 characters
-
-**Behavior**: May cause errors depending on OS
-
-**Solution**:
-```python
-# Shorten output filename template
-'output_file': 'out_{timestamp}.csv'  # Instead of very long name
-```
-
----
-
-#### 10.10.5 Special characters in filename
-
-**Scenario**: File named `data:2024-01-29.xlsx` or `report|final.xlsx`
-
-**Behavior**: May cause errors on certain filesystems
-
-**Prevention**: Avoid special characters in input filenames:
-```
-Allowed: a-z A-Z 0-9 _ - .
-Avoid: : | < > * ? / \ "
-```
-
----
-
-## 11. Performance Tuning
-
-### 11.1 Optimizing Polling Interval
-
-**Concept**: Balance between detection speed and resource usage
-
-**Recommendations**:
-```python
-# High-frequency monitoring (file arrives frequently)
-POLL_INTERVAL = 2  # Check every 2 seconds
-
-# Standard monitoring (file arrives hourly)
-POLL_INTERVAL = 5  # Check every 5 seconds (default)
-
-# Low-frequency monitoring (file arrives daily)
-POLL_INTERVAL = 30  # Check every 30 seconds
-
-# Minimal monitoring (file arrives weekly)
-POLL_INTERVAL = 60  # Check every minute
-```
-
-**Consideration**: Lower POLL_INTERVAL = higher CPU usage
-
----
-
-### 11.2 Optimizing Network Performance
-
-**Strategy 1: Local Processing**
-```python
-# Copy input to local disk
-# Process locally
-# Copy output back to network
-INPUT_FOLDER = "/tmp/local_input"
-OUTPUT_FOLDER = "/tmp/local_output"
-```
-
-**Strategy 2: Batch Processing**
-```python
-# Process multiple files before archiving
-# Reduces network operations
-```
-
-**Strategy 3: Compression**
-```python
-# For very large files, compress before transfer
-# Uncompress locally, process, compress output
-```
-
----
-
-### 11.3 Memory Optimization
-
-**Technique 1: Reduce Data in Memory**
-```python
-# Only extract necessary rows
-'row_start': 1,
-'row_end': 1000,  # Don't use 999999 if not needed
-```
-
-**Technique 2: Process Sheets Sequentially**
-```python
-# Script already does this
-# Each sheet processed independently
-# Memory freed after each sheet
-```
-
-**Technique 3: Split Large Files**
-```
-# Manual process before automation
-# Split 100MB file into 10x 10MB files
-# Process each separately
-```
-
----
-
-### 11.4 Disk I/O Optimization
-
-**Technique 1: Use SSD for Working Directory**
-```python
-# Run script from SSD
-# Use network share only for input/output
-```
-
-**Technique 2: Limit Log Detail**
-```python
-LOG_LEVEL = 'INFO'  # Not DEBUG
-```
-
-**Technique 3: Regular Log Cleanup**
-```bash
-# Automated cleanup
-find logs/ -mtime +7 -delete
-```
-
----
-
-## 12. Security Considerations
-
-### 12.1 Authentication & Authorization
-
-**Network Share Authentication**:
-- Uses current user's credentials
-- No password storage in script
-- Inherits OS-level authentication
-
-**Best Practices**:
-1. Use service accounts for production
-2. Implement least-privilege access
-3. Audit access logs regularly
-4. Rotate credentials periodically
-
----
-
-### 12.2 Data Protection
-
-**In-Transit**:
-- Network traffic not encrypted by script
-- Relies on SMB3 encryption (if enabled)
-- Consider VPN for untrusted networks
-
-**At-Rest**:
-- No encryption by script
-- Files stored in plain text
-- Use encrypted filesystems if needed
-
-**In-Processing**:
-- Files read as read-only
-- No modification of source data
-- Temporary data in memory only
-
----
-
-### 12.3 Audit Trail
-
-**What is Logged**:
-1. All file operations (read, write, move, delete)
-2. Timestamp of every operation
-3. Errors and warnings
-4. User/process information (via OS)
-
-**Log Location**:
-- Default: `logs/` directory
-- Configurable via LOG_DIRECTORY
-- One log file per script run
-
-**Retention**:
-- Manual cleanup required
-- Recommend 90-day retention for compliance
-
----
-
-### 12.4 Secure Configuration
-
-**Do NOT**:
-- ❌ Hardcode passwords
-- ❌ Store credentials in comments
-- ❌ Commit sensitive paths to version control
-
-**DO**:
-- ✅ Use environment variables for sensitive data
-- ✅ Implement file permissions (chmod 600)
-- ✅ Regularly review access logs
-- ✅ Backup configurations securely
-
----
-
-## 13. Maintenance Procedures
-
-### 13.1 Daily Maintenance
-
-**Checklist**:
-- [ ] Verify script is running
-- [ ] Check latest log for errors
-- [ ] Verify output files being created
-- [ ] Check disk space
-
-**Commands**:
-```bash
-# Check if running
-ps aux | grep data_extractor_final.py
-
-# Check latest log
-tail -50 logs/data_extractor_*.log | grep ERROR
-
-# Check output file count
-ls -1 //server/share/OUTPUT_FOLDER/ | wc -l
-```
-
----
-
-### 13.2 Weekly Maintenance
-
-**Checklist**:
-- [ ] Review all error logs
-- [ ] Check archive folder size
-- [ ] Verify network performance
-- [ ] Test with sample file
-- [ ] Review system resources
-
-**Procedures**:
-```bash
-# Extract all errors from week
-grep ERROR logs/*.log > weekly_errors.txt
-
-# Check archive size
-du -sh //server/share/archive/
-
-# Cleanup old archives if needed
-find //server/share/archive/ -mtime +90 -delete
-```
-
----
-
-### 13.3 Monthly Maintenance
-
-**Checklist**:
-- [ ] Update dependencies
-- [ ] Review and archive logs
-- [ ] Performance analysis
-- [ ] Configuration review
-- [ ] Backup current setup
-
-**Procedures**:
-```bash
-# Update dependencies
-pip install --upgrade pandas openpyxl xlrd
-
-# Archive old logs
-tar -czf logs_archive_$(date +%Y%m).tar.gz logs/*.log
-mv logs_archive_*.tar.gz /archive/logs/
-
-# Backup configuration
-cp data_extractor_final.py backups/data_extractor_$(date +%Y%m%d).py
-```
-
----
-
-### 13.4 Troubleshooting Workflow
-
-```
-Issue Reported
-    ↓
-Check Process Status
-    ├─ Running → Check Logs
-    └─ Not Running → Restart & Monitor
-    ↓
-Check Logs
-    ├─ Errors Found → Identify Error Type
-    └─ No Errors → Check Configuration
-    ↓
-Identify Error Type
-    ├─ File Access → Check Permissions
-    ├─ Data Issue → Verify File Content
-    ├─ Network Issue → Test Connectivity
-    └─ Configuration Issue → Review Config
-    ↓
-Implement Fix
-    ↓
-Test with Sample File
-    ↓
-Monitor for 24 Hours
-    ↓
-Document Resolution
-```
-
----
-
-## 14. Edge Cases & Known Limitations
-
-### 14.1 Known Limitations
-
-1. **Single File Processing**: Processes one file at a time, not concurrent
-2. **No Scheduling**: Runs continuously, no built-in scheduler
-3. **No Retry Logic**: Failed files must be manually retried
-4. **No Email Alerts**: No notification system for errors
-5. **Memory Bound**: Large files (>500MB) may cause memory issues
-6. **Network Dependent**: Requires stable network connection
-7. **No Encryption**: Data not encrypted in transit or at rest by script
-8. **No Database Integration**: Cannot write directly to databases
-9. **No Data Validation**: Does not validate data content, only structure
-10. **No Version Control**: Configuration changes not tracked
-
----
-
-### 14.2 Unsupported Features
-
-**Not Supported**:
-- File compression/decompression
-- Multiple input folders
-- Pattern-based sheet selection (e.g., all sheets starting with "Data")
-- Conditional processing (e.g., only if row count > 100)
-- Data transformation (calculations, formulas)
-- Merging multiple files
-- Real-time monitoring (using OS events)
-- Remote management/control
-- Web interface
-- API integration
-
-**Workarounds Available**:
-- Use multiple script instances for multiple folders
-- Pre-process files with separate tools
-- Use external schedulers (cron, Task Scheduler)
-
----
-
-### 14.3 Edge Cases
-
-#### 14.3.1 File Arrives During Processing
-
-**Scenario**: New file arrives while script is processing another file
-
-**Behavior**:
-- Current file completes processing
-- New file detected on next poll
-- Files processed in arrival order
-
-**Impact**: Slight delay (up to POLL_INTERVAL seconds)
-
----
-
-#### 14.3.2 Script Restarted During Processing
-
-**Scenario**: Script stopped/crashed mid-processing
-
-**Behavior**:
-- Partially processed file may remain in input folder
-- Output files from current run may be incomplete
-- On restart, file will be reprocessed from beginning
-
-**Impact**: Potential duplicate outputs (if previous run completed some sheets)
-
-**Resolution**: Delete incomplete output files manually if needed
-
----
-
-#### 14.3.3 Network Disconnects During Processing
-
-**Scenario**: Network connection lost while reading/writing
-
-**Behavior**:
-- Current operation fails
-- Error logged
-- File remains in input folder
-- Monitoring continues
-- File retried when network restored
-
-**Impact**: Temporary processing failure, automatic recovery
-
----
-
-#### 14.3.4 Disk Full During Write
-
-**Scenario**: Output folder disk full while writing output
-
-**Behavior**:
-- Write operation fails
-- Error logged: "No space left on device"
-- Input file remains unprocessed
-- Script continues monitoring
-
-**Resolution**: Free disk space, file will be retried automatically
-
----
-
-#### 14.3.5 Clock Change (Daylight Saving Time)
-
-**Scenario**: System clock adjusted forward/backward
-
-**Behavior**:
-- Timestamp in filenames may show discontinuity
-- No impact on processing logic
-- Logs show correct timestamps
-
-**Impact**: Cosmetic only, no functional impact
-
----
-
-#### 14.3.6 Same File Copied Multiple Times
-
-**Scenario**: User copies same file to input folder multiple times
-
-**Behavior**:
-- Each copy processed separately
-- Each generates independent output files
-- Archive contains each copy with unique timestamps
-
-**Impact**: Multiple outputs for same data (expected behavior)
-
----
-
-## 15. Best Practices
-
-### 15.1 Configuration Management
-
-**1. Version Control Configuration**
-```bash
-# Keep configuration in git
-git init
-git add data_extractor_final.py
-git commit -m "Initial configuration"
-
-# Before changes
-git diff data_extractor_final.py
-
-# After changes
-git add data_extractor_final.py
-git commit -m "Updated sheet A columns"
-```
-
-**2. Configuration Documentation**
-```python
-# Add comments to configuration
-SHEETS_CONFIG = [
-    {
-        # Sales team requested columns P,Q,R on 2024-01-29
-        # Ticket: IT-12345
-        'sheet_name': 'A',
-        'columns': ['P', 'Q', 'R'],
-        # ... rest of config
-    },
-]
-```
-
-**3. Configuration Testing**
-```bash
-# Test configuration changes in separate environment first
-cp data_extractor_final.py data_extractor_test.py
-# Edit test version
-python data_extractor_test.py
-# If works, promote to production
-```
-
----
-
-### 15.2 Operational Best Practices
-
-**1. Regular Monitoring**
-```bash
-# Set up daily health check
-#!/bin/bash
-# health_check.sh
-
-# Check if running
-if ! ps aux | grep -q "[d]ata_extractor_final.py"; then
-    echo "ERROR: Script not running" | mail -s "Alert: Data Extractor Down" admin@company.com
-fi
-
-# Check for errors in last 24h
-if grep -q ERROR logs/data_extractor_*.log; then
-    echo "WARNING: Errors detected" | mail -s "Alert: Data Extractor Errors" admin@company.com
-fi
-```
-
-**2. Backup Strategy**
-```bash
-# Daily backup script
-#!/bin/bash
-backup_date=$(date +%Y%m%d)
-
-# Backup script
-cp data_extractor_final.py backups/data_extractor_${backup_date}.py
-
-# Backup recent logs
-tar -czf backups/logs_${backup_date}.tar.gz logs/*.log
-
-# Keep last 30 days only
-find backups/ -mtime +30 -delete
-```
-
-**3. Performance Monitoring**
-```bash
-# Monitor processing times
-# Add to cron: 0 * * * * /path/to/performance_check.sh
-
-#!/bin/bash
-log_file="logs/performance_$(date +%Y%m).log"
-
-# Count files processed today
-files_today=$(grep -c "File processing completed" logs/data_extractor_*.log)
-
-# Average processing time (requires parsing logs)
-echo "$(date): Files processed: $files_today" >> $log_file
-```
-
----
-
-### 15.3 Data Quality Assurance
-
-**1. Sample Output Verification**
-```bash
-# Periodically verify output quality
-#!/bin/bash
-
-# Compare row counts
-input_rows=$(wc -l < /path/to/input.csv)
-output_rows=$(wc -l < /path/to/output.csv)
-
-if [ $output_rows -ne $expected_rows ]; then
-    echo "WARNING: Row count mismatch"
-fi
-```
-
-**2. Checksum Verification** (for critical data)
-```bash
-# Generate checksums for inputs
-md5sum input.xlsx > input.md5
-
-# After processing, verify
-md5sum -c input.md5
-```
-
-**3. Spot Checks**
-```python
-# Automated spot check script
-import pandas as pd
-
-input_df = pd.read_excel('input.xlsx', sheet_name='A', header=None, dtype=str)
-output_df = pd.read_csv('output.csv', header=None, dtype=str)
-
-# Verify sample row
-assert input_df.iloc[5, 15] == output_df.iloc[5, 0], "Data mismatch at row 5"
-print("Spot check passed")
-```
-
----
-
-### 15.4 Security Best Practices
-
-**1. Principle of Least Privilege**
-```bash
-# Run script as dedicated user with minimal permissions
-sudo useradd -m dataextractor
-sudo chown dataextractor:dataextractor /opt/data-extractor/
-
-# Grant only necessary permissions
-# Input: READ only
-# Output: WRITE only
-# Archive: WRITE only
-```
-
-**2. Audit Logging**
-```python
-# Enhanced logging (requires modification)
-# Log user/process information
-import os
-import getpass
-
-logger.info(f"Script started by: {getpass.getuser()}")
-logger.info(f"Process ID: {os.getpid()}")
-```
-
-**3. Secure Log Storage**
-```bash
-# Restrict log file permissions
-chmod 640 logs/*.log
-chown dataextractor:dataextractor logs/*.log
-```
-
----
-
-### 15.5 Disaster Recovery
-
-**1. Recovery Plan**
-```
-Scenario: Complete server failure
-
-Recovery Steps:
-1. Restore from backups:
-   - Script: backups/data_extractor_YYYYMMDD.py
-   - Logs: backups/logs_YYYYMMDD.tar.gz
-
-2. Verify configuration:
-   - Check folder paths
-   - Verify network access
-
-3. Test with sample file
-
-4. Resume production
-
-Recovery Time Objective (RTO): 1 hour
-Recovery Point Objective (RPO): 24 hours (daily backups)
-```
-
-**2. Backup Testing**
-```bash
-# Monthly backup restoration test
-#!/bin/bash
-
-# Extract latest backup
-latest_backup=$(ls -t backups/data_extractor_*.py | head -1)
-
-# Test in isolation
-cp $latest_backup test_restore.py
-python test_restore.py  # Should start without errors
-```
-
----
-
-### 15.6 Change Management
-
-**1. Change Request Template**
-```
-Change Request: Update Sheet A Columns
-
-Requested By: John Doe
-Date: 2024-01-29
-Priority: Medium
-
-Current Configuration:
-'columns': ['P', 'Q', 'R']
-
-Proposed Configuration:
-'columns': ['P', 'Q', 'R', 'S', 'T']
-
-Reason: Business requirement to include S and T columns
-
-Impact:
-- Output files will have 5 columns instead of 3
-- No impact on other sheets
-
-Testing Plan:
-1. Update test configuration
-2. Test with sample file
-3. Verify output has 5 columns
-4. Deploy to production
-
-Rollback Plan:
-Revert to previous configuration if issues arise
-```
-
-**2. Change Log**
-```
-# CHANGELOG.md
-
-## [2024-01-29]
-### Changed
-- Updated Sheet A columns from P,Q,R to P,Q,R,S,T
-- Reason: Business requirement
-- Ticket: IT-12345
-
-## [2024-01-15]
-### Fixed
-- Corrected ARCHIVE_FOLDER path
-- Reason: Permission error
-- Ticket: IT-12340
-```
-
----
-
-## 16. Appendices
-
-### Appendix A: Column Letter to Index Conversion
-
-```
-A = 0      N = 13     AA = 26
-B = 1      O = 14     AB = 27
-C = 2      P = 15     AC = 28
-D = 3      Q = 16     AD = 29
-E = 4      R = 17     AE = 30
-F = 5      S = 18     ...
-G = 6      T = 19     AZ = 51
-H = 7      U = 20     BA = 52
-I = 8      V = 21     ...
-J = 9      W = 22     ZZ = 701
-K = 10     X = 23
-L = 11     Y = 24
-M = 12     Z = 25
-```
-
-**Formula**:
-```
-For single letter: INDEX = ORD(letter) - ORD('A')
-For two letters: INDEX = (first_letter × 26) + second_letter - 1
-```
-
----
-
-### Appendix B: Common Error Codes
-
-| Error Code | Meaning | Solution |
-|------------|---------|----------|
-| Errno 2 | File not found | Check file path |
-| Errno 13 | Permission denied | Check permissions |
-| Errno 28 | No space left on device | Free disk space |
-| Errno 110 | Connection timed out | Check network |
-| Errno 113 | No route to host | Check server status |
-
----
-
-### Appendix C: Log Analysis Queries
-
-**Find all errors from last 7 days**:
-```bash
-find logs/ -name "*.log" -mtime -7 -exec grep ERROR {} \; > recent_errors.txt
-```
-
-**Count files processed per day**:
-```bash
-grep "File processing completed" logs/*.log | awk '{print $1}' | sort | uniq -c
-```
-
-**Average processing time** (requires parsing):
-```bash
-# Extract timestamps, calculate differences
-```
-
-**Find most common errors**:
-```bash
-grep ERROR logs/*.log | awk '{print $5}' | sort | uniq -c | sort -rn | head -10
-```
-
----
-
-### Appendix D: Performance Benchmarks
-
-**Typical Processing Times**:
-```
-File Size: 1MB
-- Read: 1-2 seconds
-- Extract: <1 second
-- Write CSV: 1 second
-- Write Excel: 2 seconds
-Total: ~5 seconds
-
-File Size: 10MB
-- Read: 5-7 seconds
-- Extract: 1-2 seconds
-- Write CSV: 3-4 seconds
-- Write Excel: 6-8 seconds
-Total: ~20 seconds
-
-File Size: 50MB
-- Read: 20-30 seconds
-- Extract: 5-10 seconds
-- Write CSV: 10-15 seconds
-- Write Excel: 20-30 seconds
-Total: ~60-90 seconds
-```
-
-**Note**: Times vary based on hardware, network, and data complexity
-
----
-
-### Appendix E: Quick Reference
-
-**Start Script**:
-```bash
-python data_extractor_final.py
-```
-
-**Stop Script**:
-```bash
-Ctrl+C
-```
-
-**Check Logs**:
-```bash
-tail -f logs/data_extractor_*.log
-```
-
-**Test Configuration**:
-```python
-# Syntax check
-python -m py_compile data_extractor_final.py
-```
-
-**Emergency Stop**:
-```bash
-pkill -f data_extractor_final.py
-```
-
----
-
-### Appendix F: Support Contacts
-
-**For Technical Issues**:
-- Check this documentation first
-- Review logs for specific errors
-- Consult troubleshooting section
-
-**For Configuration Changes**:
-- Submit change request
-- Include business justification
-- Specify testing requirements
-
-**For Urgent Issues**:
-- Follow incident response procedure
-- Document issue in detail
-- Include relevant log excerpts
-
----
-
-## Document Revision History
-
-| Version | Date | Changes | Author |
-|---------|------|---------|--------|
-| 1.0 | 2026-01-29 | Initial comprehensive documentation | System |
-
----
-
-**End of Documentation**
+Option Explicit
+
+' ========== CONFIGURATION ==========
+' Change these constants to customize behavior without modifying code
+
+' Maximum number of keywords (regenerate dashboard after changing)
+Const MAX_KEYWORDS As Integer = 10
+
+' Result Display Mode: "SIDE_BY_SIDE" or "SEPARATE_SHEET"
+' SIDE_BY_SIDE: Results appear to the right of the dashboard (columns F onwards, with col E as gap)
+' SEPARATE_SHEET: Results appear in a new worksheet
+Const RESULT_DISPLAY_MODE As String = "SIDE_BY_SIDE"
+
+' Name of the separate results sheet (only used if RESULT_DISPLAY_MODE = "SEPARATE_SHEET")
+Const RESULT_SHEET_NAME As String = "Search Results"
+
+' ========== COLOUR THEME (Reddish/Red branding) ==========
+' Primary header colour
+Const CLR_HEADER_PRIMARY As Long = 13893632    ' Dark Red RGB(192, 0, 0)
+' Section header colours
+Const CLR_SECTION_FOLDER As Long = 6039297     ' Deep Red-Blue RGB(33, 92, 92) -> using red: RGB(192,48,48)
+Const CLR_SECTION_KEYWORDS As Long = 8914957   ' Medium Red RGB(139, 0, 44) -> soft red
+Const CLR_SECTION_CONTROLS As Long = 7340032   ' Dark maroon RGB(112, 0, 0)
+Const CLR_SECTION_HOWTO As Long = 10027263     ' Coral-red RGB(255, 99, 71) -> use dark-red variant
+Const CLR_SECTION_RESULTS As Long = 9109504    ' Red-brown RGB(139, 0, 0)
+
+' ========== HELPER FUNCTIONS FOR OUTPUT ==========
+
+Function GetOutputWorksheet() As Worksheet
+    ' Returns the worksheet where results should be displayed based on configuration
+    Dim ws As Worksheet
+    
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        ' Check if results sheet exists
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(RESULT_SHEET_NAME)
+        On Error GoTo 0
+        
+        ' Create if doesn't exist
+        If ws Is Nothing Then
+            Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+            ws.Name = RESULT_SHEET_NAME
+            ws.Tab.Color = RGB(200, 200, 200)
+        Else
+            ' Clear existing content
+            ws.Cells.Clear
+        End If
+    Else
+        ' Use Search sheet (side-by-side mode)
+        Set ws = ThisWorkbook.Sheets("Search")
+    End If
+    
+    Set GetOutputWorksheet = ws
+End Function
+
+Function GetOutputStartColumn() As String
+    ' Returns the starting column letter for results
+    ' SIDE_BY_SIDE: Column F (col E is the greyed-out gap column)
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        GetOutputStartColumn = "A"
+    Else
+        GetOutputStartColumn = "F"  ' Side-by-side now starts at column F (col E is gap)
+    End If
+End Function
+
+Function GetOutputStartRow() As Integer
+    ' Returns the starting row for results
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        GetOutputStartRow = 2  ' Row 1 for title, row 2 for headers
+    Else
+        GetOutputStartRow = 3  ' Start at row 3 for side-by-side
+    End If
+End Function
+
+Function ColumnLetter(colNum As Integer) As String
+    ' Convert column number to letter (1=A, 2=B, etc.)
+    Dim temp As Integer
+    Dim letter As String
+    temp = colNum
+    Do While temp > 0
+        letter = Chr(65 + ((temp - 1) Mod 26)) & letter
+        temp = (temp - 1) \ 26
+    Loop
+    ColumnLetter = letter
+End Function
+
+Function ColumnNumber(colLetter As String) As Integer
+    ' Convert column letter to number (A=1, B=2, etc.)
+    Dim i As Integer
+    Dim result As Integer
+    result = 0
+    For i = 1 To Len(colLetter)
+        result = result * 26 + (Asc(Mid(colLetter, i, 1)) - 64)
+    Next i
+    ColumnNumber = result
+End Function
+
+' ========== MAIN SEARCH FUNCTION ==========
+Function SearchFilesForKeywords(folderPath As String, keywords() As String, keywordCount As Integer, searchContent As Boolean) As Variant
+    Dim fso As Object
+    Dim folder As Object
+    Dim file As Object
+    Dim results As Object
+    Dim candidateFiles As Object
+    Dim fileName As String
+    Dim i As Integer
+    Dim currentLevel As Integer
+    
+    ' Create FileSystemObject
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set results = CreateObject("System.Collections.ArrayList")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
+    
+    ' Check if folder exists
+    If Not fso.FolderExists(folderPath) Then
+        SearchFilesForKeywords = Array("Error: Folder not found")
+        Exit Function
+    End If
+    
+    Set folder = fso.GetFolder(folderPath)
+    
+    
+    ' Level 0: Get all files as initial candidates
+    For Each file In folder.Files
+        candidateFiles.Add file.Path
+    Next file
+    
+    ' Progressive filtering: Apply each keyword as a filter level
+    Dim tempFiles As Object
+    For currentLevel = 0 To keywordCount - 1
+        If candidateFiles.Count = 0 Then Exit For ' No candidates left
+        
+        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount, searchContent)
+        Set candidateFiles = tempFiles
+    Next currentLevel
+    
+    ' Convert final candidates to results array
+    If candidateFiles.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To candidateFiles.Count - 1)
+        Dim j As Long
+        For j = 0 To candidateFiles.Count - 1
+            Dim filePath As String
+            filePath = candidateFiles(j)
+            fileName = fso.GetFileName(filePath)
+            arr(j) = fileName & "|" & filePath
+        Next j
+        SearchFilesForKeywords = arr
+    Else
+        SearchFilesForKeywords = Array("No matches found")
+    End If
+    
+    Set fso = Nothing
+    Set folder = Nothing
+    Set results = Nothing
+    Set candidateFiles = Nothing
+End Function
+
+' ========== NEW: Search within a restricted file list ==========
+Function SearchFilesInList(filePaths() As String, fileCount As Integer, keywords() As String, keywordCount As Integer, searchContent As Boolean) As Variant
+    ' Searches only within the provided list of file paths (for secondary/refine search)
+    Dim fso As Object
+    Dim candidateFiles As Object
+    Dim tempFiles As Object
+    Dim i As Integer
+    Dim currentLevel As Integer
+    Dim fileName As String
+    Dim filePath As String
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
+    
+    ' Load provided file paths as candidates
+    For i = 0 To fileCount - 1
+        candidateFiles.Add filePaths(i)
+    Next i
+    
+    ' Progressive filtering
+    For currentLevel = 0 To keywordCount - 1
+        If candidateFiles.Count = 0 Then Exit For
+        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), currentLevel + 1, keywordCount, searchContent)
+        Set candidateFiles = tempFiles
+    Next currentLevel
+    
+    ' Convert results
+    If candidateFiles.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To candidateFiles.Count - 1)
+        Dim j As Long
+        For j = 0 To candidateFiles.Count - 1
+            filePath = candidateFiles(j)
+            fileName = fso.GetFileName(filePath)
+            arr(j) = fileName & "|" & filePath
+        Next j
+        SearchFilesInList = arr
+    Else
+        SearchFilesInList = Array("No matches found")
+    End If
+    
+    Set fso = Nothing
+    Set candidateFiles = Nothing
+End Function
+
+Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, level As Integer, totalLevels As Integer, searchContent As Boolean) As Object
+    Dim filteredFiles As Object
+    Dim i As Long
+    Dim filePath As String
+    Dim fileName As String
+    Dim fso As Object
+    Dim matchFound As Boolean
+    
+    Set filteredFiles = CreateObject("System.Collections.ArrayList")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    
+    keyword = LCase(Trim(keyword))
+    
+    ' Skip empty keywords
+    If keyword = "" Then
+        Set FilterFilesByKeyword = candidateFiles
+        Exit Function
+    End If
+    
+    ' Filter candidates by current keyword
+    For i = 0 To candidateFiles.Count - 1
+        filePath = candidateFiles(i)
+        fileName = fso.GetFileName(filePath)
+        matchFound = False
+        
+        ' Check if keyword is in file name
+        If InStr(1, LCase(fileName), keyword, vbTextCompare) > 0 Then
+            matchFound = True
+        End If
+        
+        ' Check file contents if not found in name AND searchContent is enabled
+        If Not matchFound And searchContent Then
+            matchFound = SearchFileContent(filePath, keyword)
+        End If
+        
+        ' Add to filtered list if match found
+        If matchFound Then
+            filteredFiles.Add filePath
+        End If
+    Next i
+    
+    Set FilterFilesByKeyword = filteredFiles
+    Set fso = Nothing
+End Function
+
+Function SearchFileContent(filePath As String, keyword As String) As Boolean
+    Dim fileNum As Integer
+    Dim fileContent As String
+    Dim textStream As Object
+    Dim fso As Object
+    
+    On Error Resume Next
+    
+    SearchFileContent = False
+    
+    ' Check if it's an Excel file
+    If IsExcelFile(filePath) Then
+        SearchFileContent = SearchExcelContent(filePath, keyword)
+        Exit Function
+    End If
+    
+    ' Only search text-based files
+    If IsTextFile(filePath) Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        Set textStream = fso.OpenTextFile(filePath, 1, False) ' 1 = ForReading
+        
+        If Err.Number = 0 Then
+            fileContent = textStream.ReadAll
+            textStream.Close
+            
+            If InStr(1, LCase(fileContent), keyword, vbTextCompare) > 0 Then
+                SearchFileContent = True
+            End If
+        End If
+        
+        Set textStream = Nothing
+        Set fso = Nothing
+    End If
+    
+    On Error GoTo 0
+End Function
+
+Function SearchExcelContent(filePath As String, keyword As String) As Boolean
+    ' Search content within Excel files
+    Dim xlApp As Object
+    Dim xlBook As Object
+    Dim xlSheet As Object
+    Dim cell As Object
+    Dim found As Boolean
+    
+    On Error Resume Next
+    
+    SearchExcelContent = False
+    found = False
+    
+    ' Create Excel application (late binding for compatibility)
+    Set xlApp = CreateObject("Excel.Application")
+    If xlApp Is Nothing Then Exit Function
+    
+    xlApp.Visible = False
+    xlApp.DisplayAlerts = False
+    xlApp.ScreenUpdating = False
+    
+    ' Open workbook
+    Set xlBook = xlApp.Workbooks.Open(filePath, ReadOnly:=True)
+    If Err.Number <> 0 Then
+        xlApp.Quit
+        Set xlApp = Nothing
+        Exit Function
+    End If
+    
+    ' Search all sheets
+    For Each xlSheet In xlBook.Worksheets
+        If found Then Exit For
+        
+        ' Search in used range
+        On Error Resume Next
+        Set cell = xlSheet.UsedRange.Find(What:=keyword, LookIn:=-4163, LookAt:=2, _
+                                          SearchOrder:=1, SearchDirection:=1, MatchCase:=False)
+        
+        If Not cell Is Nothing Then
+            found = True
+            Exit For
+        End If
+    Next xlSheet
+    
+    ' Clean up
+    xlBook.Close SaveChanges:=False
+    xlApp.Quit
+    
+    Set xlSheet = Nothing
+    Set xlBook = Nothing
+    Set xlApp = Nothing
+    
+    SearchExcelContent = found
+    
+    On Error GoTo 0
+End Function
+
+Function IsTextFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
+    
+    ' Text-based and Excel files
+    Select Case ext
+        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", "sql", "vbs", "bat", _
+             "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
+            IsTextFile = True
+        Case Else
+            IsTextFile = False
+    End Select
+End Function
+
+Function IsExcelFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Right(filePath, Len(filePath) - InStrRev(filePath, ".")))
+    
+    Select Case ext
+        Case "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
+            IsExcelFile = True
+        Case Else
+            IsExcelFile = False
+    End Select
+End Function
+
+
+' ========== USER-FACING SEARCH MACROS ==========
+
+Sub RunSearch()
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet
+    Dim outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String
+    Dim filePath As String
+    Dim keywordList As String
+    Dim startCol As String
+    Dim startRow As Integer
+    Dim col1 As String, col2 As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    
+    ' Get folder path
+    folderPath = ws.Range("B4").Value
+    
+    ' Get keywords
+    keywordCount = 0
+    keywordList = ""
+    
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (8 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+
+    
+    ' Validation
+    If folderPath = "" Then
+        MsgBox "Please enter folder path in cell B4", vbExclamation
+        Exit Sub
+    End If
+    
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword (cells B8 onwards)", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Get output worksheet and positions
+    Set outputWs = GetOutputWorksheet()
+    startCol = GetOutputStartColumn()
+    startRow = GetOutputStartRow()
+    
+    
+    
+    ' Clear previous results
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Cells.Clear
+        ' Add title
+        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        outputWs.Range("A1").Font.Bold = True
+        outputWs.Range("A1").Font.Size = 12
+    Else
+        Dim clearCol As Integer
+        clearCol = ColumnNumber(startCol)
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 2) & "1000").ClearContents
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 2) & "1000").ClearFormats
+        ' Also clear any stored first-search paths in helper col
+        outputWs.Range("J1:J1000").ClearContents
+    End If
+    
+    ' Run search - FILE NAME + CONTENT
+    Application.ScreenUpdating = False
+    Application.StatusBar = "Searching file names and content for " & keywordCount & " keyword(s)..."
+    
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
+    
+    ' Calculate column letters
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
+    
+    ' ---- Output Results Header Label ----
+    Call WriteResultsSectionHeader(outputWs, startCol, startRow)
+    
+    ' Output results with headers
+    outputWs.Range(col1 & startRow).Value = "File Name"
+    outputWs.Range(col2 & startRow).Value = "File Path"
+    
+    ' Format headers
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Bold = True
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Size = 10
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Interior.Color = RGB(217, 217, 217)
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).HorizontalAlignment = xlCenter
+    
+    ' Check if results contain error or no matches
+    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox results(0), vbExclamation
+        Exit Sub
+    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
+        Exit Sub
+    End If
+    
+    ' Output results with hyperlinks
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName = resultParts(0)
+        filePath = resultParts(1)
+        
+        ' Add file name as clickable hyperlink
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+                          Address:=filePath, _
+                          TextToDisplay:=fileName
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
+        
+        ' Add full path in column 2
+        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+        
+        ' Add alternating row colors
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+    
+    ' Add borders to results
+    Dim lastResultRow As Integer
+    lastResultRow = startRow + UBound(results) + 1
+    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    
+    ' Set column widths
+    outputWs.Columns(col1).ColumnWidth = 35
+    outputWs.Columns(col2).ColumnWidth = 55
+    
+    ' Add back button if separate sheet
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Range("D1").Value = "Back to Search"
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
+                          Address:="", _
+                          SubAddress:="'Search'!A1", _
+                          TextToDisplay:="Back to Search"
+        outputWs.Range("D1").Font.Bold = True
+        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
+        outputWs.Activate
+    End If
+    
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Search Type: File Name + Content" & vbCrLf & _
+           "Keywords used: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1), vbInformation
+End Sub
+
+Sub RunSearchByNameOnly()
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet
+    Dim outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String
+    Dim filePath As String
+    Dim keywordList As String
+    Dim startCol As String
+    Dim startRow As Integer
+    Dim col1 As String, col2 As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    
+    ' Get folder path
+    folderPath = ws.Range("B4").Value
+    
+    ' Get keywords
+    keywordCount = 0
+    keywordList = ""
+    
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (8 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+    
+    ' Validation
+    If folderPath = "" Then
+        MsgBox "Please enter folder path in cell B4", vbExclamation
+        Exit Sub
+    End If
+    
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword (cells B8 onwards)", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Get output worksheet and positions
+    Set outputWs = GetOutputWorksheet()
+    startCol = GetOutputStartColumn()
+    startRow = GetOutputStartRow()
+    
+    
+    ' Clear previous results
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Cells.Clear
+        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        outputWs.Range("A1").Font.Bold = True
+        outputWs.Range("A1").Font.Size = 12
+    Else
+        Dim clearCol As Integer
+        clearCol = ColumnNumber(startCol)
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 2) & "1000").ClearContents
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 2) & "1000").ClearFormats
+        ' Clear any stored file paths used for refine search
+        outputWs.Range("J1:J1000").ClearContents
+    End If
+    
+    ' Run search
+    Application.ScreenUpdating = False
+    Application.StatusBar = "Searching file names only for " & keywordCount & " keyword(s)..."
+    
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, False)
+    
+    ' Calculate column letters
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
+    
+    ' ---- Output Results Header Label ----
+    Call WriteResultsSectionHeader(outputWs, startCol, startRow)
+    
+    ' Output results with headers
+    outputWs.Range(col1 & startRow).Value = "File Name"
+    outputWs.Range(col2 & startRow).Value = "File Path"
+    
+    ' Format headers
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Bold = True
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Size = 10
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Interior.Color = RGB(217, 217, 217)
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).HorizontalAlignment = xlCenter
+    
+    
+    ' Check if results contain error or no matches
+    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox results(0), vbExclamation
+        Exit Sub
+    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox "No matches found in file names for all " & keywordCount & " keyword(s)", vbInformation
+        Exit Sub
+    End If
+    
+    ' Output results with hyperlinks
+    ' ALSO store file paths in hidden helper column J for use by RefineSearch
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName = resultParts(0)
+        filePath = resultParts(1)
+        
+        ' Add file name as clickable hyperlink
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+                          Address:=filePath, _
+                          TextToDisplay:=fileName
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
+        
+        ' Add full path
+        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+        
+        ' Store path in hidden helper column J for RefineSearch
+        outputWs.Range("J" & (startRow + 1 + i)).Value = filePath
+        
+        ' Add alternating row colors
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+    
+    ' Add borders to results
+    Dim lastResultRow As Integer
+    lastResultRow = startRow + UBound(results) + 1
+    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & lastResultRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    
+    ' Set column widths
+    outputWs.Columns(col1).ColumnWidth = 35
+    outputWs.Columns(col2).ColumnWidth = 55
+    
+    ' Hide helper column J
+    outputWs.Columns("J").Hidden = True
+    
+    ' Add back button if separate sheet
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Range("D1").Value = "Back to Search"
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
+                          Address:="", _
+                          SubAddress:="'Search'!A1", _
+                          TextToDisplay:="Back to Search"
+        outputWs.Range("D1").Font.Bold = True
+        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
+        outputWs.Activate
+    End If
+    
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Search Type: File Name Only" & vbCrLf & _
+           "Keywords used: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
+           "Tip: Use 'Refine Results' to search within these " & (UBound(results) + 1) & " file(s).", vbInformation
+End Sub
+
+' ========== NEW: REFINE SEARCH (secondary search within first results) ==========
+Sub RunRefineSearch()
+    ' Reads the file paths stored in hidden col J (from RunSearchByNameOnly),
+    ' then re-filters them using the currently entered keywords.
+    Dim ws As Worksheet
+    Dim outputWs As Worksheet
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim keywordList As String
+    Dim startCol As String
+    Dim startRow As Integer
+    Dim col1 As String, col2 As String
+    Dim results As Variant
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String
+    Dim filePath As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    Set outputWs = GetOutputWorksheet()
+    startCol = GetOutputStartColumn()
+    startRow = GetOutputStartRow()
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
+    
+    ' Collect file paths from hidden helper column J
+    Dim firstResultPaths() As String
+    Dim fileCount As Integer
+    fileCount = 0
+    
+    ' Unhide J temporarily to read
+    outputWs.Columns("J").Hidden = False
+    
+    Dim checkRow As Integer
+    checkRow = startRow + 1
+    Do While outputWs.Range("J" & checkRow).Value <> ""
+        ReDim Preserve firstResultPaths(fileCount)
+        firstResultPaths(fileCount) = outputWs.Range("J" & checkRow).Value
+        fileCount = fileCount + 1
+        checkRow = checkRow + 1
+    Loop
+    
+    outputWs.Columns("J").Hidden = True
+    
+    If fileCount = 0 Then
+        MsgBox "No first-search results found to refine." & vbCrLf & _
+               "Please run 'Search: Name Only' first.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Get keywords from dashboard
+    keywordCount = 0
+    keywordList = ""
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (8 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+    
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword to refine with (cells B8 onwards).", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Clear current results area (keep col J intact - re-written below)
+    outputWs.Range(col1 & "1:" & col2 & "1000").ClearContents
+    outputWs.Range(col1 & "1:" & col2 & "1000").ClearFormats
+    outputWs.Columns("J").Hidden = False
+    outputWs.Range("J1:J1000").ClearContents
+    outputWs.Columns("J").Hidden = True
+    
+    ' Run refined search on first-result files only
+    Application.ScreenUpdating = False
+    Application.StatusBar = "Refining search within " & fileCount & " file(s)..."
+    
+    results = SearchFilesInList(firstResultPaths, fileCount, keywords, keywordCount, False)
+    
+    ' Write results header
+    Call WriteResultsSectionHeader(outputWs, startCol, startRow)
+    
+    outputWs.Range(col1 & startRow).Value = "File Name (Refined)"
+    outputWs.Range(col2 & startRow).Value = "File Path"
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Bold = True
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Font.Size = 10
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Interior.Color = RGB(217, 217, 217)
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & startRow).HorizontalAlignment = xlCenter
+    
+    If UBound(results) = 0 And (InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found") Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox results(0), vbInformation
+        Exit Sub
+    End If
+    
+    ' Output refined results
+    outputWs.Columns("J").Hidden = False
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName = resultParts(0)
+        filePath = resultParts(1)
+        
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+                          Address:=filePath, _
+                          TextToDisplay:=fileName
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
+        
+        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+        
+        ' Persist paths for further refine if needed
+        outputWs.Range("J" & (startRow + 1 + i)).Value = filePath
+        
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(255, 240, 240)
+        End If
+    Next i
+    outputWs.Columns("J").Hidden = True
+    
+    Dim lastRow As Integer
+    lastRow = startRow + UBound(results) + 1
+    outputWs.Range(col1 & startRow & ":" & col2 & lastRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & lastRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    outputWs.Columns(col1).ColumnWidth = 35
+    outputWs.Columns(col2).ColumnWidth = 55
+    
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    
+    MsgBox "Refine Search complete!" & vbCrLf & vbCrLf & _
+           "Searched within: " & fileCount & " file(s) from first results" & vbCrLf & _
+           "Keywords used: " & keywordList & vbCrLf & _
+           "Files matched: " & (UBound(results) + 1), vbInformation
+End Sub
+
+' ========== FILTERED CONTENT VIEW FUNCTIONALITY ==========
+' This section provides functionality to view only matching rows from files
+
+Sub RunSearchWithContentPreview()
+    ' This macro performs the search and shows results on the main sheet.
+    ' Preview sheets are created ON DEMAND when the user clicks "View Preview" links.
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet
+    Dim outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String
+    Dim filePath As String
+    Dim keywordList As String
+    Dim startCol As String
+    Dim startRow As Integer
+    Dim col1 As String, col2 As String, col3 As String
+    
+    Set ws = ThisWorkbook.Sheets("Search")
+    
+    ' Get folder path
+    folderPath = ws.Range("B4").Value
+    
+    ' Get keywords and logic operators
+    keywordCount = 0
+    keywordList = ""
+    
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (8 + i)).Value)
+        keywordLogic(i) = UCase(Trim(ws.Range("C" & (8 + i)).Value))
+        
+        If keywordLogic(i) = "" Then keywordLogic(i) = "AND"
+        
+        If keywordLogic(i) <> "AND" And keywordLogic(i) <> "OR" Then
+            MsgBox "Invalid logic operator in row " & (8 + i) & ". Use 'AND' or 'OR' only.", vbExclamation
+            Exit Sub
+        End If
+        
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """ (" & keywordLogic(i) & ")"
+        End If
+    Next i
+    
+    ' Validation
+    If folderPath = "" Then
+        MsgBox "Please enter folder path in cell B4", vbExclamation
+        Exit Sub
+    End If
+    
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword (cells B8 onwards)", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Get output worksheet and positions
+    Set outputWs = GetOutputWorksheet()
+    startCol = GetOutputStartColumn()
+    startRow = GetOutputStartRow()
+    
+    ' Clear previous results
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Cells.Clear
+        outputWs.Range("A1").Value = "Search Results - " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        outputWs.Range("A1").Font.Bold = True
+        outputWs.Range("A1").Font.Size = 12
+    Else
+        Dim clearCol As Integer
+        clearCol = ColumnNumber(startCol)
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 3) & "1000").ClearContents
+        outputWs.Range(ColumnLetter(clearCol) & "1:" & ColumnLetter(clearCol + 3) & "1000").ClearFormats
+    End If
+    
+    ' Run search
+    Application.ScreenUpdating = False
+    Application.StatusBar = "Searching for " & keywordCount & " keyword(s)..."
+    
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
+    
+    ' Calculate column letters
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col2 = ColumnLetter(ColumnNumber(startCol) + 1)
+    col3 = ColumnLetter(ColumnNumber(startCol) + 2)
+    
+    ' ---- Output Results Header Label ----
+    Call WriteResultsSectionHeader(outputWs, startCol, startRow)
+    
+    ' Output results with headers
+    outputWs.Range(col1 & startRow).Value = "File Name"
+    outputWs.Range(col2 & startRow).Value = "File Path"
+    outputWs.Range(col3 & startRow).Value = "Content Preview"
+    
+    ' Format headers
+    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Font.Bold = True
+    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Font.Size = 10
+    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Interior.Color = RGB(217, 217, 217)
+    outputWs.Range(col1 & startRow & ":" & col3 & startRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col3 & startRow).HorizontalAlignment = xlCenter
+    
+    ' Check if results contain error or no matches
+    If UBound(results) = 0 And InStr(1, results(0), "Error:") > 0 Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox results(0), vbExclamation
+        Exit Sub
+    ElseIf UBound(results) = 0 And results(0) = "No matches found" Then
+        outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+        Application.ScreenUpdating = True
+        Application.StatusBar = False
+        MsgBox "No matches found for all " & keywordCount & " keyword(s)", vbInformation
+        Exit Sub
+    End If
+    
+    ' Output results - NO pre-generated preview sheets.
+    ' The "Open Preview" link uses a macro that builds the sheet on demand.
+    ' We store the file path and keywords in a named range / hidden cell to pass context.
+    
+    ' Store keyword context for on-demand preview (use a hidden sheet or named cells)
+    ' We'll store in a hidden helper sheet "PreviewConfig"
+    Call StorePreviewConfig(keywords, keywordLogic, keywordCount)
+    
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName = resultParts(0)
+        filePath = resultParts(1)
+        
+        ' Add file name as clickable hyperlink
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+                          Address:=filePath, _
+                          TextToDisplay:=fileName
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Color = RGB(5, 99, 193)
+        outputWs.Range(col1 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
+        
+        ' Add full path
+        outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+        
+        ' Determine if text-previewable
+        If IsTextFile(filePath) And Not IsExcelFile(filePath) Then
+            ' Store file index + path in col3 as plain text (macro will read it)
+            ' We use a special marker so the Worksheet_SelectionChange can trigger preview
+            outputWs.Range(col3 & (startRow + 1 + i)).Value = "[ Click to Preview ]"
+            outputWs.Range(col3 & (startRow + 1 + i)).Font.Color = RGB(192, 0, 0)
+            outputWs.Range(col3 & (startRow + 1 + i)).Font.Bold = True
+            outputWs.Range(col3 & (startRow + 1 + i)).Font.Underline = xlUnderlineStyleSingle
+            outputWs.Range(col3 & (startRow + 1 + i)).HorizontalAlignment = xlCenter
+            ' Tag: store full path in a comment for on-demand retrieval
+            outputWs.Range(col3 & (startRow + 1 + i)).AddComment Text:="PREVIEW_PATH:" & filePath
+            outputWs.Range(col3 & (startRow + 1 + i)).Comment.Visible = False
+        Else
+            outputWs.Range(col3 & (startRow + 1 + i)).Value = "N/A (Binary)"
+            outputWs.Range(col3 & (startRow + 1 + i)).Font.Color = RGB(128, 128, 128)
+            outputWs.Range(col3 & (startRow + 1 + i)).Font.Italic = True
+            outputWs.Range(col3 & (startRow + 1 + i)).HorizontalAlignment = xlCenter
+        End If
+        
+        ' Add alternating row colors
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & col3 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+    
+    ' Add borders to results
+    Dim lastResultRow As Integer
+    lastResultRow = startRow + UBound(results) + 1
+    outputWs.Range(col1 & startRow & ":" & col3 & lastResultRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col3 & lastResultRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    
+    ' Set column widths
+    outputWs.Columns(col1).ColumnWidth = 30
+    outputWs.Columns(col2).ColumnWidth = 50
+    outputWs.Columns(col3).ColumnWidth = 20
+    
+    ' Add back button if separate sheet
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        outputWs.Range("D1").Value = "Back to Search"
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
+                          Address:="", _
+                          SubAddress:="'Search'!A1", _
+                          TextToDisplay:="Back to Search"
+        outputWs.Range("D1").Font.Bold = True
+        outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
+        outputWs.Activate
+    End If
+    
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Keywords used: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
+           "Click '[ Click to Preview ]' in the Content Preview column to open a preview sheet for that file.", vbInformation
+End Sub
+
+' ========== ON-DEMAND PREVIEW: Called when user clicks a preview cell ==========
+Sub OpenPreviewForCell(previewFilePath As String)
+    ' Builds (or refreshes) a single preview sheet for the specified file.
+    Dim ws As Worksheet
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    
+    ' Load keyword config from PreviewConfig sheet
+    Call LoadPreviewConfig(keywords, keywordLogic, keywordCount)
+    
+    Dim sheetName As String
+    sheetName = CreateFilteredContentSheet(previewFilePath, keywords, keywordLogic, keywordCount, 1)
+    
+    If sheetName <> "" Then
+        ThisWorkbook.Sheets(sheetName).Activate
+    Else
+        MsgBox "Could not generate preview for this file." & vbCrLf & _
+               "It may be a binary file or could not be read.", vbInformation
+    End If
+End Sub
+
+' ========== HELPER: Store/Load keyword config for on-demand preview ==========
+Sub StorePreviewConfig(keywords() As String, keywordLogic() As String, keywordCount As Integer)
+    Dim cfgWs As Worksheet
+    On Error Resume Next
+    Set cfgWs = ThisWorkbook.Sheets("PreviewConfig")
+    On Error GoTo 0
+    
+    If cfgWs Is Nothing Then
+        Set cfgWs = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        cfgWs.Name = "PreviewConfig"
+    End If
+    
+    cfgWs.Visible = xlSheetVeryHidden
+    cfgWs.Cells.ClearContents
+    cfgWs.Range("A1").Value = keywordCount
+    
+    Dim i As Integer
+    For i = 0 To keywordCount - 1
+        cfgWs.Range("A" & (2 + i)).Value = keywords(i)
+        cfgWs.Range("B" & (2 + i)).Value = keywordLogic(i)
+    Next i
+End Sub
+
+Sub LoadPreviewConfig(keywords() As String, keywordLogic() As String, keywordCount As Integer)
+    Dim cfgWs As Worksheet
+    On Error Resume Next
+    Set cfgWs = ThisWorkbook.Sheets("PreviewConfig")
+    On Error GoTo 0
+    
+    If cfgWs Is Nothing Then
+        keywordCount = 0
+        Exit Sub
+    End If
+    
+    keywordCount = CInt(cfgWs.Range("A1").Value)
+    ReDim keywords(0 To MAX_KEYWORDS - 1)
+    ReDim keywordLogic(0 To MAX_KEYWORDS - 1)
+    
+    Dim i As Integer
+    For i = 0 To keywordCount - 1
+        keywords(i) = cfgWs.Range("A" & (2 + i)).Value
+        keywordLogic(i) = cfgWs.Range("B" & (2 + i)).Value
+    Next i
+End Sub
+
+' ========== FILTERED CONTENT VIEW FUNCTIONALITY ==========
+
+Function CreateFilteredContentSheet(filePath As String, keywords() As String, keywordLogic() As String, keywordCount As Integer, fileIndex As Integer) As String
+    Dim fso As Object
+    Dim textStream As Object
+    Dim fileContent As String
+    Dim lines() As String
+    Dim filteredLines As Object
+    Dim i As Long
+    Dim j As Integer
+    Dim ws As Worksheet
+    Dim sheetName As String
+    Dim fileName As String
+    Dim rowNum As Long
+    Dim maxSheetNameLength As Integer
+    Dim andKeywords As Object
+    Dim orKeywords As Object
+    Dim lineMatchesAnd As Boolean
+    Dim lineMatchesOr As Boolean
+    Dim hasAndKeywords As Boolean
+    Dim hasOrKeywords As Boolean
+    
+    CreateFilteredContentSheet = ""
+    
+    ' Only process text files (exclude Excel for row extraction)
+    If Not IsTextFile(filePath) Or IsExcelFile(filePath) Then
+        Exit Function
+    End If
+    
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set filteredLines = CreateObject("System.Collections.ArrayList")
+    Set andKeywords = CreateObject("System.Collections.ArrayList")
+    Set orKeywords = CreateObject("System.Collections.ArrayList")
+    
+    ' Separate keywords into AND and OR lists
+    hasAndKeywords = False
+    hasOrKeywords = False
+    
+    For j = 0 To keywordCount - 1
+        If keywords(j) <> "" Then
+            If keywordLogic(j) = "AND" Then
+                andKeywords.Add keywords(j)
+                hasAndKeywords = True
+            ElseIf keywordLogic(j) = "OR" Then
+                orKeywords.Add keywords(j)
+                hasOrKeywords = True
+            End If
+        End If
+    Next j
+    
+    On Error Resume Next
+    
+    ' Read file content
+    Set textStream = fso.OpenTextFile(filePath, 1, False)
+    If Err.Number <> 0 Then Exit Function
+    
+    fileContent = textStream.ReadAll
+    textStream.Close
+    
+    ' Split into lines
+    lines = Split(fileContent, vbCrLf)
+    If UBound(lines) = 0 Then lines = Split(fileContent, vbLf)
+    If UBound(lines) = 0 Then lines = Split(fileContent, vbCr)
+    
+    ' Filter lines based on AND/OR logic
+    For i = LBound(lines) To UBound(lines)
+        If Trim(lines(i)) = "" Then GoTo NextLine
+        
+        lineMatchesAnd = True
+        lineMatchesOr = False
+        
+        ' Check AND keywords
+        If hasAndKeywords Then
+            For j = 0 To andKeywords.Count - 1
+                If InStr(1, LCase(lines(i)), LCase(andKeywords(j)), vbTextCompare) = 0 Then
+                    lineMatchesAnd = False
+                    Exit For
+                End If
+            Next j
+        End If
+        
+        ' Check OR keywords
+        If hasOrKeywords Then
+            For j = 0 To orKeywords.Count - 1
+                If InStr(1, LCase(lines(i)), LCase(orKeywords(j)), vbTextCompare) > 0 Then
+                    lineMatchesOr = True
+                    Exit For
+                End If
+            Next j
+        Else
+            lineMatchesOr = True
+        End If
+        
+        ' Add line if matches logic
+        If lineMatchesAnd And lineMatchesOr Then
+            filteredLines.Add "Line " & (i + 1) & ": " & lines(i)
+        End If
+        
+NextLine:
+    Next i
+    
+    ' Create worksheet for filtered content
+    If filteredLines.Count > 0 Then
+        fileName = fso.GetFileName(filePath)
+        
+        ' Create safe sheet name
+        maxSheetNameLength = 31
+        sheetName = "Preview_" & Left(fileName, maxSheetNameLength - 8)
+        sheetName = Replace(sheetName, ":", "")
+        sheetName = Replace(sheetName, "\", "")
+        sheetName = Replace(sheetName, "/", "")
+        sheetName = Replace(sheetName, "?", "")
+        sheetName = Replace(sheetName, "*", "")
+        sheetName = Replace(sheetName, "[", "")
+        sheetName = Replace(sheetName, "]", "")
+        
+        ' Delete sheet if exists (refresh)
+        On Error Resume Next
+        Application.DisplayAlerts = False
+        ThisWorkbook.Sheets(sheetName).Delete
+        Application.DisplayAlerts = True
+        On Error GoTo 0
+        
+        ' Create new sheet
+        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        ws.Name = sheetName
+        ws.Tab.Color = RGB(192, 0, 0)
+        
+        ' Add header information
+        ws.Range("A1:B1").Merge
+        ws.Range("A1").Value = "Content Preview"
+        ws.Range("A1").Font.Bold = True
+        ws.Range("A1").Font.Size = 14
+        ws.Range("A1").Font.Color = RGB(255, 255, 255)
+        ws.Range("A1").Interior.Color = RGB(192, 0, 0)
+        
+        ws.Range("A2").Value = "File:"
+        ws.Range("A2").Font.Bold = True
+        ws.Range("B2").Value = fileName
+        
+        ws.Range("A3").Value = "Full Path:"
+        ws.Range("A3").Font.Bold = True
+        ws.Range("B3").Value = filePath
+        
+        ws.Range("A4").Value = "Filter Logic:"
+        ws.Range("A4").Font.Bold = True
+        Dim logicDescription As String
+        logicDescription = ""
+        
+        If hasAndKeywords Then
+            logicDescription = "AND Keywords: "
+            For j = 0 To andKeywords.Count - 1
+                If j > 0 Then logicDescription = logicDescription & " + "
+                logicDescription = logicDescription & andKeywords(j)
+            Next j
+        End If
+        
+        If hasOrKeywords Then
+            If logicDescription <> "" Then logicDescription = logicDescription & " | "
+            logicDescription = logicDescription & "OR Keywords: "
+            For j = 0 To orKeywords.Count - 1
+                If j > 0 Then logicDescription = logicDescription & " / "
+                logicDescription = logicDescription & orKeywords(j)
+            Next j
+        End If
+        
+        ws.Range("B4").Value = logicDescription
+        
+        ws.Range("A5").Value = "Matching Lines:"
+        ws.Range("A5").Font.Bold = True
+        ws.Range("B5").Value = filteredLines.Count
+        
+        ' Add column header
+        ws.Range("A7").Value = "Matching Rows (with line numbers)"
+        ws.Range("A7").Font.Bold = True
+        ws.Range("A7").Font.Color = RGB(255, 255, 255)
+        ws.Range("A7").Interior.Color = RGB(192, 0, 0)
+        
+        ' Add filtered lines with highlighting
+        rowNum = 8
+        For i = 0 To filteredLines.Count - 1
+            ws.Range("A" & rowNum).Value = filteredLines(i)
+            
+            Dim cellText As String
+            cellText = ws.Range("A" & rowNum).Value
+            
+            ' Highlight AND keywords in GREEN
+            If hasAndKeywords Then
+                For j = 0 To andKeywords.Count - 1
+                    Dim kwPos As Long
+                    Dim searchStart As Long
+                    searchStart = 1
+                    
+                    Do
+                        kwPos = InStr(searchStart, cellText, andKeywords(j), vbTextCompare)
+                        If kwPos > 0 Then
+                            ws.Range("A" & rowNum).Characters(kwPos, Len(andKeywords(j))).Font.Color = RGB(0, 128, 0)
+                            ws.Range("A" & rowNum).Characters(kwPos, Len(andKeywords(j))).Font.Bold = True
+                            searchStart = kwPos + Len(andKeywords(j))
+                        End If
+                    Loop While kwPos > 0 And searchStart < Len(cellText)
+                Next j
+            End If
+            
+            ' Highlight OR keywords in BLUE
+            If hasOrKeywords Then
+                For j = 0 To orKeywords.Count - 1
+                    searchStart = 1
+                    
+                    Do
+                        kwPos = InStr(searchStart, cellText, orKeywords(j), vbTextCompare)
+                        If kwPos > 0 Then
+                            ws.Range("A" & rowNum).Characters(kwPos, Len(orKeywords(j))).Font.Color = RGB(0, 0, 255)
+                            ws.Range("A" & rowNum).Characters(kwPos, Len(orKeywords(j))).Font.Bold = True
+                            searchStart = kwPos + Len(orKeywords(j))
+                        End If
+                    Loop While kwPos > 0 And searchStart < Len(cellText)
+                Next j
+            End If
+            
+            rowNum = rowNum + 1
+            
+            If rowNum > 10000 Then
+                ws.Range("A" & rowNum).Value = "... (More results truncated for performance)"
+                Exit For
+            End If
+        Next i
+        
+        ' Add legend
+        ws.Range("A" & (rowNum + 2)).Value = "Legend:"
+        ws.Range("A" & (rowNum + 2)).Font.Bold = True
+        
+        If hasAndKeywords Then
+            ws.Range("A" & (rowNum + 3)).Value = "AND Keywords (all must be present)"
+            ws.Range("A" & (rowNum + 3)).Font.Color = RGB(0, 128, 0)
+            ws.Range("A" & (rowNum + 3)).Font.Bold = True
+        End If
+        
+        If hasOrKeywords Then
+            Dim legendRow As Integer
+            legendRow = IIf(hasAndKeywords, rowNum + 4, rowNum + 3)
+            ws.Range("A" & legendRow).Value = "OR Keywords (at least one must be present)"
+            ws.Range("A" & legendRow).Font.Color = RGB(0, 0, 255)
+            ws.Range("A" & legendRow).Font.Bold = True
+        End If
+        
+        ' Format columns
+        ws.Columns("A").ColumnWidth = 150
+        ws.Columns("A").WrapText = True
+        ws.Columns("B").ColumnWidth = 50
+        
+        ' Add back button
+        ws.Range("A" & (rowNum + 6)).Value = "Back to Search Results"
+        ws.Hyperlinks.Add Anchor:=ws.Range("A" & (rowNum + 6)), _
+                          Address:="", _
+                          SubAddress:="'Search'!A1", _
+                          TextToDisplay:="Back to Search Results"
+        ws.Range("A" & (rowNum + 6)).Font.Bold = True
+        ws.Range("A" & (rowNum + 6)).Font.Color = RGB(192, 0, 0)
+        
+        CreateFilteredContentSheet = sheetName
+    End If
+    
+    On Error GoTo 0
+    Set fso = Nothing
+    Set textStream = Nothing
+    Set filteredLines = Nothing
+    Set andKeywords = Nothing
+    Set orKeywords = Nothing
+End Function
+
+Sub ClearFilteredContentSheets()
+    Dim ws As Worksheet
+    Dim sheetsDeleted As Integer
+    
+    sheetsDeleted = 0
+    Application.DisplayAlerts = False
+    
+    For Each ws In ThisWorkbook.Sheets
+        If Left(ws.Name, 8) = "Preview_" Then
+            ws.Delete
+            sheetsDeleted = sheetsDeleted + 1
+        End If
+    Next ws
+    
+    Application.DisplayAlerts = True
+    
+    MsgBox "Cleared " & sheetsDeleted & " preview sheet(s)", vbInformation
+End Sub
+
+
+' ========== HELPER: Write Results Section Header ==========
+Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, startRow As Integer)
+    ' Writes a styled "RESULTS / OUTPUT" header above the results data
+    ' Only applies in SIDE_BY_SIDE mode
+    If UCase(RESULT_DISPLAY_MODE) <> "SIDE_BY_SIDE" Then Exit Sub
+    
+    Dim col1 As String
+    Dim col2 As String
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col2 = ColumnLetter(ColumnNumber(startCol) + 2)
+    
+    ' Row 1: Results section header (mimics the dashboard input header style)
+    outputWs.Range(col1 & "1:" & col2 & "1").Merge
+    outputWs.Range(col1 & "1").Value = "RESULTS / OUTPUT"
+    outputWs.Range(col1 & "1").Font.Bold = True
+    outputWs.Range(col1 & "1").Font.Size = 16
+    outputWs.Range(col1 & "1").Font.Color = RGB(255, 255, 255)
+    outputWs.Range(col1 & "1").Interior.Color = RGB(139, 0, 0)
+    outputWs.Range(col1 & "1").HorizontalAlignment = xlCenter
+    outputWs.Range(col1 & "1").VerticalAlignment = xlCenter
+    outputWs.Range(col1 & "1").RowHeight = 35
+    
+    ' Row 2: Subheader with timestamp
+    outputWs.Range(col1 & "2:" & col2 & "2").Merge
+    outputWs.Range(col1 & "2").Value = "Last updated: " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+    outputWs.Range(col1 & "2").Font.Italic = True
+    outputWs.Range(col1 & "2").Font.Size = 9
+    outputWs.Range(col1 & "2").Font.Color = RGB(255, 255, 255)
+    outputWs.Range(col1 & "2").Interior.Color = RGB(192, 0, 0)
+    outputWs.Range(col1 & "2").HorizontalAlignment = xlCenter
+    outputWs.Range(col1 & "2").RowHeight = 18
+End Sub
+
+' ========== WORKSHEET EVENT HOOK for on-demand preview ==========
+' NOTE: The following sub must be placed in the "Search" sheet's code module
+' (not this module). Copy it to the Sheet1/Search sheet object:
+'
+' Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+'     If Target.Count > 1 Then Exit Sub
+'     If Target.Comment Is Nothing Then Exit Sub
+'     Dim cmt As String
+'     cmt = Target.Comment.Text
+'     If Left(cmt, 13) = "PREVIEW_PATH:" Then
+'         Dim previewPath As String
+'         previewPath = Mid(cmt, 14)
+'         Call OpenPreviewForCell(previewPath)
+'     End If
+' End Sub
+
+
+' ========== DASHBOARD SETUP ==========
+
+Sub SetupSearchSheet()
+    Dim ws As Worksheet
+    Dim i As Integer
+    Dim btn As Button
+    
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Search")
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add
+        ws.Name = "Search"
+    End If
+    
+    Application.ScreenUpdating = False
+    
+    ' Clear existing content
+    ws.Cells.Clear
+    ws.Buttons.Delete  ' Remove any existing buttons
+    
+    ' Set tab colour to match branding
+    ws.Tab.Color = RGB(192, 0, 0)
+    
+    ' ========== SECTION 1: HEADER ==========
+    ws.Range("A1:D1").Merge
+    ws.Range("A1").Value = "UNIVERSAL FILE & CONTENT FINDER"
+    ws.Range("A1").Font.Bold = True
+    ws.Range("A1").Font.Size = 16
+    ws.Range("A1").Font.Color = RGB(255, 255, 255)
+    ws.Range("A1").Interior.Color = RGB(139, 0, 0)      ' Dark Red
+    ws.Range("A1").HorizontalAlignment = xlCenter
+    ws.Range("A1").VerticalAlignment = xlCenter
+    ws.Range("A1").RowHeight = 35
+    
+    ' ========== SECTION 2: FOLDER PATH ==========
+    Dim folderSection As Integer
+    folderSection = 3
+    
+    ws.Range("A" & folderSection & ":D" & folderSection).Merge
+    ws.Range("A" & folderSection).Value = "FOLDER LOCATION"
+    ws.Range("A" & folderSection).Font.Bold = True
+    ws.Range("A" & folderSection).Font.Size = 11
+    ws.Range("A" & folderSection).Font.Color = RGB(255, 255, 255)
+    ws.Range("A" & folderSection).Interior.Color = RGB(192, 48, 48)   ' Medium Red
+    ws.Range("A" & folderSection).HorizontalAlignment = xlLeft
+    ws.Range("A" & folderSection).VerticalAlignment = xlCenter
+    ws.Range("A" & folderSection).RowHeight = 25
+    
+    ws.Range("A" & (folderSection + 1)).Value = "Folder Path:"
+    ws.Range("A" & (folderSection + 1)).Font.Bold = True
+    ws.Range("A" & (folderSection + 1)).Font.Size = 10
+    ws.Range("C" & (folderSection + 1) & ":D" & (folderSection + 1)).Merge
+    ws.Range("B" & (folderSection + 1)).Value = "C:\Your\Folder\Path"
+    ws.Range("B" & (folderSection + 1)).Font.Italic = True
+    ws.Range("B" & (folderSection + 1)).Font.Color = RGB(128, 128, 128)
+    ws.Range("B" & (folderSection + 1)).Interior.Color = RGB(255, 245, 245)
+    ws.Range("B" & (folderSection + 1)).Borders.LineStyle = xlContinuous
+    ws.Range("B" & (folderSection + 1)).Borders.Color = RGB(192, 128, 128)
+    
+    ws.Range("A" & folderSection & ":B" & (folderSection + 1)).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(139, 0, 0)
+    
+    ' ========== SECTION 3: PARAMETERS ==========
+    Dim paramSection As Integer
+    paramSection = folderSection + 3
+    
+    ws.Range("A" & paramSection & ":C" & paramSection).Merge
+    ws.Range("A" & paramSection).Value = "SEARCH PARAMETERS (Keywords)"
+    ws.Range("A" & paramSection).Font.Bold = True
+    ws.Range("A" & paramSection).Font.Size = 11
+    ws.Range("A" & paramSection).Font.Color = RGB(255, 255, 255)
+    ws.Range("A" & paramSection).Interior.Color = RGB(176, 0, 32)     ' Deep Red
+    ws.Range("A" & paramSection).HorizontalAlignment = xlLeft
+    ws.Range("A" & paramSection).VerticalAlignment = xlCenter
+    ws.Range("A" & paramSection).RowHeight = 25
+    
+    ' Column headers
+    ws.Range("A" & (paramSection + 1)).Value = "Keyword"
+    ws.Range("B" & (paramSection + 1)).Value = "Search Term"
+    ws.Range("C" & (paramSection + 1)).Value = "Logic (AND/OR)"
+    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Font.Bold = True
+    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Interior.Color = RGB(255, 200, 200)
+    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).HorizontalAlignment = xlCenter
+    ws.Range("A" & (paramSection + 1) & ":C" & (paramSection + 1)).Borders.LineStyle = xlContinuous
+    
+    ' Keyword input fields
+    For i = 1 To MAX_KEYWORDS
+        Dim currentRow As Integer
+        currentRow = paramSection + 1 + i
+        
+        ws.Range("A" & currentRow).Value = "Keyword " & i
+        ws.Range("A" & currentRow).Font.Bold = True
+        ws.Range("A" & currentRow).HorizontalAlignment = xlCenter
+        ws.Range("A" & currentRow).Interior.Color = RGB(255, 230, 230)
+        
+        ws.Range("B" & currentRow).Value = ""
+        ws.Range("B" & currentRow).Interior.Color = RGB(255, 255, 255)
+        ws.Range("B" & currentRow).Borders.LineStyle = xlContinuous
+        ws.Range("B" & currentRow).Borders.Color = RGB(192, 128, 128)
+        
+        ws.Range("C" & currentRow).Value = "AND"
+        ws.Range("C" & currentRow).Font.Color = RGB(139, 0, 0)
+        ws.Range("C" & currentRow).Font.Bold = True
+        ws.Range("C" & currentRow).HorizontalAlignment = xlCenter
+        ws.Range("C" & currentRow).Interior.Color = RGB(255, 230, 230)
+        ws.Range("C" & currentRow).Borders.LineStyle = xlContinuous
+        ws.Range("C" & currentRow).Borders.Color = RGB(192, 128, 128)
+    Next i
+    
+    ws.Range("A" & paramSection & ":C" & (paramSection + 1 + MAX_KEYWORDS)).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(176, 0, 32)
+    
+    ' ========== SECTION 4: MACRO CONTROLS ==========
+    Dim controlSection As Integer
+    controlSection = paramSection + MAX_KEYWORDS + 3
+    
+    ws.Range("A" & controlSection & ":D" & controlSection).Merge
+    ws.Range("A" & controlSection).Value = "MACRO CONTROLS"
+    ws.Range("A" & controlSection).Font.Bold = True
+    ws.Range("A" & controlSection).Font.Size = 11
+    ws.Range("A" & controlSection).Font.Color = RGB(255, 255, 255)
+    ws.Range("A" & controlSection).Interior.Color = RGB(101, 0, 0)    ' Very dark red (maroon)
+    ws.Range("A" & controlSection).HorizontalAlignment = xlLeft
+    ws.Range("A" & controlSection).VerticalAlignment = xlCenter
+    ws.Range("A" & controlSection).RowHeight = 25
+    
+    ' Create buttons
+    Dim btnTop As Long
+    Dim btnLeft As Long
+    Dim btnWidth As Long
+    Dim btnHeight As Long
+    Dim btnSpacing As Long
+    
+    btnTop = ws.Range("A" & (controlSection + 1)).Top
+    btnLeft = ws.Range("A" & (controlSection + 1)).Left
+    btnWidth = 140
+    btnHeight = 30
+    btnSpacing = 10
+    
+    ' Button 1: Search Name Only
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearchByNameOnly"
+    btn.Caption = "Search: Name Only"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Button 2: Search Name + Content
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearch"
+    btn.Caption = "Search: Name + Content"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Button 3: Search with Preview
+    btnTop = btnTop + btnHeight + btnSpacing
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearchWithContentPreview"
+    btn.Caption = "Search: With Preview"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Button 4: Refine Results (NEW)
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunRefineSearch"
+    btn.Caption = "Refine Results"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Button 5: Clear Preview Sheets
+    btnTop = btnTop + btnHeight + btnSpacing
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "ClearFilteredContentSheets"
+    btn.Caption = "Clear Preview Sheets"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Button 6: Reset Dashboard
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "SetupSearchSheet"
+    btn.Caption = "Reset Dashboard"
+    btn.Font.Bold = True
+    btn.Font.Size = 9
+    
+    ' Background for button area
+    Dim btnEndRow As Integer
+    btnEndRow = controlSection + 8
+    ws.Range("A" & (controlSection + 1) & ":D" & btnEndRow).Interior.Color = RGB(255, 235, 235)
+    
+    ws.Range("A" & controlSection & ":D" & btnEndRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(101, 0, 0)
+    
+    ' ========== SECTION 5: INSTRUCTIONS ==========
+    Dim instructionSection As Integer
+    instructionSection = btnEndRow + 2
+    
+    ws.Range("A" & instructionSection & ":D" & instructionSection).Merge
+    ws.Range("A" & instructionSection).Value = "HOW TO USE"
+    ws.Range("A" & instructionSection).Font.Bold = True
+    ws.Range("A" & instructionSection).Font.Size = 11
+    ws.Range("A" & instructionSection).Font.Color = RGB(255, 255, 255)
+    ws.Range("A" & instructionSection).Interior.Color = RGB(160, 32, 32)   ' Red-orange variant
+    ws.Range("A" & instructionSection).HorizontalAlignment = xlLeft
+    ws.Range("A" & instructionSection).VerticalAlignment = xlCenter
+    ws.Range("A" & instructionSection).RowHeight = 25
+    
+    Dim instrRow As Integer
+    instrRow = instructionSection + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "1. Enter folder path in the Folder Location section"
+    ws.Range("A" & instrRow).WrapText = True
+    instrRow = instrRow + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "2. Enter 1-" & MAX_KEYWORDS & " keywords. Set AND/OR logic (for row filtering only)"
+    ws.Range("A" & instrRow).WrapText = True
+    instrRow = instrRow + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "3. Click a button in Macro Controls to run search"
+    ws.Range("A" & instrRow).WrapText = True
+    instrRow = instrRow + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "4. Results appear " & IIf(UCase(RESULT_DISPLAY_MODE) = "SIDE_BY_SIDE", "to the right (column F)", "in '" & RESULT_SHEET_NAME & "' sheet")
+    ws.Range("A" & instrRow).WrapText = True
+    ws.Range("A" & instrRow).Font.Italic = True
+    ws.Range("A" & instrRow).Font.Color = RGB(139, 0, 0)
+    instrRow = instrRow + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "5. After 'Name Only' search, use 'Refine Results' to narrow down further"
+    ws.Range("A" & instrRow).WrapText = True
+    instrRow = instrRow + 1
+    
+    ws.Range("A" & instrRow & ":D" & instrRow).Merge
+    ws.Range("A" & instrRow).Value = "6. For 'With Preview', click '[ Click to Preview ]' to open a file preview sheet"
+    ws.Range("A" & instrRow).WrapText = True
+    instrRow = instrRow + 1
+    
+    Dim instrEndRow As Integer
+    instrEndRow = instrRow - 1
+    
+    ws.Range("A" & (instructionSection + 1) & ":D" & instrEndRow).Interior.Color = RGB(255, 235, 235)
+    ws.Range("A" & instructionSection & ":D" & instrEndRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(160, 32, 32)
+    
+    ' ========== COLUMN E: Gap column (greyed out) ==========
+    ' Column E acts as a visual separator between dashboard and results
+    Dim lastDashboardRow As Integer
+    lastDashboardRow = instrEndRow
+    
+    ws.Columns("E").ColumnWidth = 2
+    ws.Range("E1:E" & lastDashboardRow).Interior.Color = RGB(200, 200, 200)  ' Grey
+    ws.Range("E1:E" & lastDashboardRow).Borders.LineStyle = xlNone
+    
+    ' Format columns
+    ws.Columns("A").ColumnWidth = 18
+    ws.Columns("B").ColumnWidth = 32
+    ws.Columns("C").ColumnWidth = 15
+    ws.Columns("D").ColumnWidth = 5
+    ' Column E already set above (gap column)
+    
+    ' Select first input
+    ws.Range("B" & (folderSection + 1)).Select
+    
+    Application.ScreenUpdating = True
+    
+    
+    MsgBox "Dashboard Setup Complete!" & vbCrLf & vbCrLf & _
+           "Maximum Keywords: " & MAX_KEYWORDS & vbCrLf & vbCrLf & _
+           "IMPORTANT: Paste the Worksheet_SelectionChange event code into" & vbCrLf & _
+           "the Search sheet's code module to enable on-demand previews." & vbCrLf & vbCrLf & _
+           "Use the buttons in the Macro Controls section to run searches!" & vbCrLf & vbCrLf & _
+           "Proceed for file Searching", vbInformation, "Dashboard Ready"
+End Sub
+
+
+' ========== WORKSHEET EVENT CODE (paste into the Search Sheet module) ==========
+'
+' Copy the code below into the "Search" worksheet's code module
+' (Right-click the Search tab > View Code, then paste there):
+'
+' -----------------------------------------------------------------------
+' Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+'     ' On-demand preview: fires when user clicks a cell tagged with PREVIEW_PATH
+'     If Target.Count > 1 Then Exit Sub
+'     On Error Resume Next
+'     If Target.Comment Is Nothing Then Exit Sub
+'     Dim cmt As String
+'     cmt = Target.Comment.Text
+'     If Left(cmt, 13) = "PREVIEW_PATH:" Then
+'         Dim previewPath As String
+'         previewPath = Mid(cmt, 14)
+'         Application.EnableEvents = False
+'         Call OpenPreviewForCell(previewPath)
+'         Application.EnableEvents = True
+'     End If
+'     On Error GoTo 0
+' End Sub
+' -----------------------------------------------------------------------
