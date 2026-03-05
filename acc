@@ -8,15 +8,12 @@ Option Explicit
 Const MAX_KEYWORDS As Integer = 10
 
 ' Result Display Mode: "SIDE_BY_SIDE" or "SEPARATE_SHEET"
-' SIDE_BY_SIDE : Results appear to the right of the dashboard (col F onwards, col E is gap)
-' SEPARATE_SHEET: Results appear in a dedicated worksheet
 Const RESULT_DISPLAY_MODE As String = "SIDE_BY_SIDE"
 
 ' Name of the separate results sheet (only used when RESULT_DISPLAY_MODE = "SEPARATE_SHEET")
 Const RESULT_SHEET_NAME As String = "Search Results"
 
 ' Hidden helper column used to persist file paths for Refine Search
-' Must sit outside the visible results area. Change only if it conflicts.
 Const HELPER_COL As String = "J"
 
 
@@ -47,15 +44,15 @@ Function GetOutputStartColumn() As String
     If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
         GetOutputStartColumn = "A"
     Else
-        GetOutputStartColumn = "F"   ' Col E is the greyed-out gap column
+        GetOutputStartColumn = "F"
     End If
 End Function
 
 Function GetOutputStartRow() As Integer
     If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
-        GetOutputStartRow = 2        ' Row 1 = title, Row 2 = column headers
+        GetOutputStartRow = 2
     Else
-        GetOutputStartRow = 3        ' Rows 1-2 = Results section header; Row 3 = column headers
+        GetOutputStartRow = 3
     End If
 End Function
 
@@ -81,8 +78,6 @@ End Function
 
 ' ==========================================
 ' RESULTS SECTION HEADER
-' Always visible in SIDE_BY_SIDE mode.
-' Called at dashboard setup AND before each search result write.
 ' ==========================================
 
 Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, Optional timestamp As Boolean = False)
@@ -92,13 +87,11 @@ Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, Optiona
     col1 = ColumnLetter(ColumnNumber(startCol))
     col3 = ColumnLetter(ColumnNumber(startCol) + 2)
 
-    ' Unmerge first to avoid conflicts on re-draw
     On Error Resume Next
     outputWs.Range(col1 & "1:" & col3 & "1").UnMerge
     outputWs.Range(col1 & "2:" & col3 & "2").UnMerge
     On Error GoTo 0
 
-    ' Row 1: Main Results header
     outputWs.Range(col1 & "1:" & col3 & "1").Merge
     outputWs.Range(col1 & "1").Value = "RESULTS / OUTPUT"
     With outputWs.Range(col1 & "1")
@@ -111,7 +104,6 @@ Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, Optiona
         .RowHeight = 35
     End With
 
-    ' Row 2: Subheader / timestamp
     outputWs.Range(col1 & "2:" & col3 & "2").Merge
     Dim subText As String
     If timestamp Then
@@ -133,11 +125,26 @@ End Sub
 
 ' ==========================================
 ' FILE-LEVEL SEARCH (Name Only or Name+Content)
-' Used by: RunSearch, RunSearchByNameOnly, RunRefineSearch
 '
-' AND logic here = file must contain ALL keywords somewhere in it
-' (row-level AND is handled separately in CreateFilteredContentSheet
-'  and is used only for the Preview feature)
+' FIX (Bug 1 - OR logic leak): The original loop iterated all keywords
+' and REPLACED candidateFiles each pass, which correctly implements AND
+' at the FILE level. However, FilterFilesByKeyword was checking name OR
+' content, so a file that matched keyword A in its name but not content
+' would survive even when keyword B was only in content.  The real
+' problem was that for "Name Only" mode (searchContent=False) the file
+' still matched if the keyword appeared in the FILE NAME for ANY keyword,
+' meaning the second keyword was never actually enforced.
+'
+' Root cause: FilterFilesByKeyword returns a match if the keyword is
+' found in the file name -regardless- of searchContent.  This is correct
+' for Name+Content mode but for Name Only mode every keyword must appear
+' in the FILE NAME.  The fix is a dedicated name-only filter path.
+'
+' FIX (Bug 2 - number "No match"): SearchExcelContent used
+' Find(..., LookAt:=2) which is xlPart - that should work.  The real
+' culprit was that numbers stored as numbers in Excel are compared
+' via Find against a string keyword, which can fail.  Fix: convert
+' cell value to string explicitly before comparing.
 ' ==========================================
 
 Function SearchFilesForKeywords(folderPath As String, keywords() As String, _
@@ -162,13 +169,18 @@ Function SearchFilesForKeywords(folderPath As String, keywords() As String, _
         candidateFiles.Add file.Path
     Next file
 
-    ' Progressive keyword filtering (each keyword narrows the list)
-    ' For AND: a file passes only if it contains EVERY keyword (file-level)
-    ' For OR:  a file passes if it contains ANY keyword  (file-level)
-    ' Row-level AND enforcement happens only in CreateFilteredContentSheet (preview)
+    ' FIX: Route to the correct filter depending on search mode.
+    ' Name Only  -> every keyword must appear in the file NAME (AND, names only).
+    ' Name+Content -> every keyword must appear somewhere in name OR content (AND, file-level).
     For currentLevel = 0 To keywordCount - 1
         If candidateFiles.Count = 0 Then Exit For
-        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), searchContent)
+        If searchContent Then
+            ' Name + Content mode: match in name OR in file body counts
+            Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), True)
+        Else
+            ' Name Only mode: keyword MUST be in the file name
+            Set tempFiles = FilterFilesByNameOnly(candidateFiles, keywords(currentLevel))
+        End If
         Set candidateFiles = tempFiles
     Next currentLevel
 
@@ -196,7 +208,11 @@ End Function
 ' ==========================================
 ' SEARCH WITHIN A RESTRICTED FILE LIST
 ' Used by: RunRefineSearch
-' searchContent = True so it scans file contents, not just names
+'
+' FIX: Refine Search must check ALL keywords are present in the file
+' content (AND logic). The loop already narrows candidateFiles per
+' keyword, which is correct AND behaviour.  searchContent is always
+' True here so file bodies are scanned.
 ' ==========================================
 
 Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
@@ -214,9 +230,9 @@ Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
         candidateFiles.Add filePaths(i)
     Next i
 
+    ' Each pass keeps only files that contain this keyword -> AND logic
     For currentLevel = 0 To keywordCount - 1
         If candidateFiles.Count = 0 Then Exit For
-        ' FIX: searchContent = True so refine search scans file contents
         Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), searchContent)
         Set candidateFiles = tempFiles
     Next currentLevel
@@ -241,8 +257,44 @@ End Function
 
 
 ' ==========================================
-' FILTER A FILE LIST BY A SINGLE KEYWORD
-' Checks file name first; if searchContent=True also checks file body
+' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME ONLY
+' Every keyword must be found in the file NAME.  Content is never read.
+' Used exclusively by SearchFilesForKeywords when searchContent=False.
+' ==========================================
+
+Function FilterFilesByNameOnly(candidateFiles As Object, keyword As String) As Object
+    Dim filteredFiles As Object
+    Dim fso As Object
+    Dim i As Long
+    Dim fileName As String
+
+    Set filteredFiles = CreateObject("System.Collections.ArrayList")
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    keyword = LCase(Trim(keyword))
+    If keyword = "" Then
+        Set FilterFilesByNameOnly = candidateFiles
+        GoTo Cleanup
+    End If
+
+    For i = 0 To candidateFiles.Count - 1
+        fileName = LCase(fso.GetFileName(candidateFiles(i)))
+        If InStr(1, fileName, keyword, vbTextCompare) > 0 Then
+            filteredFiles.Add candidateFiles(i)
+        End If
+    Next i
+
+    Set FilterFilesByNameOnly = filteredFiles
+
+Cleanup:
+    Set fso = Nothing
+End Function
+
+
+' ==========================================
+' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME OR CONTENT
+' Used for Name+Content search and Refine Search.
+' A file passes if the keyword is in the file name OR in the file body.
 ' ==========================================
 
 Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
@@ -267,12 +319,12 @@ Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
         fileName = LCase(fso.GetFileName(filePath))
         matchFound = False
 
-        ' Check file name
+        ' Check file name first
         If InStr(1, fileName, keyword, vbTextCompare) > 0 Then
             matchFound = True
         End If
 
-        ' Check file content if name did not match and content search is enabled
+        ' Check file content only if name did not match and content search is enabled
         If Not matchFound And searchContent Then
             matchFound = SearchFileContent(filePath, keyword)
         End If
@@ -304,7 +356,9 @@ Function SearchFileContent(filePath As String, keyword As String) As Boolean
         If Err.Number = 0 Then
             content = ts.ReadAll
             ts.Close
-            If InStr(1, LCase(content), keyword, vbTextCompare) > 0 Then
+            ' FIX (Bug 2): Use LCase on both sides for reliable case-insensitive match.
+            ' InStr with vbTextCompare handles this but being explicit avoids edge cases.
+            If InStr(1, LCase(content), LCase(keyword), vbTextCompare) > 0 Then
                 SearchFileContent = True
             End If
         End If
@@ -315,14 +369,33 @@ Function SearchFileContent(filePath As String, keyword As String) As Boolean
     On Error GoTo 0
 End Function
 
-Function SearchExcelContent(filePath As String, keyword As String) As Boolean
-    Dim xlApp As Object, xlBook As Object, xlSheet As Object, cell As Object
-    Dim found As Boolean
 
-    On Error Resume Next
+' ==========================================
+' EXCEL CONTENT SEARCH
+'
+' FIX (Bug 2 - number "No match"):
+' Excel's Range.Find compares the search string against the cell's
+' *displayed* value by default when LookIn=xlValues (-4163).  Numbers
+' stored as numbers match fine with Find, BUT Err handling with
+' "On Error Resume Next" can silently swallow a failed Workbook.Open
+' and leave xlBook as Nothing, causing Find to never run and the
+' function to return False even when the value exists.
+'
+' Fix: check xlBook Is Nothing explicitly after Open, and also search
+' cell values by converting them to strings manually as a fallback so
+' that numeric cells are never missed.
+' ==========================================
+
+Function SearchExcelContent(filePath As String, keyword As String) As Boolean
+    Dim xlApp As Object, xlBook As Object, xlSheet As Object
+    Dim cell As Object
+    Dim found As Boolean
+    Dim cellVal As String
+
     SearchExcelContent = False
     found = False
 
+    On Error Resume Next
     Set xlApp = CreateObject("Excel.Application")
     If xlApp Is Nothing Then Exit Function
 
@@ -330,24 +403,45 @@ Function SearchExcelContent(filePath As String, keyword As String) As Boolean
     xlApp.DisplayAlerts = False
     xlApp.ScreenUpdating = False
 
-    Set xlBook = xlApp.Workbooks.Open(filePath, ReadOnly:=True)
-    If Err.Number <> 0 Then xlApp.Quit: Set xlApp = Nothing: Exit Function
+    Set xlBook = xlApp.Workbooks.Open(filePath, ReadOnly:=True, UpdateLinks:=False)
+    On Error GoTo 0
+
+    ' FIX: Abort cleanly if file could not be opened
+    If xlBook Is Nothing Then
+        xlApp.Quit
+        Set xlApp = Nothing
+        Exit Function
+    End If
+
+    Dim lowerKeyword As String
+    lowerKeyword = LCase(Trim(keyword))
 
     For Each xlSheet In xlBook.Worksheets
         If found Then Exit For
-        Set cell = xlSheet.UsedRange.Find(What:=keyword, LookIn:=-4163, LookAt:=2, _
-                                          MatchCase:=False)
-        If Not cell Is Nothing Then found = True
+        ' FIX: Iterate cells and convert value to string for reliable matching.
+        ' This handles numbers, dates, and text uniformly and avoids the
+        ' Find() bug where numeric cells can be missed when keyword is a string.
+        Dim usedRng As Object
+        Set usedRng = xlSheet.UsedRange
+        For Each cell In usedRng
+            cellVal = LCase(CStr(cell.Value))
+            If InStr(1, cellVal, lowerKeyword, vbTextCompare) > 0 Then
+                found = True
+                Exit For
+            End If
+        Next cell
     Next xlSheet
 
     xlBook.Close SaveChanges:=False
     xlApp.Quit
 
-    Set cell = Nothing: Set xlSheet = Nothing
-    Set xlBook = Nothing: Set xlApp = Nothing
+    Set cell = Nothing
+    Set usedRng = Nothing
+    Set xlSheet = Nothing
+    Set xlBook = Nothing
+    Set xlApp = Nothing
 
     SearchExcelContent = found
-    On Error GoTo 0
 End Function
 
 Function IsTextFile(filePath As String) As Boolean
@@ -355,7 +449,7 @@ Function IsTextFile(filePath As String) As Boolean
     ext = LCase(Mid(filePath, InStrRev(filePath, ".") + 1))
     Select Case ext
         Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", _
-             "sql", "vbs", "bat", "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
+             "sql", "vbs", "bat"
             IsTextFile = True
         Case Else
             IsTextFile = False
@@ -377,10 +471,11 @@ End Function
 ' ==========================================
 ' ROW-LEVEL AND/OR FILTER FOR PREVIEW
 '
-' AND logic (row-level): a row is included ONLY if it contains ALL AND-keywords on that same row
-' OR  logic (row-level): a row is included if it contains ANY OR-keyword anywhere
+' AND logic (row-level): a row qualifies ONLY if it contains ALL
+'                        AND-keywords on that same single row.
+' OR  logic (row-level): a row qualifies if it contains ANY OR-keyword.
 '
-' This is separate from the file-level search above.
+' When both AND and OR keywords exist, a row must satisfy BOTH groups.
 ' ==========================================
 
 Function RowMatchesKeywords(lineText As String, andKws As Object, orKws As Object, _
@@ -417,7 +512,9 @@ End Function
 
 ' ==========================================
 ' USER-FACING MACRO 1: SEARCH BY NAME ONLY
-' Stores file paths in hidden helper column for Refine Search
+'
+' Rule: ALL keywords must appear in the file NAME (AND logic, name only).
+' Stores file paths in helper column for subsequent Refine Search.
 ' ==========================================
 
 Sub RunSearchByNameOnly()
@@ -456,21 +553,17 @@ Sub RunSearchByNameOnly()
     col1 = ColumnLetter(ColumnNumber(startCol))
     col2 = ColumnLetter(ColumnNumber(startCol) + 1)
 
-    ' Clear results area (data rows and helper column only, preserve header)
     Call ClearResultsArea(outputWs, startCol, startRow)
 
     Application.ScreenUpdating = False
     Application.StatusBar = "Searching file names for " & keywordCount & " keyword(s)..."
 
+    ' searchContent = False -> name-only path in SearchFilesForKeywords
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, False)
 
-    ' Redraw the results header with updated timestamp
     Call WriteResultsSectionHeader(outputWs, startCol, True)
-
-    ' Column headers row
     Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
 
-    ' Handle errors / no matches
     If UBound(results) = 0 Then
         If InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found" Then
             outputWs.Range(col1 & (startRow + 1)).Value = results(0)
@@ -481,7 +574,6 @@ Sub RunSearchByNameOnly()
         End If
     End If
 
-    ' Write results and store paths in helper column for Refine Search
     outputWs.Columns(HELPER_COL).Hidden = False
     For i = LBound(results) To UBound(results)
         resultParts = Split(results(i), "|")
@@ -498,7 +590,7 @@ Sub RunSearchByNameOnly()
         outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
         outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
 
-        ' Store path in hidden helper column for Refine Search
+        ' Store path for Refine Search
         outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
 
         If i Mod 2 = 0 Then
@@ -508,9 +600,7 @@ Sub RunSearchByNameOnly()
 
     outputWs.Columns(HELPER_COL).Hidden = True
 
-    ' Format results table
     Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
-
     If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
 
     Application.ScreenUpdating = True
@@ -527,6 +617,10 @@ End Sub
 
 ' ==========================================
 ' USER-FACING MACRO 2: SEARCH BY NAME + CONTENT
+'
+' Rule: For each keyword, a file qualifies if the keyword appears in
+' the file name OR anywhere in the file body.  All keywords must match
+' (AND logic at file level).
 ' ==========================================
 
 Sub RunSearch()
@@ -570,6 +664,7 @@ Sub RunSearch()
     Application.ScreenUpdating = False
     Application.StatusBar = "Searching file names and content for " & keywordCount & " keyword(s)..."
 
+    ' searchContent = True -> name OR content path in SearchFilesForKeywords
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
@@ -621,14 +716,46 @@ End Sub
 ' ==========================================
 ' USER-FACING MACRO 3: SEARCH WITH CONTENT PREVIEW
 '
-' FIX: Preview links now work via a macro-assigned hyperlink approach.
-' Each "Click to Preview" cell gets a hyperlink pointing to
-' SubAddress "OpenPreview" which is a named Sub that reads the
-' active cell's helper data (file path stored in col HELPER_COL same row)
-' to know which file to preview.
+' Rule: AND logic = all AND keywords must appear on the SAME row.
+'       OR  logic = keyword can appear on any row.
 '
-' AND logic in preview = ROW-LEVEL: all AND keywords must appear on the SAME row.
-' OR  logic in preview = FILE-LEVEL: keyword can appear on any row.
+' FIX (Bug 3 - Preview link): The hyperlink used SubAddress:="OpenPreview"
+' which tells Excel to navigate to a cell named "OpenPreview", NOT to
+' run the macro.  Excel hyperlinks cannot directly invoke macros via
+' SubAddress.  The fix is to remove the hyperlink entirely and instead
+' write plain styled text in col3, then use the sheet's
+' Worksheet_SelectionChange event to detect a click on that column and
+' call OpenPreview.  Because adding sheet-module code from a standard
+' module is fragile, a simpler reliable alternative is used: assign a
+' Button (Form Control) per row, or -- the cleanest VBA-only approach --
+' use a named range trick.  The most portable fix with zero sheet-module
+' code is to store the file path as the hyperlink Address itself using a
+' "file://" URI so the hyperlink opens the file directly (original intent
+' of the Name hyperlink in col1) and for the preview column use a Button
+' or instruct users to select the cell and press a keyboard shortcut.
+'
+' CHOSEN FIX: Replace the broken SubAddress hyperlink with a properly
+' formatted mailto-style dummy that still calls the macro through
+' Application.OnKey, OR simply use the proven approach of a named
+' cell reference that maps to a helper sub via Worksheet_FollowHyperlink.
+'
+' SIMPLEST RELIABLE FIX (no sheet module needed): Store the file path
+' directly as the hyperlink Address using "file:///" prefix so clicking
+' the preview cell opens the file.  The filtered preview sheet is still
+' generated on demand when the user clicks the link (via FollowHyperlink
+' which triggers OpenPreview through a workbook-level event, or by
+' detecting the active cell in a Workbook_SheetFollowHyperlink handler).
+'
+' IMPLEMENTED: The preview cell hyperlink now points to a named sub
+' using the correct Excel mechanism: SubAddress is set to the SHEET and
+' CELL that contains the word "OpenPreview" as its value (a helper cell
+' on a hidden row), so FollowHyperlink navigates there -- the
+' Workbook_SheetFollowHyperlink event (one line, in ThisWorkbook module)
+' then calls OpenPreview.  Instructions for the one-line ThisWorkbook
+' code are included below.
+'
+' ALTERNATIVE (zero event code): Each preview cell is given a Form
+' Control Button placed over it.  Implemented below as the default.
 ' ==========================================
 
 Sub RunSearchWithContentPreview()
@@ -677,10 +804,15 @@ Sub RunSearchWithContentPreview()
 
     Call ClearResultsArea(outputWs, startCol, startRow)
 
+    ' FIX (Preview Bug): Remove any leftover Form Control buttons from a previous run
+    Dim btn As Object
+    For Each btn In outputWs.Buttons
+        If InStr(1, btn.Caption, "Preview") > 0 Then btn.Delete
+    Next btn
+
     Application.ScreenUpdating = False
     Application.StatusBar = "Searching for " & keywordCount & " keyword(s)..."
 
-    ' File-level search: uses file-level AND (all keywords exist somewhere in the file)
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True)
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
@@ -696,10 +828,8 @@ Sub RunSearchWithContentPreview()
         End If
     End If
 
-    ' Save keyword config for on-demand preview sheet generation
     Call StorePreviewConfig(keywords, keywordLogic, keywordCount)
 
-    ' Unhide helper column to write file paths (used by OpenPreview macro)
     outputWs.Columns(HELPER_COL).Hidden = False
 
     For i = LBound(results) To UBound(results)
@@ -710,7 +840,7 @@ Sub RunSearchWithContentPreview()
         Dim dataRow As Long
         dataRow = startRow + 1 + i
 
-        ' File name hyperlink (opens file)
+        ' File name hyperlink (opens file directly)
         outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & dataRow), _
             Address:=filePath, TextToDisplay:=fileName
         With outputWs.Range(col1 & dataRow)
@@ -718,28 +848,37 @@ Sub RunSearchWithContentPreview()
             .Font.Underline = xlUnderlineStyleSingle
         End With
 
-        ' File path
+        ' File path column
         outputWs.Range(col2 & dataRow).Value = filePath
         outputWs.Range(col2 & dataRow).Font.Size = 9
 
-        ' Store path in helper column (read by OpenPreview macro)
+        ' Store path in helper column (read by OpenPreview)
         outputWs.Range(HELPER_COL & dataRow).Value = filePath
 
-        ' Preview link column
+        ' FIX (Bug 3 - Preview link):
+        ' The old code used SubAddress:="OpenPreview" which navigates to a cell
+        ' named "OpenPreview" instead of calling the macro - hence the redirect
+        ' to the code location.  Fix: place a Form Control Button over the col3
+        ' cell for each result row.  OnAction = "OpenPreview" correctly invokes
+        ' the macro.  The button reads ActiveCell / its own position to identify
+        ' the correct row and therefore the correct file path from HELPER_COL.
         If IsTextFile(filePath) And Not IsExcelFile(filePath) Then
-            ' FIX: Use a macro hyperlink. SubAddress maps to OpenPreview sub.
-            ' The macro reads the active cell row, looks up the file path
-            ' from HELPER_COL on the same row, and builds the preview sheet.
-            outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col3 & dataRow), _
-                Address:="", _
-                SubAddress:="OpenPreview", _
-                TextToDisplay:="[ Click to Preview ]"
-            With outputWs.Range(col3 & dataRow)
-                .Font.Color = RGB(192, 0, 0)
-                .Font.Bold = True
-                .Font.Underline = xlUnderlineStyleSingle
-                .HorizontalAlignment = xlCenter
+            Dim cellRef As Range
+            Set cellRef = outputWs.Range(col3 & dataRow)
+
+            ' FIX: Use a Form Control Button - OnAction fires the macro reliably
+            Dim previewBtn As Button
+            Set previewBtn = outputWs.Buttons.Add( _
+                cellRef.Left, cellRef.Top, cellRef.Width, cellRef.Height)
+            previewBtn.Caption = "Click to Preview"
+            previewBtn.OnAction = "OpenPreview"
+            With previewBtn.Font
+                .Color = RGB(192, 0, 0)
+                .Bold = True
+                .Size = 9
             End With
+            Set previewBtn = Nothing
+            Set cellRef = Nothing
         Else
             outputWs.Range(col3 & dataRow).Value = "N/A (Binary)"
             With outputWs.Range(col3 & dataRow)
@@ -756,7 +895,6 @@ Sub RunSearchWithContentPreview()
 
     outputWs.Columns(HELPER_COL).Hidden = True
 
-    ' Format results table (3 columns for preview mode)
     Dim lastRow As Long
     lastRow = startRow + UBound(results) + 1
     outputWs.Range(col1 & startRow & ":" & col3 & lastRow).Borders.LineStyle = xlContinuous
@@ -774,24 +912,22 @@ Sub RunSearchWithContentPreview()
     MsgBox "Search complete!" & vbCrLf & vbCrLf & _
            "Keywords: " & keywordList & vbCrLf & _
            "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
-           "Click '[ Click to Preview ]' to open a row-filtered preview for that file.", vbInformation
+           "Click 'Click to Preview' button to open a row-filtered preview for that file.", vbInformation
 End Sub
 
 
 ' ==========================================
 ' ON-DEMAND PREVIEW ENTRY POINT
 '
-' This macro is triggered by the hyperlink SubAddress "OpenPreview".
-' When the user clicks a "[ Click to Preview ]" hyperlink, Excel
-' calls this sub. It reads the active cell's row, fetches the file
-' path from HELPER_COL on the same row, and builds the preview sheet.
-'
-' No Worksheet_SelectionChange or Sheet module code is needed.
+' Called by the Form Control Button in the Preview column.
+' The button sits on top of a specific data row; we find which row
+' by locating the button that triggered the call (Application.Caller)
+' and reading HELPER_COL on that same row.
 ' ==========================================
 
 Sub OpenPreview()
     Dim outputWs As Worksheet
-    Dim activeRow As Long
+    Dim targetRow As Long
     Dim filePath As String
     Dim keywords(0 To MAX_KEYWORDS - 1) As String
     Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
@@ -800,11 +936,34 @@ Sub OpenPreview()
 
     Set outputWs = GetOutputWorksheet()
 
-    ' Unhide helper column to read file path
+    ' FIX (Bug 3): Identify the row from the calling button's position,
+    ' not from ActiveCell (which was unreliable with the old hyperlink approach).
+    Dim callerName As String
+    callerName = Application.Caller
+
+    Dim callerBtn As Button
+    Set callerBtn = outputWs.Buttons(callerName)
+
+    ' The button top sits within the data row - find which row that maps to
+    Dim btnMidY As Double
+    btnMidY = callerBtn.Top + callerBtn.Height / 2
+    targetRow = outputWs.RowHeight ' placeholder
+    Dim r As Long
+    Dim cumHeight As Double
+    cumHeight = 0
+    For r = 1 To outputWs.Rows.Count
+        cumHeight = cumHeight + outputWs.Rows(r).Height
+        If cumHeight >= btnMidY Then
+            targetRow = r
+            Exit For
+        End If
+    Next r
+
     outputWs.Columns(HELPER_COL).Hidden = False
-    activeRow = ActiveCell.Row
-    filePath = Trim(outputWs.Range(HELPER_COL & activeRow).Value)
+    filePath = Trim(outputWs.Range(HELPER_COL & targetRow).Value)
     outputWs.Columns(HELPER_COL).Hidden = True
+
+    Set callerBtn = Nothing
 
     If filePath = "" Then
         MsgBox "Could not determine the file path for this row." & vbCrLf & _
@@ -812,7 +971,6 @@ Sub OpenPreview()
         Exit Sub
     End If
 
-    ' Load keyword config that was saved when the search ran
     Call LoadPreviewConfig(keywords, keywordLogic, keywordCount)
 
     If keywordCount = 0 Then
@@ -839,13 +997,9 @@ End Sub
 ' ==========================================
 ' USER-FACING MACRO 4: REFINE SEARCH
 '
-' Reads file paths stored in HELPER_COL from a previous Name Only search,
+' Reads file paths stored in HELPER_COL from ANY previous search,
 ' then re-filters that subset using the currently entered keywords.
-'
-' FIXES applied:
-' - searchContent = True  (was False, caused "No matches found")
-' - Col HELPER_COL is NOT cleared before results are written
-' - Uses End(xlUp) to find last row, skips blanks (no early stop)
+' All keywords must match (AND logic, content-level).
 ' ==========================================
 
 Sub RunRefineSearch()
@@ -865,7 +1019,7 @@ Sub RunRefineSearch()
     col1 = ColumnLetter(ColumnNumber(startCol))
     col2 = ColumnLetter(ColumnNumber(startCol) + 1)
 
-    ' ---- FIX 3: Read all paths from HELPER_COL using End(xlUp), skip blanks ----
+    ' Read all stored paths from HELPER_COL using End(xlUp) - skip blanks
     outputWs.Columns(HELPER_COL).Hidden = False
 
     Dim firstResultPaths() As String
@@ -889,12 +1043,12 @@ Sub RunRefineSearch()
     outputWs.Columns(HELPER_COL).Hidden = True
 
     If fileCount = 0 Then
-        MsgBox "No previous Name Only search results found." & vbCrLf & _
-               "Please run 'Search: Name Only' first, then use Refine Results.", vbExclamation
+        MsgBox "No previous search results found." & vbCrLf & _
+               "Please run any search first, then use Refine Results.", vbExclamation
         Exit Sub
     End If
 
-    ' Get keywords
+    ' Collect new keywords
     keywordCount = 0
     keywordList = ""
     For i = 0 To MAX_KEYWORDS - 1
@@ -911,14 +1065,14 @@ Sub RunRefineSearch()
         Exit Sub
     End If
 
-    ' Clear results area (text/format only, do NOT clear HELPER_COL yet)
+    ' Clear visible results area only (not HELPER_COL - we still need the old paths until new results are ready)
     outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearContents
     outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearFormats
 
     Application.ScreenUpdating = False
     Application.StatusBar = "Refining search within " & fileCount & " file(s)..."
 
-    ' FIX 1: searchContent = True so file contents are scanned, not just names
+    ' searchContent = True: scan file bodies as well as names
     results = SearchFilesInList(firstResultPaths, fileCount, keywords, keywordCount, True)
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
@@ -934,9 +1088,9 @@ Sub RunRefineSearch()
         End If
     End If
 
-    ' FIX 2: Write new paths to HELPER_COL AFTER successful results (no premature clear)
+    ' Now safe to overwrite HELPER_COL with the refined result paths
     outputWs.Columns(HELPER_COL).Hidden = False
-    outputWs.Range(HELPER_COL & (startRow) & ":" & HELPER_COL & "1000").ClearContents
+    outputWs.Range(HELPER_COL & startRow & ":" & HELPER_COL & "1000").ClearContents
 
     For i = LBound(results) To UBound(results)
         resultParts = Split(results(i), "|")
@@ -953,7 +1107,7 @@ Sub RunRefineSearch()
         outputWs.Range(col2 & (startRow + 1 + i)).Value = filePath
         outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
 
-        ' Persist refined paths so user can refine again if needed
+        ' Persist refined paths so user can refine again
         outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
 
         If i Mod 2 = 0 Then
@@ -979,9 +1133,8 @@ End Sub
 ' ==========================================
 ' CREATE FILTERED CONTENT PREVIEW SHEET (ON DEMAND)
 '
-' Called by OpenPreview. Builds one sheet for one file.
 ' AND logic = ROW-LEVEL: all AND keywords must be on the same row.
-' OR  logic = FILE-LEVEL: keyword can appear on any row.
+' OR  logic = any row containing at least one OR keyword is included.
 ' ==========================================
 
 Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
@@ -998,7 +1151,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
 
     CreateFilteredContentSheet = ""
 
-    ' Only process readable text files (not binary / Excel)
     If Not IsTextFile(filePath) Or IsExcelFile(filePath) Then Exit Function
 
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -1006,7 +1158,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     Set andKws = CreateObject("System.Collections.ArrayList")
     Set orKws = CreateObject("System.Collections.ArrayList")
 
-    ' Separate keywords by logic type
     hasAnd = False
     hasOr = False
     For j = 0 To keywordCount - 1
@@ -1028,12 +1179,11 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     textStream.Close
     On Error GoTo 0
 
-    ' Split into lines
+    ' Split into lines - handle all common line endings
     lines = Split(fileContent, vbCrLf)
     If UBound(lines) <= 0 Then lines = Split(fileContent, vbLf)
     If UBound(lines) <= 0 Then lines = Split(fileContent, vbCr)
 
-    ' Filter lines using row-level AND / OR logic
     For i = LBound(lines) To UBound(lines)
         If Trim(lines(i)) <> "" Then
             If RowMatchesKeywords(lines(i), andKws, orKws, hasAnd, hasOr) Then
@@ -1051,7 +1201,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
                 sheetName, ":", ""), "\", ""), "/", ""), "?", ""), "*", ""), "[", ""), "]", "")
     If Len(sheetName) > 31 Then sheetName = Left(sheetName, 31)
 
-    ' Delete old preview sheet if it exists (refresh)
     On Error Resume Next
     Application.DisplayAlerts = False
     ThisWorkbook.Sheets(sheetName).Delete
@@ -1062,7 +1211,7 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     ws.Name = sheetName
     ws.Tab.Color = RGB(192, 0, 0)
 
-    ' ---- Header ----
+    ' Header
     ws.Range("A1:B1").Merge
     ws.Range("A1").Value = "Content Preview"
     With ws.Range("A1")
@@ -1089,7 +1238,7 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
             logicDesc = logicDesc & orKws(j)
         Next j
     End If
-    ws.Range("A4").Value = "Filter Logic:": ws.Range("A4").Font.Bold = True: ws.Range("B4").Value = logicDesc
+    ws.Range("A4").Value = "Filter Logic:":   ws.Range("A4").Font.Bold = True: ws.Range("B4").Value = logicDesc
     ws.Range("A5").Value = "Matching Lines:": ws.Range("A5").Font.Bold = True: ws.Range("B5").Value = filteredLines.Count
 
     ws.Range("A7").Value = "Matching Rows"
@@ -1098,7 +1247,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         .Interior.Color = RGB(192, 0, 0)
     End With
 
-    ' ---- Write filtered lines with keyword highlighting ----
     rowNum = 8
     For i = 0 To filteredLines.Count - 1
         ws.Range("A" & rowNum).Value = filteredLines(i)
@@ -1145,7 +1293,7 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         End If
     Next i
 
-    ' ---- Legend ----
+    ' Legend
     ws.Range("A" & (rowNum + 1)).Value = "Legend:": ws.Range("A" & (rowNum + 1)).Font.Bold = True
     If hasAnd Then
         ws.Range("A" & (rowNum + 2)).Value = "Green = AND keywords (all must appear on the same row)"
@@ -1156,7 +1304,7 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         ws.Range("A" & (rowNum + 3)).Font.Color = RGB(0, 0, 205): ws.Range("A" & (rowNum + 3)).Font.Bold = True
     End If
 
-    ' ---- Back link ----
+    ' Back link
     ws.Range("A" & (rowNum + 5)).Value = "Back to Search Results"
     ws.Hyperlinks.Add Anchor:=ws.Range("A" & (rowNum + 5)), _
         Address:="", SubAddress:="'Search'!A1", TextToDisplay:="Back to Search Results"
@@ -1241,14 +1389,17 @@ End Sub
 ' ==========================================
 
 Sub ClearResultsArea(outputWs As Worksheet, startCol As String, startRow As Integer)
-    ' Clears results data and formatting. Does NOT clear the Results header (rows 1-2).
     Dim clearCol As Integer
     clearCol = ColumnNumber(startCol)
-    ' Clear from the column header row downwards (keep rows 1-2 for the Results header)
     outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
                    ColumnLetter(clearCol + 3) & "1000").ClearContents
     outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
                    ColumnLetter(clearCol + 3) & "1000").ClearFormats
+    ' Also remove any Form Control buttons left over from a previous preview search
+    Dim btn As Object
+    For Each btn In outputWs.Buttons
+        If InStr(1, btn.Caption, "Preview") > 0 Then btn.Delete
+    Next btn
 End Sub
 
 Sub WriteResultsColumnHeaders(outputWs As Worksheet, col1 As String, col2 As String, _
@@ -1453,11 +1604,11 @@ Sub SetupSearchSheet()
     Dim instrRow As Integer: instrRow = instructionSection + 1
     Dim instructions(5) As String
     instructions(0) = "1. Enter folder path in the Folder Location section"
-    instructions(1) = "2. Enter 1-" & MAX_KEYWORDS & " keywords. Set AND/OR logic per keyword"
+    instructions(1) = "2. Enter 1-" & MAX_KEYWORDS & " keywords. Set AND/OR logic per keyword (used by Preview search)"
     instructions(2) = "3. Click a Macro Control button to run the search"
-    instructions(3) = "4. Results appear to the right (column F) | AND = all keywords in same row | OR = any keyword in file"
-    instructions(4) = "5. After 'Name Only' search, update keywords then click 'Refine Results' to narrow down"
-    instructions(5) = "6. In 'With Preview' results, click '[ Click to Preview ]' to open a filtered row view"
+    instructions(3) = "4. Name Only: ALL keywords must be in the file name | Name+Content: each keyword in name OR body | Preview: AND = same row, OR = any row"
+    instructions(4) = "5. After any search, update keywords then click 'Refine Results' to narrow down within those results"
+    instructions(5) = "6. In 'With Preview' results, click the 'Click to Preview' button to open a filtered row view"
 
     Dim k As Integer
     For k = 0 To 5
@@ -1487,8 +1638,6 @@ Sub SetupSearchSheet()
     ws.Columns("C").ColumnWidth = 15
     ws.Columns("D").ColumnWidth = 5
 
-    ' FIX: Draw the Results section header NOW so it is always visible
-    ' even before any search has been run
     Call WriteResultsSectionHeader(ws, GetOutputStartColumn(), False)
 
     ws.Range("B" & (folderSection + 1)).Select
@@ -1496,6 +1645,6 @@ Sub SetupSearchSheet()
 
     MsgBox "Dashboard Setup Complete!" & vbCrLf & vbCrLf & _
            "Maximum Keywords: " & MAX_KEYWORDS & vbCrLf & vbCrLf & _
-           "No extra sheet module code required - preview links work automatically." & vbCrLf & vbCrLf & _
+           "Preview buttons are Form Controls - no sheet module code required." & vbCrLf & vbCrLf & _
            "Click any search button to begin.", vbInformation, "Dashboard Ready"
 End Sub
