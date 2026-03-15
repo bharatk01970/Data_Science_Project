@@ -1,693 +1,2117 @@
-import os
-import re
-import time
-import logging #to generate messages while program runs
-from datetime import datetime
-from pathlib import Path #to perform path manipulations and file I/O operations
-import pandas as pd
-from typing import Dict, List, Optional, Tuple
-import sys # to interact with the Python runtime environment and the underlying OS
-from dateutil.relativedelta import relativedelta #for getting date of prior month
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CONFIGURATION SECTION - EDIT THIS TO CUSTOMIZE BEHAVIOR
-# ═══════════════════════════════════════════════════════════════════════════
-
-#input and Output folders
-INPUT_FOLDER = "Developers/Bharat/Rate_Load/Input"  # Where input files arrive
-OUTPUT_FOLDER = "Public/Mena_mi"  # Where output files are saved
-
-#file Detection
-FILE_PATTERNS = ['.csv','.xlsx','.xls']
-POLL_INTERVAL = 5 #time(sec) between checks for new files
-
-#Post processing action
-POST_PROCESS_ACTION = 'move' #Options : 'none', 'move', 'delete'
-ARCHIVE_FOLDER = "Developers/Bharat/Rate_Load/archieve"  # Where to move processed files
-
-#sheet Processing Config
-# Add as many as sheets are required - each sheet would become a separate O/P file
-# NOTE: output_file values below are BASE NAMES (templates).
-# The actual month/year suffix is derived at runtime from the input filename.
-# E.g. if input file is "Jan26TOR.xlsx", output becomes "eom-spot_mena_mi_Jan2026.csv"
-SHEETS_CONFIG =  [
-
-    {
-        'sheet_name':"Month End TOR",
-        'columns':['B','D'],
-        'row_start':11,
-        'row_end':219,
-        'input_has_header': False,   # Does the INPUT file have a header row?
-        'output_has_header': False,  # Should the OUTPUT file include a header row?
-        'output_file': 'eom-spot_mena_mi',   # Base name — month/year appended from input filename
-        'output_format': 'csv'
-    },
-    {
-        'sheet_name': 'Average TOR',
-        'columns': ['B', 'D'],
-        'row_start': 11,
-        'row_end': 219,
-        'input_has_header': False,   # Does the INPUT file have a header row?
-        'output_has_header': False,  # Should the OUTPUT file include a header row?
-        'output_file': 'eom-avg_mena_mi',    # Base name — month/year appended from input filename
-        'output_format': 'csv'
-    },
-    {
-        'sheet_name': 'QTR AVGE',
-        'columns': ['B', 'D'],
-        'row_start': 11,
-        'row_end': 219,
-        'input_has_header': False,   # Does the INPUT file have a header row?
-        'output_has_header': False,  # Should the OUTPUT file include a header row?
-        'output_file': 'qtr-avg_mena_mi',    # Base name — month/year appended from input filename
-        'output_format': 'csv'
-    },
-    {
-        'sheet_name': 'YTD AVGE',
-        'columns': ['B', 'D'],
-        'row_start': 11,
-        'row_end': 219,
-        'input_has_header': False,   # Does the INPUT file have a header row?
-        'output_has_header': False,  # Should the OUTPUT file include a header row?
-        'output_file': 'ytd-avg_mena_mi',    # Base name — month/year appended from input filename
-        'output_format': 'csv'
-    }
-]
-
-#Logging Configration
-LOG_DIRECTORY ="Developers/Bharat/Rate_Load/logs"
-LOG_LEVEL = 'INFO' # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-        
-# ═══════════════════════════════════════════════════════════════════════════
-# END OF CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
-
-"""Main class for automated data extraction from Excel/CSV files."""
-class DataExtractor:
-    def __init__(self):
-        """Initialize the DataExtractor with configured settings."""
-        self._setup_logging()
-        self.logger.info("="*80)
-        self.logger.info("Data Extractor initialized successfully")
-        self.logger.info("="*80)
-
-    def _setup_logging(self):
-        """Configure logging to file and console."""
-        # Create log directory if it doesn't exist
-        Path(LOG_DIRECTORY).mkdir(parents=True, exist_ok=True)
-        
-        # Generate log filename with timestamp
-        log_filename = f"Rate_load_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        log_path = os.path.join(LOG_DIRECTORY, log_filename)
-        
-        # Configure logging format
-        logging.basicConfig(
-            level=getattr(logging, LOG_LEVEL.upper()),
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_path),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
-        
-        self.logger = logging.getLogger(__name__)
-
-        
-    def _validate_folders(self) -> bool:
-        """
-        Validate that input and output folders exist and are accessible.
-        Returns:
-            True if folders are valid, False otherwise
-        """
-        # Check input folder exists
-        if not os.path.exists(INPUT_FOLDER):
-            self.logger.error(f"Input folder does not exist: {INPUT_FOLDER}")
-            return False
-        
-        # Check read permission on input folder
-        if not os.access(INPUT_FOLDER, os.R_OK):
-            self.logger.error(f"No read permission for input folder: {INPUT_FOLDER}")
-            return False
-        
-        # Create output folder if it doesn't exist
-        try:
-            Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"Output folder ready: {OUTPUT_FOLDER}")
-        except PermissionError:
-            self.logger.error(f"No write permission for output folder: {OUTPUT_FOLDER}")
-            return False
-        except Exception as e:
-            self.logger.error(f"Error creating output folder: {e}")
-            return False
-        
-        self.logger.info(f"Input folder validated: {INPUT_FOLDER}")
-        return True
-
-
-    def _detect_new_file(self) -> Optional[str]:
-        """
-        Monitor input folder and detect new files matching configured patterns.
-        Returns:
-            Full path to detected file, or None if no file found
-        """
-        try:
-            # List all files in input folder
-            for file in os.listdir(INPUT_FOLDER):
-                file_path = os.path.join(INPUT_FOLDER, file)
-                
-                # Skip directories
-                if os.path.isdir(file_path):
-                    continue
-                
-                # Check if file matches any configured pattern
-                file_lower = file.lower()
-                for pattern in FILE_PATTERNS:
-                    if file_lower.endswith(pattern.lower()):
-                        self.logger.info(f"New file detected: {file}")
-                        return file_path
-            
-            return None
-        
-        except PermissionError:
-            self.logger.error(f"Permission denied accessing input folder: {INPUT_FOLDER}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error detecting files: {e}")
-            return None
-
-    def _read_file(self, file_path: str, has_header: bool) -> Optional[Dict[str, pd.DataFrame]]:
-        """
-        Read input file (Excel or CSV) in read-only mode.
-        
-        Args:
-            file_path: Full path to input file
-            has_header: Whether the file has a header row
-            
-        Returns:
-            Dictionary mapping sheet names to DataFrames, or None on error
-        """
-        self.logger.info(f"Reading file: {file_path}")
-        
-        try:
-            # Determine file type by extension
-            file_ext = os.path.splitext(file_path)[1].lower()
-
-            # Set header parameter based on configuration
-            # If has_header=True, header=0 (use first row as header)
-            # If has_header=False, header=None (no header, all rows are data)
-            header_param = 0 if has_header else None
-            
-            if file_ext in ['.xlsx', '.xls', '.xlsm']:
-                # Read Excel file - all sheets
-                engine = 'openpyxl' if file_ext == '.xlsx' else None
-                sheets_dict = pd.read_excel(
-                    file_path, 
-                    sheet_name=None, 
-                    engine=engine,
-                    header=header_param,  # Control header reading
-                    dtype=str             # Preserve exact decimal/string format
-                )
-                self.logger.info(f"Excel file read successfully. Sheets: {list(sheets_dict.keys())}")
-                return sheets_dict
-            
-            elif file_ext == '.csv':
-                # Read CSV file - treat as single sheet
-                df = pd.read_csv(
-                    file_path,
-                    header=header_param,  # Control header reading
-                    dtype=str             # Preserve exact decimal/string format
-                )
-                sheets_dict = {'Sheet1': df}
-                self.logger.info(f"CSV file read successfully. Rows: {len(df)}")
-                return sheets_dict
-            
-            else:
-                self.logger.error(f"Unsupported file format: {file_ext}")
-                return None
-        
-        except FileNotFoundError:
-            self.logger.error(f"File not found: {file_path}")
-            return None
-        except PermissionError:
-            self.logger.error(f"Permission denied reading file: {file_path}")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error reading file: {e}")
-            return None
-
-
-    def _convert_column_letter_to_index(self, column_letter: str) -> int:
-        """
-        Convert Excel column letter (e.g., 'A', 'AB') to zero-based index.
-        Args:
-            column_letter: Column letter (e.g., 'A', 'B', 'AA') 
-        Returns:
-            Zero-based column index
-        """
-        column_letter = column_letter.upper()
-        index = 0
-        for i, char in enumerate(reversed(column_letter)):
-            index += (ord(char) - ord('A') + 1) * (26 ** i)
-        return index - 1
-
-        """
-        Example: "AB"
-        Reversed: "BA"
-        Iter 1 (char='B', i=0): (ord('B')-ord('A')+1) * (26**0) = 
-         = 2
-        Iter 2 (char='A', i=1): (ord('A')-ord('A')+1) * (26**1) = 
-         = 26
-        Total: 
-        Return: 
-         27 (0-based: A=0, Z=25, AA=26, AB=27) 
-        """
-
-    
-
-    def _extract_data_from_sheet(self, df: pd.DataFrame, sheet_config: Dict) -> Optional[pd.DataFrame]:
-        """
-        Extract specific columns and rows from a DataFrame based on configuration.
-        Args:
-            df: Source DataFrame
-            sheet_config: Configuration for this sheet (columns, rows)
-            
-        Returns:
-            Extracted DataFrame, or None on error
-        """
-        try:
-            # Get column configuration
-            columns = sheet_config.get('columns', [])
-            if not columns:
-                self.logger.error("No columns specified in configuration")
-                return None
-            
-            # Convert column letters to indices
-            column_indices = []
-            for col in columns:
-                if isinstance(col, str):
-                    # Column specified as letter (e.g., 'A', 'B')
-                    col_index = self._convert_column_letter_to_index(col)
-                else:
-                    # Column specified as number (0-based)
-                    col_index = col
-                
-                column_indices.append(col_index)
-            
-            # Validate column indices
-            max_col = df.shape[1]
-            for idx in column_indices:
-                if idx >= max_col:
-                    self.logger.error(f"Column index {idx} out of range (max: {max_col-1})")
-                    return None
-            
-            # Extract columns by position
-            extracted_df = df.iloc[:, column_indices].copy()
-            
-            # Get row range configuration
-            row_start = sheet_config.get('row_start', 1)  # 1-based in config
-            row_end = sheet_config.get('row_end', len(df))  # 1-based in config
-            
-            # Convert to 0-based indexing for pandas
-            row_start_idx = row_start - 1
-            row_end_idx = row_end
-            
-            # Validate row range
-            if row_start_idx < 0:
-                self.logger.warning(f"row_start < 1, using 1")
-                row_start_idx = 0
-            
-            if row_end_idx > len(df):
-                self.logger.warning(f"row_end exceeds data length, using {len(df)}")
-                row_end_idx = len(df)
-            
-            # Extract rows
-            extracted_df = extracted_df.iloc[row_start_idx:row_end_idx]
-            
-            self.logger.info(f"Extracted data: {extracted_df.shape[0]} rows, {extracted_df.shape[1]} columns")
-            
-            return extracted_df
-        
-        except Exception as e:
-            self.logger.error(f"Error extracting data from sheet: {e}")
-            return None
-
-    # ── Enhancement 1 ──────────────────────────────────────────────────────
-    def _parse_month_year_from_filename(self, filename: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Extract the month abbreviation and 4-digit year from an input filename.
-
-        The filename is expected to follow the pattern:
-            <MonthAbbr><YY><Suffix>   e.g. "Jan26TOR"
-
-        Where:
-            <MonthAbbr> is a 3-letter month name  (Jan, Feb, … Dec)
-            <YY>        is a 2-digit year          (26 → 2026)
-            <Suffix>    is any trailing text        (TOR, etc.)
-
-        Args:
-            filename: Bare filename without directory path (extension stripped)
-
-        Returns:
-            Tuple (month_abbr, year_4digit) e.g. ("Jan", "2026"),
-            or (None, None) if the pattern is not matched.
-        """
-        # Match 3-letter month + 2-digit year at the START of the filename
-        # (case-insensitive for robustness, then title-cased for display)
-        pattern = r'^([A-Za-z]{3})(\d{2})'
-        match = re.match(pattern, filename)
-
-        if not match:
-            self.logger.warning(
-                f"Could not parse month/year from filename '{filename}'. "
-                f"Expected format like 'Jan26TOR'. "
-                f"Output filenames will use system date as fallback."
-            )
-            return None, None
-
-        month_raw = match.group(1).capitalize()   # e.g. "jan" → "Jan"
-        year_2digit = match.group(2)               # e.g. "26"
-
-        # Validate that the 3-letter token is actually a real month name
-        valid_months = {
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-        }
-        if month_raw not in valid_months:
-            self.logger.warning(
-                f"Token '{month_raw}' in filename '{filename}' is not a valid month abbreviation. "
-                f"Output filenames will use system date as fallback."
-            )
-            return None, None
-
-        # Convert 2-digit year → 4-digit year
-        # Assumes years 00-99 map to 2000-2099
-        year_4digit = f"20{year_2digit}"
-
-        self.logger.info(
-            f"Parsed from input filename '{filename}': "
-            f"month={month_raw}, year={year_4digit}"
-        )
-        return month_raw, year_4digit
-
-    def _build_month_year_suffix(self, input_filename: str) -> str:
-        """
-        Build the MonMYYYY suffix (e.g. "Jan2026") used in output filenames.
-
-        Tries to derive it from the input filename first.  Falls back to the
-        previous calendar month (system date) if parsing fails — preserving
-        the original behaviour.
-
-        Args:
-            input_filename: Bare input filename (no path, no extension)
-
-        Returns:
-            String like "Jan2026"
-        """
-        month_abbr, year_4digit = self._parse_month_year_from_filename(input_filename)
-
-        if month_abbr and year_4digit:
-            return f"{month_abbr}{year_4digit}"                    # e.g. "Jan2026"
-
-        # Fallback: use previous calendar month derived from system clock
-        fallback = (datetime.now() - relativedelta(months=1)).strftime('%b%Y')
-        self.logger.warning(f"Using fallback month/year suffix: {fallback}")
-        return fallback
-
-    # ── Enhancement 2 ──────────────────────────────────────────────────────
-    def _archive_existing_output_files(self):
-        """
-        Before writing new output files, move every existing file in OUTPUT_FOLDER
-        into an 'Archive' sub-folder, appending a timestamp to each filename.
-
-        Timestamp format:  YYYYMMDD_HHMMSS   (matches the input-file archive format)
-
-        Sub-folders (including the Archive folder itself) are left in place.
-        """
-        archive_subdir = os.path.join(OUTPUT_FOLDER, "Archive")
-
-        try:
-            # Gather files that need to be archived (skip directories)
-            existing_files = [
-                f for f in os.listdir(OUTPUT_FOLDER)
-                if os.path.isfile(os.path.join(OUTPUT_FOLDER, f))
-            ]
-
-            if not existing_files:
-                self.logger.info("No existing output files to archive.")
-                return
-
-            # Create Archive sub-folder if it doesn't exist
-            Path(archive_subdir).mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"Output Archive folder ready: {archive_subdir}")
-
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            archived_count = 0
-
-            for filename in existing_files:
-                src_path = os.path.join(OUTPUT_FOLDER, filename)
-                name, ext = os.path.splitext(filename)
-                archived_name = f"{name}_{timestamp}{ext}"
-                dst_path = os.path.join(archive_subdir, archived_name)
-
-                try:
-                    os.rename(src_path, dst_path)
-                    self.logger.info(f"Archived output file: {filename}  →  {archived_name}")
-                    archived_count += 1
-                except Exception as e:
-                    self.logger.error(f"Failed to archive output file '{filename}': {e}")
-
-            self.logger.info(
-                f"Output file archiving complete: {archived_count}/{len(existing_files)} file(s) archived."
-            )
-
-        except PermissionError:
-            self.logger.error(f"Permission denied accessing output folder for archiving: {OUTPUT_FOLDER}")
-        except Exception as e:
-            self.logger.error(f"Unexpected error during output file archiving: {e}")
-
-    # ───────────────────────────────────────────────────────────────────────
-
-    def _generate_output_filename(self, config_filename: str, original_filename: str) -> str:
-        """
-        Generate the output filename by appending the month/year suffix derived
-        from the input filename to the base name defined in SHEETS_CONFIG.
-
-        Args:
-            config_filename:   Base name from SHEETS_CONFIG['output_file']
-                               e.g. 'eom-spot_mena_mi'
-            original_filename: The detected input filename (with extension)
-                               e.g. 'Jan26TOR.xlsx'
-        Returns:
-            Final filename string (without extension), e.g. 'eom-spot_mena_mi_Jan2026'
-        """
-        # Strip extension from the input filename to get the bare name for parsing
-        input_name_only = os.path.splitext(os.path.basename(original_filename))[0]
-
-        # Build the MonYYYY suffix (Enhancement 1)
-        month_year_suffix = self._build_month_year_suffix(input_name_only)
-
-        # Append suffix to the config base name
-        filename = f"{config_filename}_{month_year_suffix}"
-        self.logger.info(f"Generated output filename: {filename}")
-        return filename
-
-
-    def _save_output_file(self, df: pd.DataFrame, output_path: str, file_format: str, include_header: bool):
-        """
-        Save extracted data to output file preserving exact decimal format.
-        
-        Args:
-            df: DataFrame to save (all values are strings preserving exact format)
-            output_path: Full path for output file
-            file_format: Format to save ('csv', 'xlsx', etc.)
-            include_header: Whether to include header row in output
-        """
-        try:
-            if file_format.lower() == 'csv':
-                # Save as CSV with exact string representation (no formatting)
-                # Data is already in string format, so it will preserve exact decimals
-                df.to_csv(
-                    output_path, 
-                    index=False, 
-                    header=include_header,  # Control header output
-                    quoting=1  # Quote non-numeric fields only
-                )
-                self.logger.info(f"CSV file saved: {output_path}")
-            
-            elif file_format.lower() in ['xlsx', 'excel']:
-                # Save as Excel with full numeric precision
-                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                    df.to_excel(
-                        writer, 
-                        index=False, 
-                        header=include_header,  # Control header output
-                        sheet_name='Data'
-                    )
-                self.logger.info(f"Excel file saved: {output_path}")
-            
-            else:
-                self.logger.error(f"Unsupported output format: {file_format}")
-        
-        except PermissionError:
-            self.logger.error(f"Permission denied writing to: {output_path}")
-        except Exception as e:
-            self.logger.error(f"Error saving output file: {e}")
-
-    def _process_file(self, file_path: str):
-        """
-        Main processing logic: read file, extract data, generate outputs.
-        Args:
-            file_path: Full path to input file
-        """
-        self.logger.info("="*80)
-        self.logger.info(f"Starting file processing: {os.path.basename(file_path)}")
-        self.logger.info("="*80)
-
-        # ── Enhancement 2: Archive any existing output files first ──────────
-        self._archive_existing_output_files()
-        # ────────────────────────────────────────────────────────────────────
-
-        # Process each configured sheet
-        for sheet_config in SHEETS_CONFIG:
-            sheet_name = sheet_config.get('sheet_name')
-            input_has_header = sheet_config.get('input_has_header', False)
-            output_has_header = sheet_config.get('output_has_header', False)
-            
-            self.logger.info(f"\nProcessing sheet: {sheet_name}")
-            
-            # Read input file
-            sheets_dict = self._read_file(file_path, input_has_header)
-            if sheets_dict is None:
-                self.logger.error("Failed to read input file. Skipping this sheet.")
-                continue
-                   
-            # Check if sheet exists in file
-            if sheet_name not in sheets_dict:
-                self.logger.error(f"Sheet '{sheet_name}' not found in file. Available sheets: {list(sheets_dict.keys())}")
-                continue
-            
-            # Get DataFrame for this sheet
-            df = sheets_dict[sheet_name]
-            
-            # Extract data based on configuration
-            extracted_df = self._extract_data_from_sheet(df, sheet_config)
-            if extracted_df is None or extracted_df.empty:
-                self.logger.error(f"No data extracted from sheet '{sheet_name}'")
-                continue
-            
-            # Generate output filename
-            # Enhancement 1: filename derived from input file name, not system date
-            output_filename = self._generate_output_filename(
-                sheet_config.get('output_file', 'output'),
-                os.path.basename(file_path)
-            )
-            
-            # Get output format
-            output_format = sheet_config.get('output_format', 'csv')
-            
-            # Ensure output filename has correct extension
-            if not output_filename.endswith(f'.{output_format}'):
-                output_filename = f"{os.path.splitext(output_filename)[0]}.{output_format}"
-            
-            # Create full output path
-            output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-            
-            # Save output file with header control
-            self._save_output_file(extracted_df, output_path, output_format, output_has_header)
-        
-        self.logger.info("="*80)
-        self.logger.info(f"File processing completed: {os.path.basename(file_path)}")
-        self.logger.info("="*80)
-
-
-    def _move_processed_file(self, file_path: str):
-        """
-        Move or delete processed file based on configuration.
-        Args:
-            file_path: Path to processed file
-        """
-        if POST_PROCESS_ACTION == 'delete':
-            try:
-                os.remove(file_path)
-                self.logger.info(f"Deleted processed file: {file_path}")
-            except Exception as e:
-                self.logger.error(f"Error deleting file: {e}")
-        
-        elif POST_PROCESS_ACTION == 'move':
-            try:
-                # Create archive folder if it doesn't exist
-                Path(ARCHIVE_FOLDER).mkdir(parents=True, exist_ok=True)
-                
-                # Generate archive filename with timestamp
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = os.path.basename(file_path)
-                name, ext = os.path.splitext(filename)
-                archive_filename = f"{name}_{timestamp}{ext}"
-                archive_path = os.path.join(ARCHIVE_FOLDER, archive_filename)
-                
-                # Move file
-                os.rename(file_path, archive_path)
-                self.logger.info(f"Moved processed file to: {archive_path}")
-            except Exception as e:
-                self.logger.error(f"Error moving file to archive: {e}")
-        else:
-            # 'none' - leave file in place
-            self.logger.info(f"File left in place: {file_path}")
-
-
-    def run(self):
-        """
-        Main execution loop: monitor input folder and process files as they arrive.
-        """
-        # Validate folders before starting
-        if not self._validate_folders():
-            self.logger.error("Folder validation failed. Exiting.")
-            return
-        
-        self.logger.info(f"Starting monitoring loop (polling every {POLL_INTERVAL} seconds)")
-        self.logger.info("Press Ctrl+C to stop")
-        
-        try:
-            while True:
-                # Check for new file
-                file_path = self._detect_new_file()
-                
-                if file_path:
-                    # Process the detected file
-                    self._process_file(file_path)
-                    # Handle processed file (move/delete/leave)
-                    self._move_processed_file(file_path)
-                
-                # Wait before next check
-                time.sleep(POLL_INTERVAL)
-        
-        except KeyboardInterrupt:
-            self.logger.info("\nMonitoring stopped by user")
-        except Exception as e:
-            self.logger.error(f"Unexpected error in main loop: {e}")
-
-
-def main():
-    """Entry point for the script."""
-    print("\n" + "="*80)
-    print("RATE LOAD - Automated File Processing")
-    print("="*80)
-    print(f"\nConfiguration:")
-    print(f"  Input Folder:  {INPUT_FOLDER}")
-    print(f"  Output Folder: {OUTPUT_FOLDER}")
-    print(f"  Sheets to Process: {len(SHEETS_CONFIG)}")
-    for i, config in enumerate(SHEETS_CONFIG, 1):
-        print(f"\n  Sheet {i}: {config['sheet_name']}")
-        print(f"    - Columns: {config['columns']}")
-        print(f"    - Rows: {config['row_start']} to {config['row_end']}")
-    print(f"  Poll Interval: {POLL_INTERVAL} seconds")
-    print(f"  Post-Process: {POST_PROCESS_ACTION}")
-    print("\n" + "="*80 + "\n")
-    
-    # Create and run extractor
-    extractor = DataExtractor()
-    extractor.run()
-
-
-if __name__ == "__main__":
-    main()
+Option Explicit
+
+' ==========================================
+' CONFIGURATION
+' ==========================================
+
+' Maximum number of keywords (run Reset Dashboard after changing)
+Const MAX_KEYWORDS As Integer = 10
+
+' Result Display Mode: "SIDE_BY_SIDE" or "SEPARATE_SHEET"
+' SIDE_BY_SIDE : Results appear to the right of the dashboard (col F onwards, col E is gap)
+' SEPARATE_SHEET: Results appear in a dedicated worksheet
+Const RESULT_DISPLAY_MODE As String = "SIDE_BY_SIDE"
+
+' Name of the separate results sheet (only used when RESULT_DISPLAY_MODE = "SEPARATE_SHEET")
+Const RESULT_SHEET_NAME As String = "Search Results"
+
+' Hidden helper column used to persist file paths for Refine Search
+' Must sit outside the visible results area. Change only if it conflicts.
+Const HELPER_COL As String = "J"
+
+
+' ==========================================
+' ABORT FLAG
+'
+' g_AbortRequested is a module-level Boolean flag.
+' - Set to True by the "Abort Search" button.
+' - Checked inside every file-scanning loop via DoEvents.
+' - Reset to False at the start of every new search.
+'
+' WHY THIS APPROACH:
+' Using Application.EnableCancelKey = xlErrorHandler and trapping
+' Err.Number = 18 is unreliable across nested calls and can leave
+' the Excel application in a broken state.  A simple Boolean flag
+' checked after DoEvents is the safest pattern: DoEvents yields
+' control back to Excel (processes clicks, repaints the screen),
+' the Abort button fires its OnAction macro which sets the flag,
+' then control returns to the loop which detects the flag and exits
+' cleanly through the normal code path.
+' ==========================================
+
+Public g_AbortRequested As Boolean
+
+
+' ==========================================
+' ABORT ENTRY POINT
+' Called by the "Abort Search" button on the dashboard.
+' ==========================================
+
+Sub AbortSearch()
+    g_AbortRequested = True
+    Application.StatusBar = "Abort requested - stopping after current file..."
+End Sub
+
+
+' ==========================================
+' HELPER FUNCTIONS - OUTPUT POSITIONING
+' ==========================================
+
+Function GetOutputWorksheet() As Worksheet
+    Dim ws As Worksheet
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(RESULT_SHEET_NAME)
+        On Error GoTo 0
+        If ws Is Nothing Then
+            Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+            ws.Name = RESULT_SHEET_NAME
+            ws.Tab.Color = RGB(192, 0, 0)
+        Else
+            ws.Cells.Clear
+        End If
+    Else
+        Set ws = ThisWorkbook.Sheets("Search")
+    End If
+    Set GetOutputWorksheet = ws
+End Function
+
+Function GetOutputStartColumn() As String
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        GetOutputStartColumn = "A"
+    Else
+        GetOutputStartColumn = "F"   ' Col E is the greyed-out gap column
+    End If
+End Function
+
+Function GetOutputStartRow() As Integer
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then
+        GetOutputStartRow = 2        ' Row 1 = title, Row 2 = column headers
+    Else
+        GetOutputStartRow = 3        ' Rows 1-2 = Results section header; Row 3 = column headers
+    End If
+End Function
+
+Function ColumnLetter(colNum As Integer) As String
+    Dim temp As Integer, letter As String
+    temp = colNum
+    Do While temp > 0
+        letter = Chr(65 + ((temp - 1) Mod 26)) & letter
+        temp = (temp - 1) \ 26
+    Loop
+    ColumnLetter = letter
+End Function
+
+Function ColumnNumber(colLetter As String) As Integer
+    Dim i As Integer, result As Integer
+    result = 0
+    For i = 1 To Len(colLetter)
+        result = result * 26 + (Asc(Mid(colLetter, i, 1)) - 64)
+    Next i
+    ColumnNumber = result
+End Function
+
+
+' ==========================================
+' DATE RANGE HELPERS
+'
+' ReadDateRange reads Start Date (B6) and End Date (B7) from the
+' dashboard sheet. Date format is MM/DD/YY (e.g. 01/15/25).
+'
+'   Both provided  -> use as-is
+'   Start only     -> End = Today
+'   End only       -> Start = date of the oldest file in the folder
+'   Neither        -> useDateFilter = False  (no filter)
+'
+' IsFileInDateRange returns True when:
+'   - No date filter is active (useDateFilter = False), OR
+'   - The file's last-modified date falls within [startDate, endDate]
+'     (comparison is date-only, time is stripped).
+' ==========================================
+
+Sub ReadDateRange(folderPath As String, _
+                  ByRef startDate As Date, ByRef endDate As Date, _
+                  ByRef useDateFilter As Boolean)
+
+    Dim ws As Worksheet
+    Dim rawStart As String, rawEnd As String
+
+    Set ws = ThisWorkbook.Sheets("Search")
+    rawStart = Trim(ws.Range("B6").Value)
+    rawEnd   = Trim(ws.Range("B7").Value)
+
+    ' FIX #3: Updated placeholder text to match new MM/DD/YY format
+    Dim hasStart As Boolean, hasEnd As Boolean
+    hasStart = (rawStart <> "" And rawStart <> "MM/DD/YY")
+    hasEnd   = (rawEnd   <> "" And rawEnd   <> "MM/DD/YY")
+
+    ' Validate any supplied dates
+    If hasStart Then
+        If Not IsDate(rawStart) Then
+            MsgBox "Start Date '" & rawStart & "' is not a valid date." & vbCrLf & _
+                   "Please use the format MM/DD/YY (e.g. 01/15/25).", vbExclamation
+            useDateFilter = False
+            Exit Sub
+        End If
+    End If
+    If hasEnd Then
+        If Not IsDate(rawEnd) Then
+            MsgBox "End Date '" & rawEnd & "' is not a valid date." & vbCrLf & _
+                   "Please use the format MM/DD/YY (e.g. 01/15/25).", vbExclamation
+            useDateFilter = False
+            Exit Sub
+        End If
+    End If
+
+    ' Scenario: neither supplied -> no filter
+    If Not hasStart And Not hasEnd Then
+        useDateFilter = False
+        Exit Sub
+    End If
+
+    useDateFilter = True
+
+    If hasStart Then startDate = CDate(rawStart)
+    If hasEnd   Then endDate   = CDate(rawEnd)
+
+    ' Scenario: Start only -> End = Today
+    If hasStart And Not hasEnd Then
+        endDate = Date
+    End If
+
+    ' Scenario: End only -> Start = oldest file date in folder
+    If Not hasStart And hasEnd Then
+        startDate = FindOldestFileDate(folderPath)
+    End If
+
+    ' Normalise: strip time component so comparisons are date-only
+    startDate = Int(startDate)
+    endDate   = Int(endDate)
+
+    ' Sanity check: start must not be after end
+    If startDate > endDate Then
+        MsgBox "Start Date (" & Format(startDate, "MM/DD/YY") & ") is after " & _
+               "End Date (" & Format(endDate, "MM/DD/YY") & ")." & vbCrLf & _
+               "Please correct the dates and try again.", vbExclamation
+        useDateFilter = False
+    End If
+End Sub
+
+
+Function FindOldestFileDate(folderPath As String) As Date
+    ' Returns the earliest DateLastModified among all files in the folder.
+    ' Falls back to a far-past date if the folder is empty or inaccessible.
+    Dim fso As Object, folder As Object, file As Object
+    Dim oldest As Date
+
+    oldest = CDate("01/01/70")
+
+    On Error Resume Next
+    Set fso    = CreateObject("Scripting.FileSystemObject")
+    Set folder = fso.GetFolder(folderPath)
+    If Err.Number <> 0 Or folder Is Nothing Then
+        FindOldestFileDate = oldest
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    Dim firstFile As Boolean
+    firstFile = True
+
+    For Each file In folder.Files
+        If firstFile Then
+            oldest    = Int(file.DateLastModified)
+            firstFile = False
+        ElseIf Int(file.DateLastModified) < oldest Then
+            oldest = Int(file.DateLastModified)
+        End If
+    Next file
+
+    FindOldestFileDate = oldest
+
+    Set fso    = Nothing
+    Set folder = Nothing
+End Function
+
+
+Function IsFileInDateRange(filePath As String, startDate As Date, endDate As Date, _
+                            useDateFilter As Boolean) As Boolean
+    ' When no date filter is active, every file passes.
+    If Not useDateFilter Then
+        IsFileInDateRange = True
+        Exit Function
+    End If
+
+    Dim fso As Object
+    Dim fileDate As Date
+
+    On Error Resume Next
+    Set fso      = CreateObject("Scripting.FileSystemObject")
+    fileDate     = Int(fso.GetFile(filePath).DateLastModified)
+    On Error GoTo 0
+
+    Set fso = Nothing
+
+    IsFileInDateRange = (fileDate >= startDate And fileDate <= endDate)
+End Function
+
+
+' ==========================================
+' RESULTS SECTION HEADER
+' Always visible in SIDE_BY_SIDE mode.
+' Called at dashboard setup AND before each search result write.
+' ==========================================
+
+Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, _
+                               Optional timestamp As Boolean = False)
+    If UCase(RESULT_DISPLAY_MODE) <> "SIDE_BY_SIDE" Then Exit Sub
+
+    Dim col1 As String, col3 As String
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    col3 = ColumnLetter(ColumnNumber(startCol) + 2)
+
+    ' Unmerge first to avoid conflicts on re-draw
+    On Error Resume Next
+    outputWs.Range(col1 & "1:" & col3 & "1").UnMerge
+    outputWs.Range(col1 & "2:" & col3 & "2").UnMerge
+    On Error GoTo 0
+
+    ' Row 1: Main Results header
+    outputWs.Range(col1 & "1:" & col3 & "1").Merge
+    outputWs.Range(col1 & "1").Value = "RESULTS / OUTPUT"
+    With outputWs.Range(col1 & "1")
+        .Font.Bold = True
+        .Font.Size = 16
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(139, 0, 0)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .RowHeight = 35
+    End With
+
+    ' Row 2: Subheader / timestamp
+    outputWs.Range(col1 & "2:" & col3 & "2").Merge
+    Dim subText As String
+    If timestamp Then
+        subText = "Last updated: " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+    Else
+        subText = "Run a search to see results here"
+    End If
+    outputWs.Range(col1 & "2").Value = subText
+    With outputWs.Range(col1 & "2")
+        .Font.Italic = True
+        .Font.Size = 9
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(192, 0, 0)
+        .HorizontalAlignment = xlCenter
+        .RowHeight = 18
+    End With
+End Sub
+
+
+' ==========================================
+' FILE-LEVEL SEARCH  (Name Only  OR  Name + Content)
+'
+' FIX #4 - ABORT / RESPONSIVENESS:
+'   Application.ScreenUpdating is set to True during scanning so Excel
+'   can repaint and process button clicks. DoEvents is called every file.
+'   The cursor is NOT changed to hourglass so the UI stays interactive.
+'
+' FIX #3 - DATE FILTER PERFORMANCE:
+'   Files are seeded into candidateFiles only when they pass the date
+'   filter. This happens BEFORE keyword filtering so large folders
+'   (20,000+ files) are trimmed as early as possible.
+' ==========================================
+
+Function SearchFilesForKeywords(folderPath As String, _
+                                 keywords() As String, _
+                                 keywordCount As Integer, _
+                                 searchContent As Boolean, _
+                                 startDate As Date, endDate As Date, _
+                                 useDateFilter As Boolean) As Variant
+
+    Dim fso As Object, folder As Object, file As Object
+    Dim candidateFiles As Object, tempFiles As Object
+    Dim fileName As String, filePath As String
+    Dim currentLevel As Integer, j As Long
+    Dim fileCounter As Long, totalFiles As Long
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
+
+    If Not fso.FolderExists(folderPath) Then
+        SearchFilesForKeywords = Array("Error: Folder not found")
+        GoTo Cleanup
+    End If
+
+    Set folder = fso.GetFolder(folderPath)
+    totalFiles = folder.Files.Count
+
+    ' ---- Seed phase: apply date filter and collect candidate file paths ----
+    fileCounter = 0
+    For Each file In folder.Files
+        fileCounter = fileCounter + 1
+
+        ' FIX #4: DoEvents every file keeps the UI responsive for Abort clicks
+        DoEvents
+        If g_AbortRequested Then
+            SearchFilesForKeywords = Array("Aborted")
+            GoTo Cleanup
+        End If
+
+        Application.StatusBar = "Scanning: " & fileCounter & " of " & _
+                                  totalFiles & " files checked  |  Candidates so far: " & _
+                                  candidateFiles.Count & "  |  Click ABORT to stop"
+
+        ' FIX #3: Date range filter applied here - fastest gate, no file open needed
+        If useDateFilter Then
+            If Not IsFileInDateRange(file.Path, startDate, endDate, useDateFilter) Then
+                GoTo NextFile
+            End If
+        End If
+
+        candidateFiles.Add file.Path
+
+NextFile:
+    Next file
+
+    ' ---- Keyword filter phase: progressively narrow the candidate list ----
+    ' Name Only  -> every keyword must be in the file name  (FilterFilesByNameOnly)
+    ' Name+Content -> keyword in name OR file body counts    (FilterFilesByKeyword)
+    For currentLevel = 0 To keywordCount - 1
+        If candidateFiles.Count = 0 Then Exit For
+
+        If searchContent Then
+            Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), True)
+        Else
+            Set tempFiles = FilterFilesByNameOnly(candidateFiles, keywords(currentLevel))
+        End If
+
+        ' Check abort after each keyword pass
+        DoEvents
+        If g_AbortRequested Then
+            SearchFilesForKeywords = Array("Aborted")
+            GoTo Cleanup
+        End If
+
+        Set candidateFiles = tempFiles
+    Next currentLevel
+
+    ' ---- Build result array ----
+    If candidateFiles.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To candidateFiles.Count - 1)
+        For j = 0 To candidateFiles.Count - 1
+            filePath = candidateFiles(j)
+            fileName = fso.GetFileName(filePath)
+            arr(j) = fileName & "|" & filePath
+        Next j
+        SearchFilesForKeywords = arr
+    Else
+        SearchFilesForKeywords = Array("No matches found")
+    End If
+
+Cleanup:
+    Set fso            = Nothing
+    Set folder         = Nothing
+    Set candidateFiles = Nothing
+    Set tempFiles      = Nothing
+End Function
+
+
+' ==========================================
+' SEARCH WITHIN A RESTRICTED FILE LIST
+' Used by: RunRefineSearch
+'
+' Abort check added after each keyword pass.
+' Date filter is NOT re-applied here because the input list was already
+' date-filtered during the original search that produced it.
+' ==========================================
+
+Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
+                            keywords() As String, keywordCount As Integer, _
+                            searchContent As Boolean) As Variant
+
+    Dim fso As Object
+    Dim candidateFiles As Object, tempFiles As Object
+    Dim fileName As String, filePath As String
+    Dim i As Integer, currentLevel As Integer, j As Long
+
+    Set fso            = CreateObject("Scripting.FileSystemObject")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
+
+    For i = 0 To fileCount - 1
+        candidateFiles.Add filePaths(i)
+    Next i
+
+    ' Each pass keeps only files that contain this keyword -> AND logic
+    For currentLevel = 0 To keywordCount - 1
+        If candidateFiles.Count = 0 Then Exit For
+
+        Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), searchContent)
+
+        ' Abort check after each keyword pass
+        DoEvents
+        If g_AbortRequested Then
+            SearchFilesInList = Array("Aborted")
+            GoTo Cleanup
+        End If
+
+        Set candidateFiles = tempFiles
+    Next currentLevel
+
+    If candidateFiles.Count > 0 Then
+        Dim arr() As Variant
+        ReDim arr(0 To candidateFiles.Count - 1)
+        For j = 0 To candidateFiles.Count - 1
+            filePath = candidateFiles(j)
+            fileName = fso.GetFileName(filePath)
+            arr(j) = fileName & "|" & filePath
+        Next j
+        SearchFilesInList = arr
+    Else
+        SearchFilesInList = Array("No matches found")
+    End If
+
+Cleanup:
+    Set fso            = Nothing
+    Set candidateFiles = Nothing
+    Set tempFiles      = Nothing
+End Function
+
+
+' ==========================================
+' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME ONLY
+' Every keyword must be found in the file NAME. Content is never read.
+' Used exclusively by SearchFilesForKeywords when searchContent=False.
+' ==========================================
+
+Function FilterFilesByNameOnly(candidateFiles As Object, keyword As String) As Object
+    Dim filteredFiles As Object
+    Dim fso As Object
+    Dim i As Long
+    Dim fileName As String
+
+    Set filteredFiles = CreateObject("System.Collections.ArrayList")
+    Set fso           = CreateObject("Scripting.FileSystemObject")
+
+    keyword = LCase(Trim(keyword))
+    If keyword = "" Then
+        Set FilterFilesByNameOnly = candidateFiles
+        GoTo Cleanup
+    End If
+
+    For i = 0 To candidateFiles.Count - 1
+        ' Abort check inside per-file loop
+        DoEvents
+        If g_AbortRequested Then
+            Set FilterFilesByNameOnly = filteredFiles
+            GoTo Cleanup
+        End If
+
+        fileName = LCase(fso.GetFileName(candidateFiles(i)))
+        If InStr(1, fileName, keyword, vbTextCompare) > 0 Then
+            filteredFiles.Add candidateFiles(i)
+        End If
+    Next i
+
+    Set FilterFilesByNameOnly = filteredFiles
+
+Cleanup:
+    Set fso = Nothing
+End Function
+
+
+' ==========================================
+' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME OR CONTENT
+' Used for Name+Content search and Refine Search.
+' A file passes if the keyword is in the file name OR in the file body.
+' Abort is checked once per file inside the loop.
+' ==========================================
+
+Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
+                               searchContent As Boolean) As Object
+    Dim filteredFiles As Object
+    Dim fso As Object
+    Dim i As Long
+    Dim filePath As String, fileName As String
+    Dim matchFound As Boolean
+
+    Set filteredFiles = CreateObject("System.Collections.ArrayList")
+    Set fso           = CreateObject("Scripting.FileSystemObject")
+
+    keyword = LCase(Trim(keyword))
+    If keyword = "" Then
+        Set FilterFilesByKeyword = candidateFiles
+        GoTo Cleanup
+    End If
+
+    For i = 0 To candidateFiles.Count - 1
+        ' Abort check - checked once per file so the loop exits promptly
+        DoEvents
+        If g_AbortRequested Then
+            Set FilterFilesByKeyword = filteredFiles
+            GoTo Cleanup
+        End If
+
+        filePath   = candidateFiles(i)
+        fileName   = LCase(fso.GetFileName(filePath))
+        matchFound = False
+
+        ' Check file name first
+        If InStr(1, fileName, keyword, vbTextCompare) > 0 Then
+            matchFound = True
+        End If
+
+        ' Check file content only if name did not match and content search is enabled
+        If Not matchFound And searchContent Then
+            matchFound = SearchFileContent(filePath, keyword)
+        End If
+
+        If matchFound Then filteredFiles.Add filePath
+    Next i
+
+    Set FilterFilesByKeyword = filteredFiles
+
+Cleanup:
+    Set fso = Nothing
+End Function
+
+
+' ==========================================
+' CONTENT SEARCH - dispatcher
+' ==========================================
+
+Function SearchFileContent(filePath As String, keyword As String) As Boolean
+    On Error Resume Next
+    SearchFileContent = False
+
+    If IsExcelFile(filePath) Then
+        SearchFileContent = SearchExcelContent(filePath, keyword)
+    ElseIf IsTextFile(filePath) Then
+        Dim fso As Object, ts As Object, content As String
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        Set ts  = fso.OpenTextFile(filePath, 1, False)
+        If Err.Number = 0 Then
+            content = ts.ReadAll
+            ts.Close
+            If InStr(1, LCase(content), LCase(keyword), vbTextCompare) > 0 Then
+                SearchFileContent = True
+            End If
+        End If
+        Set ts  = Nothing
+        Set fso = Nothing
+    End If
+
+    On Error GoTo 0
+End Function
+
+
+' ==========================================
+' EXCEL CONTENT SEARCH
+'
+' Iterates cells and converts each value to String via CStr() so that
+' numeric cells are never missed. Explicit Nothing-check after Open
+' prevents silent failures when a file is locked or corrupt.
+' ==========================================
+
+Function SearchExcelContent(filePath As String, keyword As String) As Boolean
+    Dim xlApp As Object, xlBook As Object, xlSheet As Object
+    Dim cell As Object
+    Dim found As Boolean
+    Dim cellVal As String
+
+    SearchExcelContent = False
+    found = False
+
+    On Error Resume Next
+    Set xlApp = CreateObject("Excel.Application")
+    If xlApp Is Nothing Then Exit Function
+
+    xlApp.Visible        = False
+    xlApp.DisplayAlerts  = False
+    xlApp.ScreenUpdating = False
+
+    Set xlBook = xlApp.Workbooks.Open(filePath, ReadOnly:=True, UpdateLinks:=False)
+    On Error GoTo 0
+
+    If xlBook Is Nothing Then
+        xlApp.Quit
+        Set xlApp = Nothing
+        Exit Function
+    End If
+
+    Dim lowerKeyword As String
+    lowerKeyword = LCase(Trim(keyword))
+
+    For Each xlSheet In xlBook.Worksheets
+        If found Then Exit For
+        Dim usedRng As Object
+        Set usedRng = xlSheet.UsedRange
+        For Each cell In usedRng
+            cellVal = LCase(CStr(cell.Value))
+            If InStr(1, cellVal, lowerKeyword, vbTextCompare) > 0 Then
+                found = True
+                Exit For
+            End If
+        Next cell
+    Next xlSheet
+
+    xlBook.Close SaveChanges:=False
+    xlApp.Quit
+
+    Set cell    = Nothing
+    Set usedRng = Nothing
+    Set xlSheet = Nothing
+    Set xlBook  = Nothing
+    Set xlApp   = Nothing
+
+    SearchExcelContent = found
+End Function
+
+Function IsTextFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Mid(filePath, InStrRev(filePath, ".") + 1))
+    Select Case ext
+        Case "txt", "csv", "log", "xml", "json", "ini", "cfg", "md", "html", "htm", _
+             "sql", "vbs", "bat"
+            IsTextFile = True
+        Case Else
+            IsTextFile = False
+    End Select
+End Function
+
+Function IsExcelFile(filePath As String) As Boolean
+    Dim ext As String
+    ext = LCase(Mid(filePath, InStrRev(filePath, ".") + 1))
+    Select Case ext
+        Case "xls", "xlsx", "xlsm", "xlsb", "xltx", "xltm"
+            IsExcelFile = True
+        Case Else
+            IsExcelFile = False
+    End Select
+End Function
+
+
+' ==========================================
+' ROW-LEVEL AND/OR FILTER FOR PREVIEW
+'
+' FIX #2 - PREVIEW LOGIC:
+' AND logic (row-level): a row is included ONLY if it contains ALL
+'                        AND-keywords on that same single row.
+' OR  logic (file-level): a row is included if it contains ANY OR-keyword.
+'                         Additionally, ALL OR-keywords must appear
+'                         somewhere in the file (enforced in
+'                         CreateFilteredContentSheet before line iteration).
+' When both groups exist, a row must satisfy BOTH conditions.
+' ==========================================
+
+Function RowMatchesKeywords(lineText As String, andKws As Object, orKws As Object, _
+                             hasAnd As Boolean, hasOr As Boolean) As Boolean
+    Dim j As Integer
+    Dim lineMatchesAnd As Boolean, lineMatchesOr As Boolean
+
+    ' AND check: every AND keyword must appear on this single row
+    lineMatchesAnd = True
+    If hasAnd Then
+        For j = 0 To andKws.Count - 1
+            If InStr(1, LCase(lineText), LCase(andKws(j)), vbTextCompare) = 0 Then
+                lineMatchesAnd = False
+                Exit For
+            End If
+        Next j
+    End If
+
+    ' OR check: at least one OR keyword must appear on this row
+    lineMatchesOr = True   ' default True when no OR keywords supplied
+    If hasOr Then
+        lineMatchesOr = False
+        For j = 0 To orKws.Count - 1
+            If InStr(1, LCase(lineText), LCase(orKws(j)), vbTextCompare) > 0 Then
+                lineMatchesOr = True
+                Exit For
+            End If
+        Next j
+    End If
+
+    RowMatchesKeywords = lineMatchesAnd And lineMatchesOr
+End Function
+
+
+' ==========================================
+' SHARED ABORT + CLEANUP HELPER
+'
+' Called by all four search macros after the search function returns
+' "Aborted".  Restores Excel state and shows a clean message.
+' ==========================================
+
+Sub HandleAbort(outputWs As Worksheet, startCol As String, startRow As Integer)
+    ' FIX #4: Restore cursor and screen updating
+    Application.Cursor = xlDefault
+    Application.ScreenUpdating = True
+    Application.StatusBar = False
+    g_AbortRequested = False   ' Reset flag so next search starts cleanly
+
+    ' Write a visible note in the results area
+    Dim col1 As String
+    col1 = ColumnLetter(ColumnNumber(startCol))
+    outputWs.Range(col1 & (startRow + 1)).Value = "Search was aborted by the user."
+    outputWs.Range(col1 & (startRow + 1)).Font.Color = RGB(192, 0, 0)
+    outputWs.Range(col1 & (startRow + 1)).Font.Italic = True
+
+    MsgBox "Search aborted." & vbCrLf & vbCrLf & _
+           "Excel is fully operational. You can run a new search at any time.", _
+           vbInformation, "Search Aborted"
+End Sub
+
+
+' ==========================================
+' USER-FACING MACRO 1: SEARCH BY NAME ONLY
+'
+' Rule: ALL keywords must appear in the file NAME (AND logic, name only).
+' Stores file paths in helper column for subsequent Refine Search.
+'
+' FIX #5: Keyword cells read from B11+i (0-based), matching the
+'         dashboard layout where keywords start at Row 11.
+' ==========================================
+
+Sub RunSearchByNameOnly()
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet, outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String, filePath As String
+    Dim keywordList As String
+    Dim startCol As String, startRow As Integer
+    Dim col1 As String, col2 As String
+    Dim startDate As Date, endDate As Date
+    Dim useDateFilter As Boolean
+
+    ' Reset abort flag at the start of every new search
+    g_AbortRequested = False
+
+    Set ws         = ThisWorkbook.Sheets("Search")
+    folderPath     = Trim(ws.Range("B4").Value)
+    startCol       = GetOutputStartColumn()
+    startRow       = GetOutputStartRow()
+    col1           = ColumnLetter(ColumnNumber(startCol))
+    col2           = ColumnLetter(ColumnNumber(startCol) + 1)
+
+    ' Collect and validate date range before doing anything else
+    Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
+    If Err.Number <> 0 Then Exit Sub
+
+    ' FIX #5: Read keywords from B11 onwards (Row 11 = first keyword row)
+    keywordCount = 0
+    keywordList  = ""
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (11 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+
+    If folderPath = "" Then MsgBox "Please enter a folder path in cell B4.", vbExclamation: Exit Sub
+    If keywordCount = 0 Then MsgBox "Please enter at least one keyword (cells B11 onwards).", vbExclamation: Exit Sub
+
+    Set outputWs = GetOutputWorksheet()
+    Call ClearResultsArea(outputWs, startCol, startRow)
+
+    ' FIX #4: Do NOT turn off ScreenUpdating - keep UI live so Abort button works
+    ' Do NOT change cursor to hourglass
+    Application.StatusBar = "Searching file names for " & keywordCount & " keyword(s)..."
+
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, False, _
+                                      startDate, endDate, useDateFilter)
+
+    ' ---- Handle Abort ----
+    If UBound(results) = 0 Then
+        If results(0) = "Aborted" Then
+            Call HandleAbort(outputWs, startCol, startRow)
+            Exit Sub
+        End If
+    End If
+
+    Call WriteResultsSectionHeader(outputWs, startCol, True)
+    Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
+
+    If UBound(results) = 0 Then
+        If InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found" Then
+            outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+            Application.StatusBar = False
+            MsgBox results(0), IIf(InStr(results(0), "Error") > 0, vbExclamation, vbInformation)
+            Exit Sub
+        End If
+    End If
+
+    outputWs.Columns(HELPER_COL).Hidden = False
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName    = resultParts(0)
+        filePath    = resultParts(1)
+
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+            Address:=filePath, TextToDisplay:=fileName
+        With outputWs.Range(col1 & (startRow + 1 + i))
+            .Font.Color     = RGB(5, 99, 193)
+            .Font.Underline = xlUnderlineStyleSingle
+        End With
+
+        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+
+        ' Store path in hidden helper column for Refine Search
+        outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
+
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
+                           col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+
+    outputWs.Columns(HELPER_COL).Hidden = True
+
+    Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
+
+    Application.StatusBar = False
+
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Type: File Name Only" & vbCrLf & _
+           "Keywords: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
+           "Tip: Update keywords and click 'Refine Results' to narrow down within " & _
+           "these " & (UBound(results) + 1) & " file(s).", vbInformation
+End Sub
+
+
+' ==========================================
+' USER-FACING MACRO 2: SEARCH BY NAME + CONTENT
+'
+' Rule: For each keyword, a file qualifies if the keyword appears in
+' the file name OR anywhere in the file body. All keywords must match
+' (AND logic at file level).
+'
+' FIX #5: Keyword cells read from B11 onwards.
+' ==========================================
+
+Sub RunSearch()
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet, outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String, filePath As String
+    Dim keywordList As String
+    Dim startCol As String, startRow As Integer
+    Dim col1 As String, col2 As String
+    Dim startDate As Date, endDate As Date
+    Dim useDateFilter As Boolean
+
+    g_AbortRequested = False
+
+    Set ws         = ThisWorkbook.Sheets("Search")
+    folderPath     = Trim(ws.Range("B4").Value)
+    startCol       = GetOutputStartColumn()
+    startRow       = GetOutputStartRow()
+    col1           = ColumnLetter(ColumnNumber(startCol))
+    col2           = ColumnLetter(ColumnNumber(startCol) + 1)
+
+    Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
+    If Err.Number <> 0 Then Exit Sub
+
+    ' FIX #5: Read keywords from B11 onwards
+    keywordCount = 0
+    keywordList  = ""
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (11 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+
+    If folderPath = "" Then MsgBox "Please enter a folder path in cell B4.", vbExclamation: Exit Sub
+    If keywordCount = 0 Then MsgBox "Please enter at least one keyword (cells B11 onwards).", vbExclamation: Exit Sub
+
+    Set outputWs = GetOutputWorksheet()
+    Call ClearResultsArea(outputWs, startCol, startRow)
+
+    ' FIX #4: Keep ScreenUpdating ON so Abort button remains clickable
+    Application.StatusBar = "Searching file names and content for " & keywordCount & " keyword(s)..."
+
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True, _
+                                      startDate, endDate, useDateFilter)
+
+    If UBound(results) = 0 Then
+        If results(0) = "Aborted" Then
+            Call HandleAbort(outputWs, startCol, startRow)
+            Exit Sub
+        End If
+    End If
+
+    Call WriteResultsSectionHeader(outputWs, startCol, True)
+    Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
+
+    If UBound(results) = 0 Then
+        If InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found" Then
+            outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+            Application.StatusBar = False
+            MsgBox results(0), IIf(InStr(results(0), "Error") > 0, vbExclamation, vbInformation)
+            Exit Sub
+        End If
+    End If
+
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName    = resultParts(0)
+        filePath    = resultParts(1)
+
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+            Address:=filePath, TextToDisplay:=fileName
+        With outputWs.Range(col1 & (startRow + 1 + i))
+            .Font.Color     = RGB(5, 99, 193)
+            .Font.Underline = xlUnderlineStyleSingle
+        End With
+
+        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
+                           col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+
+    Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
+
+    Application.StatusBar = False
+
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Type: File Name + Content" & vbCrLf & _
+           "Keywords: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1), vbInformation
+End Sub
+
+
+' ==========================================
+' USER-FACING MACRO 3: SEARCH WITH CONTENT PREVIEW
+'
+' FIX #2 - PREVIEW LOGIC:
+'   AND logic = all AND keywords must appear on the SAME row.
+'   OR  logic = keyword can appear on any row, but ALL OR-keywords
+'               must exist somewhere in the file.
+'
+' FIX #1 - BUTTON DISAPPEAR:
+'   ClearResultsArea deleted ALL buttons matching "Preview" in caption,
+'   which wiped the "Search: With Preview" and "Clear Preview Sheets"
+'   dashboard buttons. Fix: only delete buttons whose name starts with
+'   "Button " (auto-named Form Controls), not named dashboard buttons.
+'
+' FIX #5: Keyword cells read from B11 onwards.
+' ==========================================
+
+Sub RunSearchWithContentPreview()
+    Dim folderPath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim results As Variant
+    Dim ws As Worksheet, outputWs As Worksheet
+    Dim i As Long
+    Dim resultParts() As String
+    Dim fileName As String, filePath As String
+    Dim keywordList As String
+    Dim startCol As String, startRow As Integer
+    Dim col1 As String, col2 As String, col3 As String
+    Dim startDate As Date, endDate As Date
+    Dim useDateFilter As Boolean
+
+    g_AbortRequested = False
+
+    Set ws         = ThisWorkbook.Sheets("Search")
+    folderPath     = Trim(ws.Range("B4").Value)
+    startCol       = GetOutputStartColumn()
+    startRow       = GetOutputStartRow()
+    col1           = ColumnLetter(ColumnNumber(startCol))
+    col2           = ColumnLetter(ColumnNumber(startCol) + 1)
+    col3           = ColumnLetter(ColumnNumber(startCol) + 2)
+
+    Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
+    If Err.Number <> 0 Then Exit Sub
+
+    ' FIX #5: Read keywords from B11 onwards, logic from C11 onwards
+    keywordCount = 0
+    keywordList  = ""
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i)    = Trim(ws.Range("B" & (11 + i)).Value)
+        keywordLogic(i) = UCase(Trim(ws.Range("C" & (11 + i)).Value))
+        If keywordLogic(i) = "" Then keywordLogic(i) = "AND"
+        If keywordLogic(i) <> "AND" And keywordLogic(i) <> "OR" Then
+            MsgBox "Invalid logic in row " & (11 + i) & ". Use AND or OR only.", vbExclamation
+            Exit Sub
+        End If
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """ (" & keywordLogic(i) & ")"
+        End If
+    Next i
+
+    If folderPath = "" Then MsgBox "Please enter a folder path in cell B4.", vbExclamation: Exit Sub
+    If keywordCount = 0 Then MsgBox "Please enter at least one keyword (cells B11 onwards).", vbExclamation: Exit Sub
+
+    Set outputWs = GetOutputWorksheet()
+    Call ClearResultsArea(outputWs, startCol, startRow)
+
+    ' FIX #4: Keep ScreenUpdating ON so Abort button remains clickable
+    Application.StatusBar = "Searching for " & keywordCount & " keyword(s)..."
+
+    results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True, _
+                                      startDate, endDate, useDateFilter)
+
+    If UBound(results) = 0 Then
+        If results(0) = "Aborted" Then
+            Call HandleAbort(outputWs, startCol, startRow)
+            Exit Sub
+        End If
+    End If
+
+    Call WriteResultsSectionHeader(outputWs, startCol, True)
+    Call WriteResultsColumnHeaders(outputWs, col1, col2, col3, startRow, True)
+
+    If UBound(results) = 0 Then
+        If InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found" Then
+            outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+            Application.StatusBar = False
+            MsgBox results(0), IIf(InStr(results(0), "Error") > 0, vbExclamation, vbInformation)
+            Exit Sub
+        End If
+    End If
+
+    Call StorePreviewConfig(keywords, keywordLogic, keywordCount)
+    outputWs.Columns(HELPER_COL).Hidden = False
+
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName    = resultParts(0)
+        filePath    = resultParts(1)
+
+        Dim dataRow As Long
+        dataRow = startRow + 1 + i
+
+        ' File name hyperlink (opens file directly)
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & dataRow), _
+            Address:=filePath, TextToDisplay:=fileName
+        With outputWs.Range(col1 & dataRow)
+            .Font.Color     = RGB(5, 99, 193)
+            .Font.Underline = xlUnderlineStyleSingle
+        End With
+
+        ' File path column
+        outputWs.Range(col2 & dataRow).Value     = filePath
+        outputWs.Range(col2 & dataRow).Font.Size = 9
+
+        ' Store path in helper column (read by OpenPreview)
+        outputWs.Range(HELPER_COL & dataRow).Value = filePath
+
+        ' Preview button (Form Control - OnAction fires macro reliably)
+        If IsTextFile(filePath) And Not IsExcelFile(filePath) Then
+            Dim cellRef As Range
+            Set cellRef = outputWs.Range(col3 & dataRow)
+
+            Dim previewBtn As Button
+            Set previewBtn = outputWs.Buttons.Add( _
+                cellRef.Left, cellRef.Top, cellRef.Width, cellRef.Height)
+            previewBtn.Caption  = "Click to Preview"
+            previewBtn.OnAction = "OpenPreview"
+            With previewBtn.Font
+                .Color = RGB(192, 0, 0)
+                .Bold  = True
+                .Size  = 9
+            End With
+            Set previewBtn = Nothing
+            Set cellRef    = Nothing
+        Else
+            outputWs.Range(col3 & dataRow).Value = "N/A (Binary)"
+            With outputWs.Range(col3 & dataRow)
+                .Font.Color        = RGB(128, 128, 128)
+                .Font.Italic       = True
+                .HorizontalAlignment = xlCenter
+            End With
+        End If
+
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & dataRow & ":" & col3 & dataRow).Interior.Color = RGB(242, 242, 242)
+        End If
+    Next i
+
+    outputWs.Columns(HELPER_COL).Hidden = True
+
+    Dim lastRow As Long
+    lastRow = startRow + UBound(results) + 1
+    outputWs.Range(col1 & startRow & ":" & col3 & lastRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col3 & lastRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    outputWs.Columns(col1).ColumnWidth = 30
+    outputWs.Columns(col2).ColumnWidth = 50
+    outputWs.Columns(col3).ColumnWidth = 20
+
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
+
+    Application.StatusBar = False
+
+    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
+           "Keywords: " & keywordList & vbCrLf & _
+           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
+           "Click 'Click to Preview' to open a row-filtered preview for that file.", vbInformation
+End Sub
+
+
+' ==========================================
+' ON-DEMAND PREVIEW ENTRY POINT
+'
+' FIX #2 (screenshot bug): The row-detection loop accumulated cumulative
+' row heights via outputWs.Rows(r).Height in a loop up to .Rows.Count
+' (~1 million rows), which was extremely slow and returned a wrong row.
+' Fix: Use RangeFromPoint or directly map button Top to row via
+' outputWs.Rows(r).Top comparison - much faster and accurate.
+' ==========================================
+
+Sub OpenPreview()
+    Dim outputWs As Worksheet
+    Dim targetRow As Long
+    Dim filePath As String
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer
+    Dim sheetName As String
+
+    Set outputWs = GetOutputWorksheet()
+
+    ' Identify the row from the calling button's vertical position
+    Dim callerName As String
+    callerName = Application.Caller
+
+    Dim callerBtn As Button
+    On Error Resume Next
+    Set callerBtn = outputWs.Buttons(callerName)
+    On Error GoTo 0
+
+    If callerBtn Is Nothing Then
+        MsgBox "Could not identify the Preview button. Please run the search again.", vbExclamation
+        Exit Sub
+    End If
+
+    ' FIX #2 (screenshot bug): Find the row by comparing button midpoint
+    ' to row Top positions - accurate and fast (no cumulative height loop)
+    Dim btnMidY As Double
+    btnMidY = callerBtn.Top + callerBtn.Height / 2
+
+    ' Binary-approach: find row whose Top <= btnMidY < Top+Height
+    targetRow = 0
+    Dim r As Long
+    ' Start from a reasonable row (skip headers) for performance
+    Dim startR As Long
+    startR = GetOutputStartRow()
+    If startR < 1 Then startR = 1
+
+    For r = startR To startR + 2000   ' Search within a reasonable range
+        If outputWs.Rows(r).Top > btnMidY Then
+            targetRow = r - 1
+            Exit For
+        End If
+        If outputWs.Rows(r).Top <= btnMidY And _
+           (outputWs.Rows(r).Top + outputWs.Rows(r).Height) > btnMidY Then
+            targetRow = r
+            Exit For
+        End If
+    Next r
+
+    Set callerBtn = Nothing
+
+    If targetRow = 0 Then
+        MsgBox "Could not determine the file path for this row." & vbCrLf & _
+               "Please run the search again.", vbExclamation
+        Exit Sub
+    End If
+
+    outputWs.Columns(HELPER_COL).Hidden = False
+    filePath = Trim(outputWs.Range(HELPER_COL & targetRow).Value)
+    outputWs.Columns(HELPER_COL).Hidden = True
+
+    If filePath = "" Then
+        MsgBox "Could not determine the file path for this row." & vbCrLf & _
+               "Please run the search again.", vbExclamation
+        Exit Sub
+    End If
+
+    Call LoadPreviewConfig(keywords, keywordLogic, keywordCount)
+
+    If keywordCount = 0 Then
+        MsgBox "Keyword configuration not found." & vbCrLf & _
+               "Please run 'Search: With Preview' again.", vbExclamation
+        Exit Sub
+    End If
+
+    Application.StatusBar = "Building preview for " & filePath & "..."
+
+    sheetName = CreateFilteredContentSheet(filePath, keywords, keywordLogic, keywordCount)
+
+    Application.StatusBar = False
+
+    If sheetName <> "" Then
+        ThisWorkbook.Sheets(sheetName).Activate
+    Else
+        MsgBox "Preview could not be generated for this file." & vbCrLf & _
+               "It may be a binary or unreadable file type.", vbInformation
+    End If
+End Sub
+
+
+' ==========================================
+' USER-FACING MACRO 4: REFINE SEARCH
+'
+' Reads file paths from HELPER_COL (populated by any previous search).
+' Re-filters that subset with the current keywords (AND logic, content scan).
+' Date filter is NOT re-applied - the prior result set is already filtered.
+'
+' FIX #5: Keyword cells read from B11 onwards.
+' ==========================================
+
+Sub RunRefineSearch()
+    Dim ws As Worksheet, outputWs As Worksheet
+    Dim keywords(0 To MAX_KEYWORDS - 1) As String
+    Dim keywordCount As Integer, keywordList As String
+    Dim startCol As String, startRow As Integer
+    Dim col1 As String, col2 As String
+    Dim results As Variant
+    Dim i As Long, resultParts() As String
+    Dim fileName As String, filePath As String
+
+    g_AbortRequested = False
+
+    Set ws         = ThisWorkbook.Sheets("Search")
+    Set outputWs   = GetOutputWorksheet()
+    startCol       = GetOutputStartColumn()
+    startRow       = GetOutputStartRow()
+    col1           = ColumnLetter(ColumnNumber(startCol))
+    col2           = ColumnLetter(ColumnNumber(startCol) + 1)
+
+    ' Read all stored paths from HELPER_COL using End(xlUp) - skip blanks
+    outputWs.Columns(HELPER_COL).Hidden = False
+
+    Dim firstResultPaths() As String
+    Dim fileCount As Integer
+    fileCount = 0
+
+    Dim lastJRow As Long
+    lastJRow = outputWs.Cells(outputWs.Rows.Count, HELPER_COL).End(xlUp).Row
+
+    Dim checkRow As Long
+    Dim cellVal As String
+    For checkRow = startRow + 1 To lastJRow
+        cellVal = Trim(outputWs.Range(HELPER_COL & checkRow).Value)
+        If cellVal <> "" Then
+            ReDim Preserve firstResultPaths(fileCount)
+            firstResultPaths(fileCount) = cellVal
+            fileCount = fileCount + 1
+        End If
+    Next checkRow
+
+    outputWs.Columns(HELPER_COL).Hidden = True
+
+    If fileCount = 0 Then
+        MsgBox "No previous search results found." & vbCrLf & _
+               "Please run any search first, then use Refine Results.", vbExclamation
+        Exit Sub
+    End If
+
+    ' FIX #5: Read keywords from B11 onwards
+    keywordCount = 0
+    keywordList  = ""
+    For i = 0 To MAX_KEYWORDS - 1
+        keywords(i) = Trim(ws.Range("B" & (11 + i)).Value)
+        If keywords(i) <> "" Then
+            keywordCount = keywordCount + 1
+            If keywordList <> "" Then keywordList = keywordList & ", "
+            keywordList = keywordList & """" & keywords(i) & """"
+        End If
+    Next i
+
+    If keywordCount = 0 Then
+        MsgBox "Please enter at least one keyword (cells B11 onwards).", vbExclamation
+        Exit Sub
+    End If
+
+    ' Clear visible results only (preserve HELPER_COL until new results are ready)
+    outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearContents
+    outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearFormats
+
+    ' FIX #4: Keep ScreenUpdating ON for Abort responsiveness
+    Application.StatusBar = "Refining search within " & fileCount & " file(s)..."
+
+    results = SearchFilesInList(firstResultPaths, fileCount, keywords, keywordCount, True)
+
+    If UBound(results) = 0 Then
+        If results(0) = "Aborted" Then
+            Call HandleAbort(outputWs, startCol, startRow)
+            Exit Sub
+        End If
+    End If
+
+    Call WriteResultsSectionHeader(outputWs, startCol, True)
+    Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
+
+    If UBound(results) = 0 Then
+        If InStr(1, results(0), "Error:") > 0 Or results(0) = "No matches found" Then
+            outputWs.Range(col1 & (startRow + 1)).Value = results(0)
+            Application.StatusBar = False
+            MsgBox results(0), IIf(InStr(results(0), "Error") > 0, vbExclamation, vbInformation)
+            Exit Sub
+        End If
+    End If
+
+    ' Now safe to overwrite HELPER_COL with the refined result paths
+    outputWs.Columns(HELPER_COL).Hidden = False
+    outputWs.Range(HELPER_COL & startRow & ":" & HELPER_COL & "1000").ClearContents
+
+    For i = LBound(results) To UBound(results)
+        resultParts = Split(results(i), "|")
+        fileName    = resultParts(0)
+        filePath    = resultParts(1)
+
+        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
+            Address:=filePath, TextToDisplay:=fileName
+        With outputWs.Range(col1 & (startRow + 1 + i))
+            .Font.Color     = RGB(5, 99, 193)
+            .Font.Underline = xlUnderlineStyleSingle
+        End With
+
+        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
+        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
+
+        ' Persist refined paths so user can refine again
+        outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
+
+        If i Mod 2 = 0 Then
+            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
+                           col2 & (startRow + 1 + i)).Interior.Color = RGB(255, 240, 240)
+        End If
+    Next i
+
+    outputWs.Columns(HELPER_COL).Hidden = True
+
+    Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
+    If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
+
+    Application.StatusBar = False
+
+    MsgBox "Refine Search complete!" & vbCrLf & vbCrLf & _
+           "Searched within: " & fileCount & " file(s) from previous results" & vbCrLf & _
+           "Keywords: " & keywordList & vbCrLf & _
+           "Matched: " & (UBound(results) + 1) & " file(s)", vbInformation
+End Sub
+
+
+' ==========================================
+' CREATE FILTERED CONTENT PREVIEW SHEET (ON DEMAND)
+'
+' FIX #2 - PREVIEW LOGIC (OR file-level enforcement):
+'   Before iterating lines, verify that every OR keyword exists
+'   somewhere in the full file content. If any OR keyword is absent
+'   from the entire file, return "" (no preview) - consistent with
+'   the requirement that all OR keywords must exist in the file.
+'
+' AND logic = ROW-LEVEL: all AND keywords must be on the same row.
+' OR  logic = ROW-LEVEL: row included if it contains ANY OR keyword.
+'             FILE-LEVEL gate: ALL OR keywords must appear somewhere.
+' ==========================================
+
+Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
+                                     keywordLogic() As String, _
+                                     keywordCount As Integer) As String
+    Dim fso As Object, textStream As Object
+    Dim fileContent As String, lines() As String
+    Dim filteredLines As Object
+    Dim andKws As Object, orKws As Object
+    Dim hasAnd As Boolean, hasOr As Boolean
+    Dim i As Long, j As Integer
+    Dim ws As Worksheet
+    Dim sheetName As String, fileName As String
+    Dim rowNum As Long
+
+    CreateFilteredContentSheet = ""
+
+    ' Only process readable text files (not binary / Excel)
+    If Not IsTextFile(filePath) Or IsExcelFile(filePath) Then Exit Function
+
+    Set fso           = CreateObject("Scripting.FileSystemObject")
+    Set filteredLines = CreateObject("System.Collections.ArrayList")
+    Set andKws        = CreateObject("System.Collections.ArrayList")
+    Set orKws         = CreateObject("System.Collections.ArrayList")
+
+    ' Separate keywords by logic type
+    hasAnd = False
+    hasOr  = False
+    For j = 0 To keywordCount - 1
+        If keywords(j) <> "" Then
+            If keywordLogic(j) = "AND" Then
+                andKws.Add keywords(j)
+                hasAnd = True
+            ElseIf keywordLogic(j) = "OR" Then
+                orKws.Add keywords(j)
+                hasOr = True
+            End If
+        End If
+    Next j
+
+    On Error Resume Next
+    Set textStream = fso.OpenTextFile(filePath, 1, False)
+    If Err.Number <> 0 Then GoTo Cleanup
+    fileContent = textStream.ReadAll
+    textStream.Close
+    On Error GoTo 0
+
+    ' FIX #2 - OR FILE-LEVEL GATE:
+    ' All OR keywords must exist somewhere in the file content.
+    ' This enforces the rule: "OR logic - all keywords must exist in the file"
+    If hasOr Then
+        Dim lowerContent As String
+        lowerContent = LCase(fileContent)
+        For j = 0 To orKws.Count - 1
+            If InStr(1, lowerContent, LCase(orKws(j)), vbTextCompare) = 0 Then
+                ' At least one OR keyword missing from entire file - skip this file
+                GoTo Cleanup
+            End If
+        Next j
+    End If
+
+    ' Split into lines - handle all common line endings
+    lines = Split(fileContent, vbCrLf)
+    If UBound(lines) <= 0 Then lines = Split(fileContent, vbLf)
+    If UBound(lines) <= 0 Then lines = Split(fileContent, vbCr)
+
+    ' Filter lines using row-level AND / OR logic
+    ' Store original line number alongside matched line for navigation
+    For i = LBound(lines) To UBound(lines)
+        If Trim(lines(i)) <> "" Then
+            If RowMatchesKeywords(lines(i), andKws, orKws, hasAnd, hasOr) Then
+                filteredLines.Add "Line " & (i + 1) & ": " & lines(i)
+            End If
+        End If
+    Next i
+
+    If filteredLines.Count = 0 Then GoTo Cleanup
+
+    ' Build safe sheet name
+    fileName  = fso.GetFileName(filePath)
+    sheetName = "Preview_" & Left(fileName, 23)
+    sheetName = Replace(Replace(Replace(Replace(Replace(Replace(Replace( _
+                sheetName, ":", ""), "\", ""), "/", ""), "?", ""), "*", ""), "[", ""), "]", "")
+    If Len(sheetName) > 31 Then sheetName = Left(sheetName, 31)
+
+    ' Delete old preview sheet if it exists (refresh)
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    ThisWorkbook.Sheets(sheetName).Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+
+    Set ws         = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    ws.Name        = sheetName
+    ws.Tab.Color   = RGB(192, 0, 0)
+
+    ' ---- Header ----
+    ws.Range("A1:B1").Merge
+    ws.Range("A1").Value = "Content Preview"
+    With ws.Range("A1")
+        .Font.Bold    = True
+        .Font.Size    = 14
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(139, 0, 0)
+    End With
+    ws.Range("A2").Value = "File:":      ws.Range("A2").Font.Bold = True
+    ws.Range("B2").Value = fileName
+    ws.Range("A3").Value = "Full Path:": ws.Range("A3").Font.Bold = True
+    ws.Range("B3").Value = filePath
+
+    Dim logicDesc As String
+    logicDesc = ""
+    If hasAnd Then
+        logicDesc = "AND (row-level): "
+        For j = 0 To andKws.Count - 1
+            If j > 0 Then logicDesc = logicDesc & " + "
+            logicDesc = logicDesc & andKws(j)
+        Next j
+    End If
+    If hasOr Then
+        If logicDesc <> "" Then logicDesc = logicDesc & "  |  "
+        logicDesc = logicDesc & "OR (row shows any OR-kw; all OR-kw exist in file): "
+        For j = 0 To orKws.Count - 1
+            If j > 0 Then logicDesc = logicDesc & " / "
+            logicDesc = logicDesc & orKws(j)
+        Next j
+    End If
+    ws.Range("A4").Value = "Filter Logic:":   ws.Range("A4").Font.Bold = True
+    ws.Range("B4").Value = logicDesc
+    ws.Range("A5").Value = "Matching Lines:": ws.Range("A5").Font.Bold = True
+    ws.Range("B5").Value = filteredLines.Count
+
+    ws.Range("A7").Value = "Matching Rows"
+    With ws.Range("A7")
+        .Font.Bold      = True
+        .Font.Color     = RGB(255, 255, 255)
+        .Interior.Color = RGB(192, 0, 0)
+    End With
+
+    ' ---- Write filtered lines with keyword highlighting ----
+    rowNum = 8
+    For i = 0 To filteredLines.Count - 1
+        ws.Range("A" & rowNum).Value = filteredLines(i)
+
+        Dim cellText As String
+        cellText = ws.Range("A" & rowNum).Value
+        Dim kwPos As Long, srchStart As Long
+
+        ' Highlight AND keywords in green
+        If hasAnd Then
+            For j = 0 To andKws.Count - 1
+                srchStart = 1
+                Do
+                    kwPos = InStr(srchStart, cellText, andKws(j), vbTextCompare)
+                    If kwPos > 0 Then
+                        ws.Range("A" & rowNum).Characters(kwPos, Len(andKws(j))).Font.Color = RGB(0, 128, 0)
+                        ws.Range("A" & rowNum).Characters(kwPos, Len(andKws(j))).Font.Bold  = True
+                        srchStart = kwPos + Len(andKws(j))
+                    End If
+                Loop While kwPos > 0 And srchStart <= Len(cellText)
+            Next j
+        End If
+
+        ' Highlight OR keywords in blue
+        If hasOr Then
+            For j = 0 To orKws.Count - 1
+                srchStart = 1
+                Do
+                    kwPos = InStr(srchStart, cellText, orKws(j), vbTextCompare)
+                    If kwPos > 0 Then
+                        ws.Range("A" & rowNum).Characters(kwPos, Len(orKws(j))).Font.Color = RGB(0, 0, 205)
+                        ws.Range("A" & rowNum).Characters(kwPos, Len(orKws(j))).Font.Bold  = True
+                        srchStart = kwPos + Len(orKws(j))
+                    End If
+                Loop While kwPos > 0 And srchStart <= Len(cellText)
+            Next j
+        End If
+
+        rowNum = rowNum + 1
+        If rowNum > 10000 Then
+            ws.Range("A" & rowNum).Value = "... (truncated - more results exist)"
+            rowNum = rowNum + 1
+            Exit For
+        End If
+    Next i
+
+    ' ---- Legend ----
+    ws.Range("A" & (rowNum + 1)).Value = "Legend:"
+    ws.Range("A" & (rowNum + 1)).Font.Bold = True
+    If hasAnd Then
+        ws.Range("A" & (rowNum + 2)).Value      = "Green = AND keywords (all must appear on the same row)"
+        ws.Range("A" & (rowNum + 2)).Font.Color = RGB(0, 128, 0)
+        ws.Range("A" & (rowNum + 2)).Font.Bold  = True
+    End If
+    If hasOr Then
+        ws.Range("A" & (rowNum + 3)).Value      = "Blue = OR keywords (any shown on row; all exist in file)"
+        ws.Range("A" & (rowNum + 3)).Font.Color = RGB(0, 0, 205)
+        ws.Range("A" & (rowNum + 3)).Font.Bold  = True
+    End If
+
+    ' ---- Back link ----
+    ws.Range("A" & (rowNum + 5)).Value = "Back to Search Results"
+    ws.Hyperlinks.Add Anchor:=ws.Range("A" & (rowNum + 5)), _
+        Address:="", SubAddress:="'Search'!A1", TextToDisplay:="Back to Search Results"
+    ws.Range("A" & (rowNum + 5)).Font.Bold  = True
+    ws.Range("A" & (rowNum + 5)).Font.Color = RGB(192, 0, 0)
+
+    ws.Columns("A").ColumnWidth = 150
+    ws.Columns("A").WrapText    = True
+    ws.Columns("B").ColumnWidth = 60
+
+    CreateFilteredContentSheet = sheetName
+
+Cleanup:
+    Set fso           = Nothing
+    Set textStream    = Nothing
+    Set filteredLines = Nothing
+    Set andKws        = Nothing
+    Set orKws         = Nothing
+End Function
+
+
+' ==========================================
+' KEYWORD CONFIG STORE / LOAD (for on-demand preview)
+'
+' FIX #2 (screenshot - LoadPreviewConfig bug):
+' Original code read from column A & B starting at row 2, but
+' StorePreviewConfig wrote count to A1 and data to A2:B(n+1).
+' The LoadPreviewConfig correctly reads count from A1 and data
+' from A2/B2 onwards - this is consistent. However the screenshot
+' shows the ReDim line highlighted, suggesting the array bounds
+' were the issue. Fix: use MAX_KEYWORDS - 1 consistently.
+' ==========================================
+
+Sub StorePreviewConfig(keywords() As String, keywordLogic() As String, _
+                        keywordCount As Integer)
+    Dim cfgWs As Worksheet
+    On Error Resume Next
+    Set cfgWs = ThisWorkbook.Sheets("PreviewConfig")
+    On Error GoTo 0
+    If cfgWs Is Nothing Then
+        Set cfgWs      = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        cfgWs.Name     = "PreviewConfig"
+    End If
+    cfgWs.Visible = xlSheetVeryHidden
+    cfgWs.Cells.ClearContents
+    ' FIX: Store count in B1 (consistent with LoadPreviewConfig which reads B1)
+    cfgWs.Range("B1").Value = keywordCount
+    Dim i As Integer
+    For i = 0 To keywordCount - 1
+        cfgWs.Range("B" & (11 + i)).Value = keywords(i)
+        cfgWs.Range("C" & (11 + i)).Value = keywordLogic(i)
+    Next i
+End Sub
+
+Sub LoadPreviewConfig(keywords() As String, keywordLogic() As String, _
+                       keywordCount As Integer)
+    Dim cfgWs As Worksheet
+    On Error Resume Next
+    Set cfgWs = ThisWorkbook.Sheets("PreviewConfig")
+    On Error GoTo 0
+    keywordCount = 0
+    ' FIX #2 (screenshot): ReDim must use MAX_KEYWORDS - 1 as upper bound
+    ReDim keywords(0 To MAX_KEYWORDS - 1)
+    ReDim keywordLogic(0 To MAX_KEYWORDS - 1)
+    If cfgWs Is Nothing Then Exit Sub
+    ' FIX: Read count from B1 (matches StorePreviewConfig write location)
+    keywordCount = CInt(cfgWs.Range("B1").Value)
+    Dim i As Integer
+    For i = 0 To keywordCount - 1
+        keywords(i)    = cfgWs.Range("B" & (11 + i)).Value
+        keywordLogic(i) = cfgWs.Range("C" & (11 + i)).Value
+    Next i
+End Sub
+
+
+' ==========================================
+' CLEAR PREVIEW SHEETS
+' ==========================================
+
+Sub ClearFilteredContentSheets()
+    Dim ws As Worksheet
+    Dim count As Integer
+    count = 0
+    Application.DisplayAlerts = False
+    For Each ws In ThisWorkbook.Sheets
+        If Left(ws.Name, 8) = "Preview_" Then
+            ws.Delete
+            count = count + 1
+        End If
+    Next ws
+    Application.DisplayAlerts = True
+    MsgBox "Cleared " & count & " preview sheet(s).", vbInformation
+End Sub
+
+
+' ==========================================
+' SHARED UI HELPERS
+' ==========================================
+
+' FIX #1 - BUTTON DISAPPEAR:
+' The original ClearResultsArea deleted every button whose Caption
+' contained "Preview". This matched:
+'   - "Click to Preview"  (result-row Form Controls)  <- intended
+'   - "Search: With Preview"  (dashboard button)       <- UNINTENDED
+'   - "Clear Preview Sheets"  (dashboard button)       <- UNINTENDED
+'
+' Fix: Only delete Form Control buttons that were added by the search
+' macro. Dashboard buttons are added by SetupSearchSheet and have
+' a known set of captions. We now delete only buttons whose OnAction
+' is "OpenPreview" - that is the exact OnAction set on result buttons.
+
+Sub ClearResultsArea(outputWs As Worksheet, startCol As String, startRow As Integer)
+    ' Clears results data and formatting. Does NOT clear the Results header (rows 1-2).
+    Dim clearCol As Integer
+    clearCol = ColumnNumber(startCol)
+    outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
+                   ColumnLetter(clearCol + 3) & "1000").ClearContents
+    outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
+                   ColumnLetter(clearCol + 3) & "1000").ClearFormats
+
+    ' FIX #1: Only remove preview result buttons (OnAction = "OpenPreview")
+    ' NOT dashboard control buttons (Search: With Preview, Clear Preview Sheets)
+    Dim btn As Object
+    For Each btn In outputWs.Buttons
+        If btn.OnAction = "OpenPreview" Then btn.Delete
+    Next btn
+End Sub
+
+Sub WriteResultsColumnHeaders(outputWs As Worksheet, col1 As String, col2 As String, _
+                               col3 As String, startRow As Integer, hasPreview As Boolean)
+    outputWs.Range(col1 & startRow).Value = "File Name"
+    outputWs.Range(col2 & startRow).Value = "File Path"
+    If hasPreview And col3 <> "" Then outputWs.Range(col3 & startRow).Value = "Content Preview"
+
+    Dim headerRange As String
+    If hasPreview And col3 <> "" Then
+        headerRange = col1 & startRow & ":" & col3 & startRow
+    Else
+        headerRange = col1 & startRow & ":" & col2 & startRow
+    End If
+
+    With outputWs.Range(headerRange)
+        .Font.Bold           = True
+        .Font.Size           = 10
+        .Interior.Color      = RGB(217, 217, 217)
+        .Borders.LineStyle   = xlContinuous
+        .HorizontalAlignment = xlCenter
+    End With
+End Sub
+
+Sub FormatResultsTable(outputWs As Worksheet, col1 As String, col2 As String, _
+                        startRow As Integer, lastIndex As Long)
+    Dim lastRow As Long
+    lastRow = startRow + lastIndex + 1
+    outputWs.Range(col1 & startRow & ":" & col2 & lastRow).Borders.LineStyle = xlContinuous
+    outputWs.Range(col1 & startRow & ":" & col2 & lastRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
+    outputWs.Columns(col1).ColumnWidth = 35
+    outputWs.Columns(col2).ColumnWidth = 55
+End Sub
+
+Sub AddBackButton(outputWs As Worksheet)
+    outputWs.Range("D1").Value = "Back to Search"
+    outputWs.Hyperlinks.Add Anchor:=outputWs.Range("D1"), _
+        Address:="", SubAddress:="'Search'!A1", TextToDisplay:="Back to Search"
+    outputWs.Range("D1").Font.Bold  = True
+    outputWs.Range("D1").Font.Color = RGB(5, 99, 193)
+    outputWs.Activate
+End Sub
+
+
+' ==========================================
+' DASHBOARD SETUP
+'
+' FIX #3 - DATE FORMAT: Changed placeholder and format hint from
+'          dd-mmm-yyyy to MM/DD/YY throughout.
+'
+' FIX #5 - KEYWORD ROW: Header row is Row 10, keyword input rows
+'          start at Row 11 (B11:C20 for 10 keywords).
+'          The loop variable currentRow = 10 + i gives rows 11-20.
+'
+' FIX #6 - RESET POPUP: Removed the "New in this version" section
+'          from the completion MsgBox.
+' ==========================================
+
+Sub SetupSearchSheet()
+    Dim ws As Worksheet
+    Dim i As Integer
+    Dim btn As Button
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Search")
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        Set ws      = ThisWorkbook.Sheets.Add
+        ws.Name     = "Search"
+    End If
+
+    Application.ScreenUpdating = False
+
+    ws.Cells.Clear
+    ws.Buttons.Delete
+    ws.Tab.Color = RGB(192, 0, 0)
+
+    ' ---- SECTION 1: Main Header (Row 1) ----
+    ws.Range("A1:D1").Merge
+    ws.Range("A1").Value = "UNIVERSAL FILE & CONTENT FINDER"
+    With ws.Range("A1")
+        .Font.Bold    = True
+        .Font.Size    = 16
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(139, 0, 0)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 35
+    End With
+
+    ' ---- SECTION 2: Folder Path (Rows 3-4) ----
+    Dim folderSection As Integer: folderSection = 3
+    ws.Range("A" & folderSection & ":D" & folderSection).Merge
+    ws.Range("A" & folderSection).Value = "FOLDER LOCATION"
+    With ws.Range("A" & folderSection)
+        .Font.Bold    = True
+        .Font.Size    = 11
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(192, 48, 48)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 25
+    End With
+    ws.Range("A4").Value = "Folder Path:": ws.Range("A4").Font.Bold = True
+    ws.Range("C4:D4").Merge
+    ws.Range("B4").Value = "C:\Your\Folder\Path"
+    With ws.Range("B4")
+        .Font.Italic  = True
+        .Font.Color   = RGB(128, 128, 128)
+        .Interior.Color = RGB(255, 245, 245)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Color     = RGB(192, 128, 128)
+    End With
+    ws.Range("A3:B4").BorderAround LineStyle:=xlContinuous, Weight:=xlMedium, _
+        Color:=RGB(139, 0, 0)
+
+    ' ---- SECTION 3: Date Range Filter (Rows 5-7) ----
+    ws.Range("A5:D5").Merge
+    ws.Range("A5").Value = "DATE RANGE FILTER  (optional - leave blank to search all files)"
+    With ws.Range("A5")
+        .Font.Bold    = True
+        .Font.Size    = 11
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(160, 32, 32)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 25
+    End With
+
+    ' Start Date row (Row 6)
+    ' FIX #3: Placeholder and format changed to MM/DD/YY
+    ws.Range("A6").Value = "Start Date:": ws.Range("A6").Font.Bold = True
+    ws.Range("B6").Value = "MM/DD/YY"
+    With ws.Range("B6")
+        .Font.Italic  = True
+        .Font.Color   = RGB(128, 128, 128)
+        .Interior.Color = RGB(255, 245, 245)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Color     = RGB(192, 128, 128)
+        .NumberFormat = "@"    ' Store as text to avoid Excel auto-converting dates
+    End With
+    ws.Range("C6").Value = "Format: MM/DD/YY  (e.g. 01/15/25)"
+    With ws.Range("C6")
+        .Font.Size    = 8
+        .Font.Color   = RGB(150, 150, 150)
+        .Font.Italic  = True
+    End With
+
+    ' End Date row (Row 7)
+    ws.Range("A7").Value = "End Date:": ws.Range("A7").Font.Bold = True
+    ws.Range("B7").Value = "MM/DD/YY"
+    With ws.Range("B7")
+        .Font.Italic  = True
+        .Font.Color   = RGB(128, 128, 128)
+        .Interior.Color = RGB(255, 245, 245)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Color     = RGB(192, 128, 128)
+        .NumberFormat = "@"
+    End With
+    ws.Range("C7").Value = "Leave blank = today (if Start given) or no upper limit"
+    With ws.Range("C7")
+        .Font.Size    = 8
+        .Font.Color   = RGB(150, 150, 150)
+        .Font.Italic  = True
+    End With
+
+    ws.Range("A5:B7").BorderAround LineStyle:=xlContinuous, Weight:=xlMedium, _
+        Color:=RGB(160, 32, 32)
+
+    ' ---- SECTION 4: Keywords (Rows 9-20) ----
+    Dim paramSection As Integer: paramSection = 9
+    ws.Range("A" & paramSection & ":C" & paramSection).Merge
+    ws.Range("A" & paramSection).Value = "SEARCH PARAMETERS (Keywords)"
+    With ws.Range("A" & paramSection)
+        .Font.Bold    = True
+        .Font.Size    = 11
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(176, 0, 32)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 25
+    End With
+
+    ' FIX #5: Column header row is Row 10; keyword rows start at Row 11
+    ws.Range("A10").Value = "Keyword"
+    ws.Range("B10").Value = "Search Term"
+    ws.Range("C10").Value = "Logic (AND/OR)"
+    With ws.Range("A10:C10")
+        .Font.Bold           = True
+        .Interior.Color      = RGB(255, 200, 200)
+        .HorizontalAlignment = xlCenter
+        .Borders.LineStyle   = xlContinuous
+    End With
+
+    ' Keyword input rows: Row 11 to Row (10 + MAX_KEYWORDS)
+    For i = 1 To MAX_KEYWORDS
+        Dim currentRow As Integer: currentRow = 10 + i      ' Rows 11 to 20
+        ws.Range("A" & currentRow).Value = "Keyword " & i
+        With ws.Range("A" & currentRow)
+            .Font.Bold           = True
+            .HorizontalAlignment = xlCenter
+            .Interior.Color      = RGB(255, 230, 230)
+        End With
+        With ws.Range("B" & currentRow)
+            .Value              = ""
+            .Interior.Color     = RGB(255, 255, 255)
+            .Borders.LineStyle  = xlContinuous
+            .Borders.Color      = RGB(192, 128, 128)
+        End With
+        With ws.Range("C" & currentRow)
+            .Value              = "AND"
+            .Font.Color         = RGB(139, 0, 0)
+            .Font.Bold          = True
+            .HorizontalAlignment = xlCenter
+            .Interior.Color     = RGB(255, 230, 230)
+            .Borders.LineStyle  = xlContinuous
+            .Borders.Color      = RGB(192, 128, 128)
+        End With
+    Next i
+    ws.Range("A9:C" & (10 + MAX_KEYWORDS)).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(176, 0, 32)
+
+    ' ---- SECTION 5: Macro Controls ----
+    Dim controlSection As Integer: controlSection = 10 + MAX_KEYWORDS + 2
+    ws.Range("A" & controlSection & ":D" & controlSection).Merge
+    ws.Range("A" & controlSection).Value = "MACRO CONTROLS"
+    With ws.Range("A" & controlSection)
+        .Font.Bold    = True
+        .Font.Size    = 11
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(101, 0, 0)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 25
+    End With
+
+    Dim btnTop As Long, btnLeft As Long
+    Dim btnWidth As Long, btnHeight As Long, btnSpacing As Long
+    btnTop     = ws.Range("A" & (controlSection + 1)).Top
+    btnLeft    = ws.Range("A" & (controlSection + 1)).Left
+    btnWidth   = 140
+    btnHeight  = 30
+    btnSpacing = 10
+
+    ' Row 1 of buttons: search actions
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearchByNameOnly": btn.Caption = "Search: Name Only"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearch": btn.Caption = "Search: Name + Content"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    ' Row 2 of buttons: preview + refine
+    btnTop = btnTop + btnHeight + btnSpacing
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunSearchWithContentPreview": btn.Caption = "Search: With Preview"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "RunRefineSearch": btn.Caption = "Refine Results"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    ' Row 3 of buttons: utilities
+    btnTop = btnTop + btnHeight + btnSpacing
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "ClearFilteredContentSheets": btn.Caption = "Clear Preview Sheets"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    Set btn = ws.Buttons.Add(btnLeft + btnWidth + btnSpacing, btnTop, btnWidth, btnHeight)
+    btn.OnAction = "SetupSearchSheet": btn.Caption = "Reset Dashboard"
+    btn.Font.Bold = True: btn.Font.Size = 9
+
+    ' Row 4 of buttons: ABORT (prominent red styling)
+    btnTop = btnTop + btnHeight + btnSpacing
+    Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth * 2 + btnSpacing, btnHeight)
+    btn.OnAction = "AbortSearch"
+    btn.Caption  = "ABORT / STOP SEARCH"
+    btn.Font.Bold = True
+    btn.Font.Size = 10
+
+    Dim btnEndRow As Integer: btnEndRow = controlSection + 10
+    ws.Range("A" & (controlSection + 1) & ":D" & btnEndRow).Interior.Color = RGB(255, 235, 235)
+    ws.Range("A" & controlSection & ":D" & btnEndRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(101, 0, 0)
+
+    ' ---- SECTION 6: Instructions ----
+    Dim instructionSection As Integer: instructionSection = btnEndRow + 2
+    ws.Range("A" & instructionSection & ":D" & instructionSection).Merge
+    ws.Range("A" & instructionSection).Value = "HOW TO USE"
+    With ws.Range("A" & instructionSection)
+        .Font.Bold    = True
+        .Font.Size    = 11
+        .Font.Color   = RGB(255, 255, 255)
+        .Interior.Color = RGB(160, 32, 32)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment   = xlCenter
+        .RowHeight    = 25
+    End With
+
+    Dim instrRow As Integer: instrRow = instructionSection + 1
+    Dim instructions(6) As String
+    instructions(0) = "1. Enter the folder path in cell B4"
+    instructions(1) = "2. (Optional) Enter Start Date and/or End Date in B6/B7 using MM/DD/YY format to filter by file date"
+    instructions(2) = "3. Enter 1-" & MAX_KEYWORDS & " keywords in B11:B" & (10 + MAX_KEYWORDS) & ". Set AND/OR logic in column C (AND/OR only used by Preview search)"
+    instructions(3) = "4. Click a search button: Name Only = all keywords in filename | Name+Content = keyword in name OR body | Preview = AND same row, OR any row (all OR-keywords must exist in file)"
+    instructions(4) = "5. After any search, update keywords then click 'Refine Results' to narrow down within the previous result set"
+    instructions(5) = "6. In 'With Preview' results, click the 'Click to Preview' button to open a filtered row view"
+    instructions(6) = "7. Click 'ABORT / STOP SEARCH' at any time to safely stop a running search without crashing Excel"
+
+    Dim k As Integer
+    For k = 0 To 6
+        ws.Range("A" & instrRow & ":D" & instrRow).Merge
+        ws.Range("A" & instrRow).Value    = instructions(k)
+        ws.Range("A" & instrRow).WrapText = True
+        If k = 3 Then
+            ws.Range("A" & instrRow).Font.Italic = True
+            ws.Range("A" & instrRow).Font.Color  = RGB(139, 0, 0)
+        End If
+        instrRow = instrRow + 1
+    Next k
+
+    Dim instrEndRow As Integer: instrEndRow = instrRow - 1
+    ws.Range("A" & (instructionSection + 1) & ":D" & instrEndRow).Interior.Color = RGB(255, 235, 235)
+    ws.Range("A" & instructionSection & ":D" & instrEndRow).BorderAround _
+        LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(160, 32, 32)
+
+    ' ---- Column E: Gap / separator ----
+    ws.Columns("E").ColumnWidth = 2
+    ws.Range("E1:E" & instrEndRow).Interior.Color  = RGB(200, 200, 200)
+    ws.Range("E1:E" & instrEndRow).Borders.LineStyle = xlNone
+
+    ' ---- Column widths (dashboard side) ----
+    ws.Columns("A").ColumnWidth = 18
+    ws.Columns("B").ColumnWidth = 32
+    ws.Columns("C").ColumnWidth = 22
+    ws.Columns("D").ColumnWidth = 5
+
+    ' Draw Results section header so it is visible before any search
+    Call WriteResultsSectionHeader(ws, GetOutputStartColumn(), False)
+
+    ws.Range("B4").Select
+    Application.ScreenUpdating = True
+
+    ' FIX #6: Removed "New in this version" section from popup
+    MsgBox "Dashboard Setup Complete!" & vbCrLf & vbCrLf & _
+           "Maximum Keywords: " & MAX_KEYWORDS & vbCrLf & _
+           "Keyword rows: B11 to B" & (10 + MAX_KEYWORDS) & vbCrLf & _
+           "Date format: MM/DD/YY (e.g. 01/15/25)" & vbCrLf & vbCrLf & _
+           "Click any search button to begin.", vbInformation, "Dashboard Ready"
+End Sub
