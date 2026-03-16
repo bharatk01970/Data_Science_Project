@@ -21,25 +21,27 @@ Const HELPER_COL As String = "J"
 
 
 ' ==========================================
-' ABORT FLAG
+' MODULE-LEVEL STATE
 '
-' g_AbortRequested is a module-level Boolean flag.
-' - Set to True by the "Abort Search" button.
-' - Checked inside every file-scanning loop via DoEvents.
-' - Reset to False at the start of every new search.
+' g_AbortRequested  - Boolean flag set by AbortSearch button. Checked
+'                     inside every file loop via DoEvents.
 '
-' WHY THIS APPROACH:
-' Using Application.EnableCancelKey = xlErrorHandler and trapping
-' Err.Number = 18 is unreliable across nested calls and can leave
-' the Excel application in a broken state.  A simple Boolean flag
-' checked after DoEvents is the safest pattern: DoEvents yields
-' control back to Excel (processes clicks, repaints the screen),
-' the Abort button fires its OnAction macro which sets the flag,
-' then control returns to the loop which detects the flag and exits
-' cleanly through the normal code path.
+' g_Stats_*         - Performance counters populated during each search.
+'                     Read by ShowSearchSummary at completion.
+'                     Reset to zero at the start of every new search.
 ' ==========================================
 
-Public g_AbortRequested As Boolean
+Public g_AbortRequested       As Boolean
+
+' Performance / summary counters (Enhancement #3)
+Public g_Stats_TotalScanned   As Long     ' Files seen in folder
+Public g_Stats_Candidates     As Long     ' Files passing date filter
+Public g_Stats_Searched       As Long     ' Files actually opened / name-checked
+Public g_Stats_Matches        As Long     ' Final matched files
+Public g_Stats_DateSecs       As Double   ' Seconds spent in date-filter phase
+Public g_Stats_SearchSecs     As Double   ' Seconds spent in keyword-filter phase
+Public g_Stats_WasAborted     As Boolean  ' True if user aborted mid-run
+Public g_Stats_AbortPhase     As String   ' "date" | "search" | ""
 
 
 ' ==========================================
@@ -113,6 +115,23 @@ End Function
 
 
 ' ==========================================
+' RESET PERFORMANCE COUNTERS
+' Called at the start of every new search.
+' ==========================================
+
+Sub ResetStats()
+    g_Stats_TotalScanned = 0
+    g_Stats_Candidates   = 0
+    g_Stats_Searched     = 0
+    g_Stats_Matches      = 0
+    g_Stats_DateSecs     = 0
+    g_Stats_SearchSecs   = 0
+    g_Stats_WasAborted   = False
+    g_Stats_AbortPhase   = ""
+End Sub
+
+
+' ==========================================
 ' DATE RANGE HELPERS
 '
 ' ReadDateRange reads Start Date (B6) and End Date (B7) from the
@@ -122,11 +141,6 @@ End Function
 '   Start only     -> End = Today
 '   End only       -> Start = date of the oldest file in the folder
 '   Neither        -> useDateFilter = False  (no filter)
-'
-' IsFileInDateRange returns True when:
-'   - No date filter is active (useDateFilter = False), OR
-'   - The file's last-modified date falls within [startDate, endDate]
-'     (comparison is date-only, time is stripped).
 ' ==========================================
 
 Sub ReadDateRange(folderPath As String, _
@@ -140,12 +154,10 @@ Sub ReadDateRange(folderPath As String, _
     rawStart = Trim(ws.Range("B6").Value)
     rawEnd   = Trim(ws.Range("B7").Value)
 
-    ' FIX #3: Updated placeholder text to match new MM/DD/YY format
     Dim hasStart As Boolean, hasEnd As Boolean
     hasStart = (rawStart <> "" And rawStart <> "MM/DD/YY")
     hasEnd   = (rawEnd   <> "" And rawEnd   <> "MM/DD/YY")
 
-    ' Validate any supplied dates
     If hasStart Then
         If Not IsDate(rawStart) Then
             MsgBox "Start Date '" & rawStart & "' is not a valid date." & vbCrLf & _
@@ -163,7 +175,6 @@ Sub ReadDateRange(folderPath As String, _
         End If
     End If
 
-    ' Scenario: neither supplied -> no filter
     If Not hasStart And Not hasEnd Then
         useDateFilter = False
         Exit Sub
@@ -174,21 +185,12 @@ Sub ReadDateRange(folderPath As String, _
     If hasStart Then startDate = CDate(rawStart)
     If hasEnd   Then endDate   = CDate(rawEnd)
 
-    ' Scenario: Start only -> End = Today
-    If hasStart And Not hasEnd Then
-        endDate = Date
-    End If
+    If hasStart And Not hasEnd Then endDate = Date
+    If Not hasStart And hasEnd Then startDate = FindOldestFileDate(folderPath)
 
-    ' Scenario: End only -> Start = oldest file date in folder
-    If Not hasStart And hasEnd Then
-        startDate = FindOldestFileDate(folderPath)
-    End If
-
-    ' Normalise: strip time component so comparisons are date-only
     startDate = Int(startDate)
     endDate   = Int(endDate)
 
-    ' Sanity check: start must not be after end
     If startDate > endDate Then
         MsgBox "Start Date (" & Format(startDate, "MM/DD/YY") & ") is after " & _
                "End Date (" & Format(endDate, "MM/DD/YY") & ")." & vbCrLf & _
@@ -199,8 +201,6 @@ End Sub
 
 
 Function FindOldestFileDate(folderPath As String) As Date
-    ' Returns the earliest DateLastModified among all files in the folder.
-    ' Falls back to a far-past date if the folder is empty or inaccessible.
     Dim fso As Object, folder As Object, file As Object
     Dim oldest As Date
 
@@ -236,7 +236,6 @@ End Function
 
 Function IsFileInDateRange(filePath As String, startDate As Date, endDate As Date, _
                             useDateFilter As Boolean) As Boolean
-    ' When no date filter is active, every file passes.
     If Not useDateFilter Then
         IsFileInDateRange = True
         Exit Function
@@ -259,7 +258,6 @@ End Function
 ' ==========================================
 ' RESULTS SECTION HEADER
 ' Always visible in SIDE_BY_SIDE mode.
-' Called at dashboard setup AND before each search result write.
 ' ==========================================
 
 Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, _
@@ -270,13 +268,11 @@ Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, _
     col1 = ColumnLetter(ColumnNumber(startCol))
     col3 = ColumnLetter(ColumnNumber(startCol) + 2)
 
-    ' Unmerge first to avoid conflicts on re-draw
     On Error Resume Next
     outputWs.Range(col1 & "1:" & col3 & "1").UnMerge
     outputWs.Range(col1 & "2:" & col3 & "2").UnMerge
     On Error GoTo 0
 
-    ' Row 1: Main Results header
     outputWs.Range(col1 & "1:" & col3 & "1").Merge
     outputWs.Range(col1 & "1").Value = "RESULTS / OUTPUT"
     With outputWs.Range(col1 & "1")
@@ -289,7 +285,6 @@ Sub WriteResultsSectionHeader(outputWs As Worksheet, startCol As String, _
         .RowHeight = 35
     End With
 
-    ' Row 2: Subheader / timestamp
     outputWs.Range(col1 & "2:" & col3 & "2").Merge
     Dim subText As String
     If timestamp Then
@@ -310,17 +305,257 @@ End Sub
 
 
 ' ==========================================
+' ENHANCEMENT #3: PERFORMANCE SUMMARY DIALOG
+'
+' Replaces the basic MsgBox completion alert with a rich, formatted
+' summary showing file counts and timing for each phase.
+' Called after every search (normal completion and abort).
+' ==========================================
+
+Sub ShowSearchSummary(searchType As String, keywordList As String)
+    Dim totalSecs  As Double
+    totalSecs = g_Stats_DateSecs + g_Stats_SearchSecs
+
+    ' Format number with comma separators
+    Dim scanned   As String, candidates As String
+    Dim searched  As String, matches    As String
+    scanned    = Format(g_Stats_TotalScanned, "#,##0")
+    candidates = Format(g_Stats_Candidates,  "#,##0")
+    searched   = Format(g_Stats_Searched,    "#,##0")
+    matches    = Format(g_Stats_Matches,     "#,##0")
+
+    Dim dateSecs   As String, searchSecs As String, totalSecStr As String
+    dateSecs   = Format(g_Stats_DateSecs,   "0.0") & " sec"
+    searchSecs = Format(g_Stats_SearchSecs, "0.0") & " sec"
+    totalSecStr = Format(totalSecs,         "0.0") & " sec"
+
+    Dim msg As String
+    Dim title As String
+
+    If g_Stats_WasAborted Then
+        title = "Search Aborted - Partial Results"
+        msg = "  ** SEARCH WAS ABORTED (" & g_Stats_AbortPhase & " phase) **" & vbCrLf & vbCrLf
+    Else
+        title = "Search Completed"
+        msg = ""
+    End If
+
+    msg = msg & String(50, Chr(8213)) & vbCrLf   ' horizontal rule
+    msg = msg & "  SEARCH SUMMARY" & vbCrLf
+    msg = msg & String(50, Chr(8213)) & vbCrLf & vbCrLf
+
+    msg = msg & "  Type    : " & searchType & vbCrLf
+    msg = msg & "  Keywords: " & keywordList & vbCrLf & vbCrLf
+
+    msg = msg & "  FILES" & vbCrLf
+    msg = msg & "  " & String(30, "-") & vbCrLf
+    msg = msg & "  Total files in folder    : " & scanned    & vbCrLf
+    msg = msg & "  After date filter        : " & candidates & vbCrLf
+    msg = msg & "  Files actually searched  : " & searched   & vbCrLf
+    msg = msg & "  Matches found            : " & matches    & vbCrLf & vbCrLf
+
+    msg = msg & "  TIMING" & vbCrLf
+    msg = msg & "  " & String(30, "-") & vbCrLf
+    msg = msg & "  Date filtering           : " & dateSecs    & vbCrLf
+    msg = msg & "  Keyword searching        : " & searchSecs  & vbCrLf
+    msg = msg & "  Total execution time     : " & totalSecStr & vbCrLf
+
+    If g_Stats_WasAborted Then
+        msg = msg & vbCrLf & "  Partial results (if any) have been written to the output area."
+        MsgBox msg, vbExclamation, title
+    Else
+        If g_Stats_Matches > 0 Then
+            msg = msg & vbCrLf & "  Tip: Click 'Refine Results' to narrow down within these matches."
+        End If
+        MsgBox msg, vbInformation, title
+    End If
+End Sub
+
+
+' ==========================================
+' ENHANCEMENT #1: OPTIMISED DATE FILTERING
+'
+' Loads all file metadata into a sorted array (Newest -> Oldest)
+' before any date filtering begins. Once a file older than startDate
+' is encountered, a prompt offers to stop scanning and work with the
+' already-collected candidates - avoiding full-folder traversal.
+'
+' Returns: ArrayList of file paths that pass the date filter.
+'          Returns special sentinel array on Abort.
+'
+' Also accumulates g_Stats_TotalScanned, g_Stats_Candidates,
+' g_Stats_DateSecs for the summary dialog.
+' ==========================================
+
+Function CollectCandidatesByDate(folderPath As String, _
+                                  startDate As Date, endDate As Date, _
+                                  useDateFilter As Boolean) As Object
+
+    Dim fso As Object, folder As Object, file As Object
+    Dim candidateFiles As Object
+    Dim t0 As Double
+    t0 = Timer
+
+    Set fso            = CreateObject("Scripting.FileSystemObject")
+    Set candidateFiles = CreateObject("System.Collections.ArrayList")
+
+    ' If no date filter, just collect all paths immediately
+    If Not useDateFilter Then
+        Set folder = fso.GetFolder(folderPath)
+        Dim f As Object
+        Dim fc As Long: fc = 0
+        For Each f In folder.Files
+            fc = fc + 1
+            DoEvents
+            If g_AbortRequested Then
+                g_Stats_WasAborted  = True
+                g_Stats_AbortPhase  = "date scanning"
+                g_Stats_TotalScanned = fc
+                g_Stats_Candidates  = candidateFiles.Count
+                g_Stats_DateSecs    = Timer - t0
+                Set CollectCandidatesByDate = candidateFiles
+                GoTo CleanupDate
+            End If
+            Application.StatusBar = "Collecting files: " & fc & " found  |  Click ABORT to stop"
+            candidateFiles.Add f.Path
+        Next f
+        g_Stats_TotalScanned = fc
+        g_Stats_Candidates   = candidateFiles.Count
+        g_Stats_DateSecs     = Timer - t0
+        Set CollectCandidatesByDate = candidateFiles
+        GoTo CleanupDate
+    End If
+
+    ' ---- Date filter mode: sort all files newest-to-oldest then scan ----
+    ' Step 1: Load all file objects into a VBA array for sorting
+    Set folder = fso.GetFolder(folderPath)
+    Dim totalFiles As Long
+    totalFiles = folder.Files.Count
+    g_Stats_TotalScanned = totalFiles
+
+    If totalFiles = 0 Then
+        g_Stats_DateSecs = Timer - t0
+        Set CollectCandidatesByDate = candidateFiles
+        GoTo CleanupDate
+    End If
+
+    ' Build parallel arrays: paths and dates
+    Dim filePaths() As String
+    Dim fileDates() As Date
+    ReDim filePaths(0 To totalFiles - 1)
+    ReDim fileDates(0 To totalFiles - 1)
+
+    Dim idx As Long
+    idx = 0
+    Application.StatusBar = "Loading file metadata for sorting... (one-time cost)"
+    For Each file In folder.Files
+        DoEvents
+        If g_AbortRequested Then
+            g_Stats_WasAborted = True
+            g_Stats_AbortPhase = "date scanning (load)"
+            g_Stats_Candidates = 0
+            g_Stats_DateSecs   = Timer - t0
+            Set CollectCandidatesByDate = candidateFiles
+            GoTo CleanupDate
+        End If
+        filePaths(idx) = file.Path
+        fileDates(idx) = Int(file.DateLastModified)
+        idx = idx + 1
+    Next file
+
+    ' Step 2: Sort by date descending (newest first) - Insertion sort
+    ' Insertion sort is fine here: optimised for nearly-sorted data and
+    ' avoids recursion depth issues with 20 000+ items that QuickSort can hit.
+    Application.StatusBar = "Sorting " & totalFiles & " files by date..."
+    Dim si As Long, sj As Long
+    Dim tmpPath As String, tmpDate As Date
+    For si = 1 To totalFiles - 1
+        tmpPath = filePaths(si)
+        tmpDate = fileDates(si)
+        sj = si - 1
+        Do While sj >= 0 And fileDates(sj) < tmpDate
+            filePaths(sj + 1) = filePaths(sj)
+            fileDates(sj + 1) = fileDates(sj)
+            sj = sj - 1
+        Loop
+        filePaths(sj + 1) = tmpPath
+        fileDates(sj + 1) = tmpDate
+    Next si
+
+    ' Step 3: Scan sorted list and apply date range
+    Dim scannedCount As Long
+    scannedCount = 0
+    Dim hitOlderThanStart As Boolean
+    hitOlderThanStart = False
+
+    Dim k As Long
+    For k = 0 To totalFiles - 1
+        scannedCount = scannedCount + 1
+
+        DoEvents
+        If g_AbortRequested Then
+            g_Stats_WasAborted  = True
+            g_Stats_AbortPhase  = "date scanning"
+            g_Stats_Candidates  = candidateFiles.Count
+            g_Stats_DateSecs    = Timer - t0
+            Set CollectCandidatesByDate = candidateFiles
+            GoTo CleanupDate
+        End If
+
+        Application.StatusBar = "Date filter: " & scannedCount & " of " & totalFiles & _
+                                  "  |  Candidates: " & candidateFiles.Count & _
+                                  "  |  Click ABORT to stop"
+
+        Dim fileD As Date
+        fileD = fileDates(k)
+
+        ' File is within range
+        If fileD >= startDate And fileD <= endDate Then
+            candidateFiles.Add filePaths(k)
+
+        ' ENHANCEMENT #1: File is OLDER than start date - all newer files
+        ' already processed so no more matches can exist in the sorted list.
+        ElseIf fileD < startDate Then
+            hitOlderThanStart = True
+            ' Offer to stop early - show prompt
+            Dim stopNow As Integer
+            stopNow = MsgBox( _
+                "All files within the selected date range have been identified." & vbCrLf & vbCrLf & _
+                "  Files scanned so far : " & Format(scannedCount, "#,##0") & " of " & Format(totalFiles, "#,##0") & vbCrLf & _
+                "  Candidate files found: " & Format(candidateFiles.Count, "#,##0") & vbCrLf & vbCrLf & _
+                "Do you want to stop date filtering and continue searching" & vbCrLf & _
+                "within the already-identified candidate files?" & vbCrLf & vbCrLf & _
+                "  Yes = Stop now and search " & Format(candidateFiles.Count, "#,##0") & " candidates (faster)" & vbCrLf & _
+                "  No  = Continue scanning remaining files (safer, current behaviour)", _
+                vbQuestion + vbYesNo, "Early Stop Possible")
+
+            If stopNow = vbYes Then
+                ' User chose early stop - exit date scan loop now
+                Exit For
+            End If
+            ' User chose to continue - file is out of range but keep looping
+        End If
+        ' Files newer than endDate are simply skipped (no action needed)
+    Next k
+
+    g_Stats_Candidates = candidateFiles.Count
+    g_Stats_DateSecs   = Timer - t0
+    Set CollectCandidatesByDate = candidateFiles
+
+CleanupDate:
+    Set fso    = Nothing
+    Set folder = Nothing
+    Set file   = Nothing
+End Function
+
+
+' ==========================================
 ' FILE-LEVEL SEARCH  (Name Only  OR  Name + Content)
 '
-' FIX #4 - ABORT / RESPONSIVENESS:
-'   Application.ScreenUpdating is set to True during scanning so Excel
-'   can repaint and process button clicks. DoEvents is called every file.
-'   The cursor is NOT changed to hourglass so the UI stays interactive.
-'
-' FIX #3 - DATE FILTER PERFORMANCE:
-'   Files are seeded into candidateFiles only when they pass the date
-'   filter. This happens BEFORE keyword filtering so large folders
-'   (20,000+ files) are trimmed as early as possible.
+' Now delegates date-filter phase to CollectCandidatesByDate which
+' handles sorting, early-stop prompt, and timing.
+' Keyword filter phase records g_Stats_Searched and g_Stats_SearchSecs.
+' Abort during keyword phase returns partial results (Enhancement #2).
 ' ==========================================
 
 Function SearchFilesForKeywords(folderPath As String, _
@@ -330,56 +565,48 @@ Function SearchFilesForKeywords(folderPath As String, _
                                  startDate As Date, endDate As Date, _
                                  useDateFilter As Boolean) As Variant
 
-    Dim fso As Object, folder As Object, file As Object
+    Dim fso As Object
     Dim candidateFiles As Object, tempFiles As Object
     Dim fileName As String, filePath As String
     Dim currentLevel As Integer, j As Long
-    Dim fileCounter As Long, totalFiles As Long
+    Dim t1 As Double
 
     Set fso = CreateObject("Scripting.FileSystemObject")
-    Set candidateFiles = CreateObject("System.Collections.ArrayList")
 
     If Not fso.FolderExists(folderPath) Then
         SearchFilesForKeywords = Array("Error: Folder not found")
-        GoTo Cleanup
+        Set fso = Nothing
+        Exit Function
     End If
 
-    Set folder = fso.GetFolder(folderPath)
-    totalFiles = folder.Files.Count
+    ' ---- Phase 1: Date filtering (with sort + early stop) ----
+    Set candidateFiles = CollectCandidatesByDate(folderPath, startDate, endDate, useDateFilter)
 
-    ' ---- Seed phase: apply date filter and collect candidate file paths ----
-    fileCounter = 0
-    For Each file In folder.Files
-        fileCounter = fileCounter + 1
+    ' If aborted during date phase, return immediately with no results
+    If g_Stats_WasAborted Then
+        SearchFilesForKeywords = Array("Aborted")
+        Set fso = Nothing
+        Set candidateFiles = Nothing
+        Exit Function
+    End If
 
-        ' FIX #4: DoEvents every file keeps the UI responsive for Abort clicks
-        DoEvents
-        If g_AbortRequested Then
-            SearchFilesForKeywords = Array("Aborted")
-            GoTo Cleanup
-        End If
+    If candidateFiles.Count = 0 Then
+        SearchFilesForKeywords = Array("No matches found")
+        Set fso = Nothing
+        Set candidateFiles = Nothing
+        Exit Function
+    End If
 
-        Application.StatusBar = "Scanning: " & fileCounter & " of " & _
-                                  totalFiles & " files checked  |  Candidates so far: " & _
-                                  candidateFiles.Count & "  |  Click ABORT to stop"
+    ' ---- Phase 2: Keyword filter ----
+    t1 = Timer
+    g_Stats_Searched = candidateFiles.Count   ' All candidates will be examined
 
-        ' FIX #3: Date range filter applied here - fastest gate, no file open needed
-        If useDateFilter Then
-            If Not IsFileInDateRange(file.Path, startDate, endDate, useDateFilter) Then
-                GoTo NextFile
-            End If
-        End If
-
-        candidateFiles.Add file.Path
-
-NextFile:
-    Next file
-
-    ' ---- Keyword filter phase: progressively narrow the candidate list ----
-    ' Name Only  -> every keyword must be in the file name  (FilterFilesByNameOnly)
-    ' Name+Content -> keyword in name OR file body counts    (FilterFilesByKeyword)
     For currentLevel = 0 To keywordCount - 1
         If candidateFiles.Count = 0 Then Exit For
+
+        Application.StatusBar = "Keyword pass " & (currentLevel + 1) & " of " & keywordCount & _
+                                  "  |  Remaining candidates: " & candidateFiles.Count & _
+                                  "  |  Click ABORT to stop"
 
         If searchContent Then
             Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), True)
@@ -387,15 +614,37 @@ NextFile:
             Set tempFiles = FilterFilesByNameOnly(candidateFiles, keywords(currentLevel))
         End If
 
-        ' Check abort after each keyword pass
         DoEvents
+        ' ENHANCEMENT #2: On abort during keyword phase, return partial
+        ' results from files processed before the abort - do NOT discard.
         If g_AbortRequested Then
-            SearchFilesForKeywords = Array("Aborted")
-            GoTo Cleanup
+            g_Stats_WasAborted   = True
+            g_Stats_AbortPhase   = "keyword searching"
+            g_Stats_SearchSecs   = Timer - t1
+            g_Stats_Matches      = tempFiles.Count
+            ' Return whatever tempFiles has (files processed before abort)
+            If tempFiles.Count > 0 Then
+                Dim partArr() As Variant
+                ReDim partArr(0 To tempFiles.Count - 1)
+                For j = 0 To tempFiles.Count - 1
+                    filePath = tempFiles(j)
+                    fileName = fso.GetFileName(filePath)
+                    partArr(j) = fileName & "|" & filePath
+                Next j
+                SearchFilesForKeywords = partArr
+            Else
+                SearchFilesForKeywords = Array("Aborted")
+            End If
+            Set fso = Nothing
+            Set candidateFiles = Nothing
+            Set tempFiles = Nothing
+            Exit Function
         End If
 
         Set candidateFiles = tempFiles
     Next currentLevel
+
+    g_Stats_SearchSecs = Timer - t1
 
     ' ---- Build result array ----
     If candidateFiles.Count > 0 Then
@@ -406,26 +655,22 @@ NextFile:
             fileName = fso.GetFileName(filePath)
             arr(j) = fileName & "|" & filePath
         Next j
+        g_Stats_Matches = candidateFiles.Count
         SearchFilesForKeywords = arr
     Else
         SearchFilesForKeywords = Array("No matches found")
     End If
 
-Cleanup:
     Set fso            = Nothing
-    Set folder         = Nothing
     Set candidateFiles = Nothing
     Set tempFiles      = Nothing
 End Function
 
 
 ' ==========================================
-' SEARCH WITHIN A RESTRICTED FILE LIST
-' Used by: RunRefineSearch
+' SEARCH WITHIN A RESTRICTED FILE LIST (Refine Search)
 '
-' Abort check added after each keyword pass.
-' Date filter is NOT re-applied here because the input list was already
-' date-filtered during the original search that produced it.
+' ENHANCEMENT #2: Abort returns partial results.
 ' ==========================================
 
 Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
@@ -436,6 +681,7 @@ Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
     Dim candidateFiles As Object, tempFiles As Object
     Dim fileName As String, filePath As String
     Dim i As Integer, currentLevel As Integer, j As Long
+    Dim t1 As Double
 
     Set fso            = CreateObject("Scripting.FileSystemObject")
     Set candidateFiles = CreateObject("System.Collections.ArrayList")
@@ -444,21 +690,47 @@ Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
         candidateFiles.Add filePaths(i)
     Next i
 
-    ' Each pass keeps only files that contain this keyword -> AND logic
+    g_Stats_Searched = fileCount
+    t1 = Timer
+
     For currentLevel = 0 To keywordCount - 1
         If candidateFiles.Count = 0 Then Exit For
 
+        Application.StatusBar = "Refine - pass " & (currentLevel + 1) & " of " & keywordCount & _
+                                  "  |  Remaining: " & candidateFiles.Count & _
+                                  "  |  Click ABORT to stop"
+
         Set tempFiles = FilterFilesByKeyword(candidateFiles, keywords(currentLevel), searchContent)
 
-        ' Abort check after each keyword pass
         DoEvents
+        ' ENHANCEMENT #2: Return partial results on abort
         If g_AbortRequested Then
-            SearchFilesInList = Array("Aborted")
-            GoTo Cleanup
+            g_Stats_WasAborted = True
+            g_Stats_AbortPhase = "keyword searching (refine)"
+            g_Stats_SearchSecs = Timer - t1
+            g_Stats_Matches    = tempFiles.Count
+            If tempFiles.Count > 0 Then
+                Dim partArr() As Variant
+                ReDim partArr(0 To tempFiles.Count - 1)
+                For j = 0 To tempFiles.Count - 1
+                    filePath = tempFiles(j)
+                    fileName = fso.GetFileName(filePath)
+                    partArr(j) = fileName & "|" & filePath
+                Next j
+                SearchFilesInList = partArr
+            Else
+                SearchFilesInList = Array("Aborted")
+            End If
+            Set fso = Nothing
+            Set candidateFiles = Nothing
+            Set tempFiles = Nothing
+            Exit Function
         End If
 
         Set candidateFiles = tempFiles
     Next currentLevel
+
+    g_Stats_SearchSecs = Timer - t1
 
     If candidateFiles.Count > 0 Then
         Dim arr() As Variant
@@ -468,12 +740,12 @@ Function SearchFilesInList(filePaths() As String, fileCount As Integer, _
             fileName = fso.GetFileName(filePath)
             arr(j) = fileName & "|" & filePath
         Next j
+        g_Stats_Matches = candidateFiles.Count
         SearchFilesInList = arr
     Else
         SearchFilesInList = Array("No matches found")
     End If
 
-Cleanup:
     Set fso            = Nothing
     Set candidateFiles = Nothing
     Set tempFiles      = Nothing
@@ -482,8 +754,6 @@ End Function
 
 ' ==========================================
 ' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME ONLY
-' Every keyword must be found in the file NAME. Content is never read.
-' Used exclusively by SearchFilesForKeywords when searchContent=False.
 ' ==========================================
 
 Function FilterFilesByNameOnly(candidateFiles As Object, keyword As String) As Object
@@ -502,7 +772,6 @@ Function FilterFilesByNameOnly(candidateFiles As Object, keyword As String) As O
     End If
 
     For i = 0 To candidateFiles.Count - 1
-        ' Abort check inside per-file loop
         DoEvents
         If g_AbortRequested Then
             Set FilterFilesByNameOnly = filteredFiles
@@ -524,9 +793,6 @@ End Function
 
 ' ==========================================
 ' FILTER A FILE LIST BY A SINGLE KEYWORD - NAME OR CONTENT
-' Used for Name+Content search and Refine Search.
-' A file passes if the keyword is in the file name OR in the file body.
-' Abort is checked once per file inside the loop.
 ' ==========================================
 
 Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
@@ -547,7 +813,6 @@ Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
     End If
 
     For i = 0 To candidateFiles.Count - 1
-        ' Abort check - checked once per file so the loop exits promptly
         DoEvents
         If g_AbortRequested Then
             Set FilterFilesByKeyword = filteredFiles
@@ -558,12 +823,10 @@ Function FilterFilesByKeyword(candidateFiles As Object, keyword As String, _
         fileName   = LCase(fso.GetFileName(filePath))
         matchFound = False
 
-        ' Check file name first
         If InStr(1, fileName, keyword, vbTextCompare) > 0 Then
             matchFound = True
         End If
 
-        ' Check file content only if name did not match and content search is enabled
         If Not matchFound And searchContent Then
             matchFound = SearchFileContent(filePath, keyword)
         End If
@@ -609,10 +872,6 @@ End Function
 
 ' ==========================================
 ' EXCEL CONTENT SEARCH
-'
-' Iterates cells and converts each value to String via CStr() so that
-' numeric cells are never missed. Explicit Nothing-check after Open
-' prevents silent failures when a file is locked or corrupt.
 ' ==========================================
 
 Function SearchExcelContent(filePath As String, keyword As String) As Boolean
@@ -696,14 +955,10 @@ End Function
 ' ==========================================
 ' ROW-LEVEL AND/OR FILTER FOR PREVIEW
 '
-' FIX #2 - PREVIEW LOGIC:
-' AND logic (row-level): a row is included ONLY if it contains ALL
-'                        AND-keywords on that same single row.
-' OR  logic (file-level): a row is included if it contains ANY OR-keyword.
-'                         Additionally, ALL OR-keywords must appear
-'                         somewhere in the file (enforced in
-'                         CreateFilteredContentSheet before line iteration).
-' When both groups exist, a row must satisfy BOTH conditions.
+' AND logic: row included ONLY if ALL AND-keywords appear on same row.
+' OR  logic: row included if ANY OR-keyword appears on it.
+'            File-level gate (all OR-kw must exist in file) is enforced
+'            in CreateFilteredContentSheet before this function is called.
 ' ==========================================
 
 Function RowMatchesKeywords(lineText As String, andKws As Object, orKws As Object, _
@@ -711,7 +966,6 @@ Function RowMatchesKeywords(lineText As String, andKws As Object, orKws As Objec
     Dim j As Integer
     Dim lineMatchesAnd As Boolean, lineMatchesOr As Boolean
 
-    ' AND check: every AND keyword must appear on this single row
     lineMatchesAnd = True
     If hasAnd Then
         For j = 0 To andKws.Count - 1
@@ -722,8 +976,7 @@ Function RowMatchesKeywords(lineText As String, andKws As Object, orKws As Objec
         Next j
     End If
 
-    ' OR check: at least one OR keyword must appear on this row
-    lineMatchesOr = True   ' default True when no OR keywords supplied
+    lineMatchesOr = True
     If hasOr Then
         lineMatchesOr = False
         For j = 0 To orKws.Count - 1
@@ -741,38 +994,95 @@ End Function
 ' ==========================================
 ' SHARED ABORT + CLEANUP HELPER
 '
-' Called by all four search macros after the search function returns
-' "Aborted".  Restores Excel state and shows a clean message.
+' ENHANCEMENT #2: Now shows partial results if any were collected,
+' rather than just discarding everything.
 ' ==========================================
 
-Sub HandleAbort(outputWs As Worksheet, startCol As String, startRow As Integer)
-    ' FIX #4: Restore cursor and screen updating
+Sub HandleAbort(outputWs As Worksheet, startCol As String, startRow As Integer, _
+                Optional hasPartialResults As Boolean = False, _
+                Optional searchType As String = "", _
+                Optional keywordList As String = "")
+
     Application.Cursor = xlDefault
-    Application.ScreenUpdating = True
     Application.StatusBar = False
     g_AbortRequested = False   ' Reset flag so next search starts cleanly
 
-    ' Write a visible note in the results area
+    ' Annotate results area
     Dim col1 As String
     col1 = ColumnLetter(ColumnNumber(startCol))
-    outputWs.Range(col1 & (startRow + 1)).Value = "Search was aborted by the user."
-    outputWs.Range(col1 & (startRow + 1)).Font.Color = RGB(192, 0, 0)
-    outputWs.Range(col1 & (startRow + 1)).Font.Italic = True
 
-    MsgBox "Search aborted." & vbCrLf & vbCrLf & _
-           "Excel is fully operational. You can run a new search at any time.", _
-           vbInformation, "Search Aborted"
+    If hasPartialResults Then
+        ' Partial results are already written - add a banner above them
+        outputWs.Range(col1 & (startRow + 0)).Value = _
+            "** SEARCH ABORTED - Partial results below (only files processed before abort) **"
+        With outputWs.Range(col1 & (startRow + 0))
+            .Font.Color  = RGB(192, 0, 0)
+            .Font.Bold   = True
+            .Font.Italic = True
+        End With
+    Else
+        outputWs.Range(col1 & (startRow + 1)).Value = "Search was aborted. No results available."
+        outputWs.Range(col1 & (startRow + 1)).Font.Color  = RGB(192, 0, 0)
+        outputWs.Range(col1 & (startRow + 1)).Font.Italic = True
+    End If
+
+    ' Show summary (will show aborted state via g_Stats_WasAborted)
+    If searchType <> "" Then
+        Call ShowSearchSummary(searchType, keywordList)
+    Else
+        MsgBox "Search aborted." & vbCrLf & vbCrLf & _
+               "Excel is fully operational. You can run a new search at any time.", _
+               vbInformation, "Search Aborted"
+    End If
+End Sub
+
+
+' ==========================================
+' WRITE OUTPUT ROWS (shared helper)
+'
+' ENHANCEMENT #5: All output cells have WrapText = False and
+' ShrinkToFit = False. Column overflow is prevented by setting
+' VerticalAlignment = xlTop and using fixed column widths.
+' This ensures file names and paths never bleed into adjacent cells.
+' ==========================================
+
+Sub WriteOutputRow(outputWs As Worksheet, col1 As String, col2 As String, _
+                   dataRow As Long, fileName As String, filePath As String, _
+                   rowIndex As Long)
+
+    ' File name as hyperlink
+    outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & dataRow), _
+        Address:=filePath, TextToDisplay:=fileName
+    With outputWs.Range(col1 & dataRow)
+        .Font.Color          = RGB(5, 99, 193)
+        .Font.Underline       = xlUnderlineStyleSingle
+        ' ENHANCEMENT #5: Prevent overflow
+        .WrapText             = False
+        .ShrinkToFit          = False
+        .HorizontalAlignment  = xlLeft
+        .VerticalAlignment    = xlTop
+    End With
+
+    ' File path cell
+    With outputWs.Range(col2 & dataRow)
+        .Value               = filePath
+        .Font.Size           = 9
+        ' ENHANCEMENT #5: Prevent overflow
+        .WrapText             = False
+        .ShrinkToFit          = False
+        .HorizontalAlignment  = xlLeft
+        .VerticalAlignment    = xlTop
+    End With
+
+    ' Alternating row shading
+    If rowIndex Mod 2 = 0 Then
+        outputWs.Range(col1 & dataRow & ":" & col2 & dataRow).Interior.Color = RGB(242, 242, 242)
+    End If
 End Sub
 
 
 ' ==========================================
 ' USER-FACING MACRO 1: SEARCH BY NAME ONLY
-'
-' Rule: ALL keywords must appear in the file NAME (AND logic, name only).
-' Stores file paths in helper column for subsequent Refine Search.
-'
-' FIX #5: Keyword cells read from B11+i (0-based), matching the
-'         dashboard layout where keywords start at Row 11.
 ' ==========================================
 
 Sub RunSearchByNameOnly()
@@ -790,8 +1100,8 @@ Sub RunSearchByNameOnly()
     Dim startDate As Date, endDate As Date
     Dim useDateFilter As Boolean
 
-    ' Reset abort flag at the start of every new search
     g_AbortRequested = False
+    Call ResetStats
 
     Set ws         = ThisWorkbook.Sheets("Search")
     folderPath     = Trim(ws.Range("B4").Value)
@@ -800,11 +1110,9 @@ Sub RunSearchByNameOnly()
     col1           = ColumnLetter(ColumnNumber(startCol))
     col2           = ColumnLetter(ColumnNumber(startCol) + 1)
 
-    ' Collect and validate date range before doing anything else
     Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
     If Err.Number <> 0 Then Exit Sub
 
-    ' FIX #5: Read keywords from B11 onwards (Row 11 = first keyword row)
     keywordCount = 0
     keywordList  = ""
     For i = 0 To MAX_KEYWORDS - 1
@@ -822,20 +1130,20 @@ Sub RunSearchByNameOnly()
     Set outputWs = GetOutputWorksheet()
     Call ClearResultsArea(outputWs, startCol, startRow)
 
-    ' FIX #4: Do NOT turn off ScreenUpdating - keep UI live so Abort button works
-    ' Do NOT change cursor to hourglass
     Application.StatusBar = "Searching file names for " & keywordCount & " keyword(s)..."
 
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, False, _
                                       startDate, endDate, useDateFilter)
 
     ' ---- Handle Abort ----
-    If UBound(results) = 0 Then
-        If results(0) = "Aborted" Then
-            Call HandleAbort(outputWs, startCol, startRow)
-            Exit Sub
-        End If
+    If UBound(results) = 0 And results(0) = "Aborted" Then
+        Call HandleAbort(outputWs, startCol, startRow, False, "Name Only", keywordList)
+        Exit Sub
     End If
+
+    ' ---- Partial abort results (array has real data but was aborted) ----
+    Dim wasPartialAbort As Boolean
+    wasPartialAbort = g_Stats_WasAborted And Not (UBound(results) = 0 And results(0) = "Aborted")
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
     Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
@@ -855,49 +1163,28 @@ Sub RunSearchByNameOnly()
         fileName    = resultParts(0)
         filePath    = resultParts(1)
 
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-            Address:=filePath, TextToDisplay:=fileName
-        With outputWs.Range(col1 & (startRow + 1 + i))
-            .Font.Color     = RGB(5, 99, 193)
-            .Font.Underline = xlUnderlineStyleSingle
-        End With
+        ' ENHANCEMENT #5: Use WriteOutputRow for consistent formatting
+        Call WriteOutputRow(outputWs, col1, col2, startRow + 1 + i, fileName, filePath, i)
 
-        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-
-        ' Store path in hidden helper column for Refine Search
         outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
-
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
-                           col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
-        End If
     Next i
 
     outputWs.Columns(HELPER_COL).Hidden = True
-
     Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
     If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
 
     Application.StatusBar = False
 
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Type: File Name Only" & vbCrLf & _
-           "Keywords: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
-           "Tip: Update keywords and click 'Refine Results' to narrow down within " & _
-           "these " & (UBound(results) + 1) & " file(s).", vbInformation
+    If wasPartialAbort Then
+        Call HandleAbort(outputWs, startCol, startRow, True, "Name Only", keywordList)
+    Else
+        Call ShowSearchSummary("Name Only", keywordList)
+    End If
 End Sub
 
 
 ' ==========================================
 ' USER-FACING MACRO 2: SEARCH BY NAME + CONTENT
-'
-' Rule: For each keyword, a file qualifies if the keyword appears in
-' the file name OR anywhere in the file body. All keywords must match
-' (AND logic at file level).
-'
-' FIX #5: Keyword cells read from B11 onwards.
 ' ==========================================
 
 Sub RunSearch()
@@ -916,6 +1203,7 @@ Sub RunSearch()
     Dim useDateFilter As Boolean
 
     g_AbortRequested = False
+    Call ResetStats
 
     Set ws         = ThisWorkbook.Sheets("Search")
     folderPath     = Trim(ws.Range("B4").Value)
@@ -927,7 +1215,6 @@ Sub RunSearch()
     Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
     If Err.Number <> 0 Then Exit Sub
 
-    ' FIX #5: Read keywords from B11 onwards
     keywordCount = 0
     keywordList  = ""
     For i = 0 To MAX_KEYWORDS - 1
@@ -945,18 +1232,18 @@ Sub RunSearch()
     Set outputWs = GetOutputWorksheet()
     Call ClearResultsArea(outputWs, startCol, startRow)
 
-    ' FIX #4: Keep ScreenUpdating ON so Abort button remains clickable
     Application.StatusBar = "Searching file names and content for " & keywordCount & " keyword(s)..."
 
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True, _
                                       startDate, endDate, useDateFilter)
 
-    If UBound(results) = 0 Then
-        If results(0) = "Aborted" Then
-            Call HandleAbort(outputWs, startCol, startRow)
-            Exit Sub
-        End If
+    If UBound(results) = 0 And results(0) = "Aborted" Then
+        Call HandleAbort(outputWs, startCol, startRow, False, "Name + Content", keywordList)
+        Exit Sub
     End If
+
+    Dim wasPartialAbort As Boolean
+    wasPartialAbort = g_Stats_WasAborted And Not (UBound(results) = 0 And results(0) = "Aborted")
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
     Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
@@ -974,21 +1261,8 @@ Sub RunSearch()
         resultParts = Split(results(i), "|")
         fileName    = resultParts(0)
         filePath    = resultParts(1)
-
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-            Address:=filePath, TextToDisplay:=fileName
-        With outputWs.Range(col1 & (startRow + 1 + i))
-            .Font.Color     = RGB(5, 99, 193)
-            .Font.Underline = xlUnderlineStyleSingle
-        End With
-
-        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
-                           col2 & (startRow + 1 + i)).Interior.Color = RGB(242, 242, 242)
-        End If
+        ' ENHANCEMENT #5: consistent overflow-safe formatting
+        Call WriteOutputRow(outputWs, col1, col2, startRow + 1 + i, fileName, filePath, i)
     Next i
 
     Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
@@ -996,28 +1270,19 @@ Sub RunSearch()
 
     Application.StatusBar = False
 
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Type: File Name + Content" & vbCrLf & _
-           "Keywords: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1), vbInformation
+    If wasPartialAbort Then
+        Call HandleAbort(outputWs, startCol, startRow, True, "Name + Content", keywordList)
+    Else
+        Call ShowSearchSummary("Name + Content", keywordList)
+    End If
 End Sub
 
 
 ' ==========================================
 ' USER-FACING MACRO 3: SEARCH WITH CONTENT PREVIEW
 '
-' FIX #2 - PREVIEW LOGIC:
-'   AND logic = all AND keywords must appear on the SAME row.
-'   OR  logic = keyword can appear on any row, but ALL OR-keywords
-'               must exist somewhere in the file.
-'
-' FIX #1 - BUTTON DISAPPEAR:
-'   ClearResultsArea deleted ALL buttons matching "Preview" in caption,
-'   which wiped the "Search: With Preview" and "Clear Preview Sheets"
-'   dashboard buttons. Fix: only delete buttons whose name starts with
-'   "Button " (auto-named Form Controls), not named dashboard buttons.
-'
-' FIX #5: Keyword cells read from B11 onwards.
+' ENHANCEMENT #4: ClearResultsArea now reliably removes ALL previous
+' "Click to Preview" Form Control buttons before building new ones.
 ' ==========================================
 
 Sub RunSearchWithContentPreview()
@@ -1037,6 +1302,7 @@ Sub RunSearchWithContentPreview()
     Dim useDateFilter As Boolean
 
     g_AbortRequested = False
+    Call ResetStats
 
     Set ws         = ThisWorkbook.Sheets("Search")
     folderPath     = Trim(ws.Range("B4").Value)
@@ -1049,7 +1315,6 @@ Sub RunSearchWithContentPreview()
     Call ReadDateRange(folderPath, startDate, endDate, useDateFilter)
     If Err.Number <> 0 Then Exit Sub
 
-    ' FIX #5: Read keywords from B11 onwards, logic from C11 onwards
     keywordCount = 0
     keywordList  = ""
     For i = 0 To MAX_KEYWORDS - 1
@@ -1071,20 +1336,23 @@ Sub RunSearchWithContentPreview()
     If keywordCount = 0 Then MsgBox "Please enter at least one keyword (cells B11 onwards).", vbExclamation: Exit Sub
 
     Set outputWs = GetOutputWorksheet()
+
+    ' ENHANCEMENT #4: ClearResultsArea removes ALL previous preview buttons
+    ' (this call handles it via OnAction = "OpenPreview" check)
     Call ClearResultsArea(outputWs, startCol, startRow)
 
-    ' FIX #4: Keep ScreenUpdating ON so Abort button remains clickable
     Application.StatusBar = "Searching for " & keywordCount & " keyword(s)..."
 
     results = SearchFilesForKeywords(folderPath, keywords, keywordCount, True, _
                                       startDate, endDate, useDateFilter)
 
-    If UBound(results) = 0 Then
-        If results(0) = "Aborted" Then
-            Call HandleAbort(outputWs, startCol, startRow)
-            Exit Sub
-        End If
+    If UBound(results) = 0 And results(0) = "Aborted" Then
+        Call HandleAbort(outputWs, startCol, startRow, False, "With Preview", keywordList)
+        Exit Sub
     End If
+
+    Dim wasPartialAbort As Boolean
+    wasPartialAbort = g_Stats_WasAborted And Not (UBound(results) = 0 And results(0) = "Aborted")
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
     Call WriteResultsColumnHeaders(outputWs, col1, col2, col3, startRow, True)
@@ -1109,26 +1377,16 @@ Sub RunSearchWithContentPreview()
         Dim dataRow As Long
         dataRow = startRow + 1 + i
 
-        ' File name hyperlink (opens file directly)
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & dataRow), _
-            Address:=filePath, TextToDisplay:=fileName
-        With outputWs.Range(col1 & dataRow)
-            .Font.Color     = RGB(5, 99, 193)
-            .Font.Underline = xlUnderlineStyleSingle
-        End With
+        ' File name and path with overflow-safe formatting (Enhancement #5)
+        Call WriteOutputRow(outputWs, col1, col2, dataRow, fileName, filePath, i)
 
-        ' File path column
-        outputWs.Range(col2 & dataRow).Value     = filePath
-        outputWs.Range(col2 & dataRow).Font.Size = 9
-
-        ' Store path in helper column (read by OpenPreview)
+        ' Store path for OpenPreview
         outputWs.Range(HELPER_COL & dataRow).Value = filePath
 
-        ' Preview button (Form Control - OnAction fires macro reliably)
+        ' ENHANCEMENT #4: Fresh preview button for this result row
         If IsTextFile(filePath) And Not IsExcelFile(filePath) Then
             Dim cellRef As Range
             Set cellRef = outputWs.Range(col3 & dataRow)
-
             Dim previewBtn As Button
             Set previewBtn = outputWs.Buttons.Add( _
                 cellRef.Left, cellRef.Top, cellRef.Width, cellRef.Height)
@@ -1142,16 +1400,15 @@ Sub RunSearchWithContentPreview()
             Set previewBtn = Nothing
             Set cellRef    = Nothing
         Else
-            outputWs.Range(col3 & dataRow).Value = "N/A (Binary)"
             With outputWs.Range(col3 & dataRow)
-                .Font.Color        = RGB(128, 128, 128)
-                .Font.Italic       = True
+                .Value               = "N/A (Binary)"
+                .Font.Color          = RGB(128, 128, 128)
+                .Font.Italic         = True
                 .HorizontalAlignment = xlCenter
+                ' ENHANCEMENT #5
+                .WrapText            = False
+                .ShrinkToFit         = False
             End With
-        End If
-
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & dataRow & ":" & col3 & dataRow).Interior.Color = RGB(242, 242, 242)
         End If
     Next i
 
@@ -1170,35 +1427,33 @@ Sub RunSearchWithContentPreview()
 
     Application.StatusBar = False
 
-    MsgBox "Search complete!" & vbCrLf & vbCrLf & _
-           "Keywords: " & keywordList & vbCrLf & _
-           "Files found: " & (UBound(results) + 1) & vbCrLf & vbCrLf & _
-           "Click 'Click to Preview' to open a row-filtered preview for that file.", vbInformation
+    If wasPartialAbort Then
+        Call HandleAbort(outputWs, startCol, startRow, True, "With Preview", keywordList)
+    Else
+        Call ShowSearchSummary("With Preview", keywordList)
+    End If
 End Sub
 
 
 ' ==========================================
 ' ON-DEMAND PREVIEW ENTRY POINT
 '
-' FIX #2 (screenshot bug): The row-detection loop accumulated cumulative
-' row heights via outputWs.Rows(r).Height in a loop up to .Rows.Count
-' (~1 million rows), which was extremely slow and returned a wrong row.
-' Fix: Use RangeFromPoint or directly map button Top to row via
-' outputWs.Rows(r).Top comparison - much faster and accurate.
+' Arrays declared as dynamic () to avoid Error 10
+' "This array is fixed or temporarily locked" from ReDim in LoadPreviewConfig.
 ' ==========================================
 
 Sub OpenPreview()
     Dim outputWs As Worksheet
     Dim targetRow As Long
     Dim filePath As String
-    Dim keywords(0 To MAX_KEYWORDS - 1) As String
-    Dim keywordLogic(0 To MAX_KEYWORDS - 1) As String
+    ' CRITICAL: Declare as dynamic arrays - NOT fixed size
+    Dim keywords() As String
+    Dim keywordLogic() As String
     Dim keywordCount As Integer
     Dim sheetName As String
 
     Set outputWs = GetOutputWorksheet()
 
-    ' Identify the row from the calling button's vertical position
     Dim callerName As String
     callerName = Application.Caller
 
@@ -1212,20 +1467,17 @@ Sub OpenPreview()
         Exit Sub
     End If
 
-    ' FIX #2 (screenshot bug): Find the row by comparing button midpoint
-    ' to row Top positions - accurate and fast (no cumulative height loop)
+    ' Find the row by comparing button midpoint to row Top positions
     Dim btnMidY As Double
     btnMidY = callerBtn.Top + callerBtn.Height / 2
 
-    ' Binary-approach: find row whose Top <= btnMidY < Top+Height
     targetRow = 0
     Dim r As Long
-    ' Start from a reasonable row (skip headers) for performance
     Dim startR As Long
     startR = GetOutputStartRow()
     If startR < 1 Then startR = 1
 
-    For r = startR To startR + 2000   ' Search within a reasonable range
+    For r = startR To startR + 2000
         If outputWs.Rows(r).Top > btnMidY Then
             targetRow = r - 1
             Exit For
@@ -1264,9 +1516,7 @@ Sub OpenPreview()
     End If
 
     Application.StatusBar = "Building preview for " & filePath & "..."
-
     sheetName = CreateFilteredContentSheet(filePath, keywords, keywordLogic, keywordCount)
-
     Application.StatusBar = False
 
     If sheetName <> "" Then
@@ -1281,11 +1531,8 @@ End Sub
 ' ==========================================
 ' USER-FACING MACRO 4: REFINE SEARCH
 '
-' Reads file paths from HELPER_COL (populated by any previous search).
-' Re-filters that subset with the current keywords (AND logic, content scan).
-' Date filter is NOT re-applied - the prior result set is already filtered.
-'
-' FIX #5: Keyword cells read from B11 onwards.
+' ENHANCEMENT #4: ClearResultsArea is called first, removing any
+' stale "Click to Preview" buttons from a previous Preview search.
 ' ==========================================
 
 Sub RunRefineSearch()
@@ -1299,6 +1546,7 @@ Sub RunRefineSearch()
     Dim fileName As String, filePath As String
 
     g_AbortRequested = False
+    Call ResetStats
 
     Set ws         = ThisWorkbook.Sheets("Search")
     Set outputWs   = GetOutputWorksheet()
@@ -1307,7 +1555,6 @@ Sub RunRefineSearch()
     col1           = ColumnLetter(ColumnNumber(startCol))
     col2           = ColumnLetter(ColumnNumber(startCol) + 1)
 
-    ' Read all stored paths from HELPER_COL using End(xlUp) - skip blanks
     outputWs.Columns(HELPER_COL).Hidden = False
 
     Dim firstResultPaths() As String
@@ -1317,8 +1564,7 @@ Sub RunRefineSearch()
     Dim lastJRow As Long
     lastJRow = outputWs.Cells(outputWs.Rows.Count, HELPER_COL).End(xlUp).Row
 
-    Dim checkRow As Long
-    Dim cellVal As String
+    Dim checkRow As Long, cellVal As String
     For checkRow = startRow + 1 To lastJRow
         cellVal = Trim(outputWs.Range(HELPER_COL & checkRow).Value)
         If cellVal <> "" Then
@@ -1336,7 +1582,6 @@ Sub RunRefineSearch()
         Exit Sub
     End If
 
-    ' FIX #5: Read keywords from B11 onwards
     keywordCount = 0
     keywordList  = ""
     For i = 0 To MAX_KEYWORDS - 1
@@ -1353,21 +1598,21 @@ Sub RunRefineSearch()
         Exit Sub
     End If
 
-    ' Clear visible results only (preserve HELPER_COL until new results are ready)
-    outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearContents
-    outputWs.Range(col1 & startRow & ":" & col2 & "1000").ClearFormats
+    ' ENHANCEMENT #4: Remove stale preview buttons before new results
+    Call ClearResultsArea(outputWs, startCol, startRow)
 
-    ' FIX #4: Keep ScreenUpdating ON for Abort responsiveness
     Application.StatusBar = "Refining search within " & fileCount & " file(s)..."
+    g_Stats_TotalScanned = fileCount
 
     results = SearchFilesInList(firstResultPaths, fileCount, keywords, keywordCount, True)
 
-    If UBound(results) = 0 Then
-        If results(0) = "Aborted" Then
-            Call HandleAbort(outputWs, startCol, startRow)
-            Exit Sub
-        End If
+    If UBound(results) = 0 And results(0) = "Aborted" Then
+        Call HandleAbort(outputWs, startCol, startRow, False, "Refine Search", keywordList)
+        Exit Sub
     End If
+
+    Dim wasPartialAbort As Boolean
+    wasPartialAbort = g_Stats_WasAborted And Not (UBound(results) = 0 And results(0) = "Aborted")
 
     Call WriteResultsSectionHeader(outputWs, startCol, True)
     Call WriteResultsColumnHeaders(outputWs, col1, col2, "", startRow, False)
@@ -1381,7 +1626,6 @@ Sub RunRefineSearch()
         End If
     End If
 
-    ' Now safe to overwrite HELPER_COL with the refined result paths
     outputWs.Columns(HELPER_COL).Hidden = False
     outputWs.Range(HELPER_COL & startRow & ":" & HELPER_COL & "1000").ClearContents
 
@@ -1390,51 +1634,29 @@ Sub RunRefineSearch()
         fileName    = resultParts(0)
         filePath    = resultParts(1)
 
-        outputWs.Hyperlinks.Add Anchor:=outputWs.Range(col1 & (startRow + 1 + i)), _
-            Address:=filePath, TextToDisplay:=fileName
-        With outputWs.Range(col1 & (startRow + 1 + i))
-            .Font.Color     = RGB(5, 99, 193)
-            .Font.Underline = xlUnderlineStyleSingle
-        End With
+        ' ENHANCEMENT #5: overflow-safe formatting
+        Call WriteOutputRow(outputWs, col1, col2, startRow + 1 + i, fileName, filePath, i)
+        outputWs.Range(col1 & (startRow + 1 + i) & ":" & col2 & (startRow + 1 + i)).Interior.Color = RGB(255, 240, 240)
 
-        outputWs.Range(col2 & (startRow + 1 + i)).Value     = filePath
-        outputWs.Range(col2 & (startRow + 1 + i)).Font.Size = 9
-
-        ' Persist refined paths so user can refine again
         outputWs.Range(HELPER_COL & (startRow + 1 + i)).Value = filePath
-
-        If i Mod 2 = 0 Then
-            outputWs.Range(col1 & (startRow + 1 + i) & ":" & _
-                           col2 & (startRow + 1 + i)).Interior.Color = RGB(255, 240, 240)
-        End If
     Next i
 
     outputWs.Columns(HELPER_COL).Hidden = True
-
     Call FormatResultsTable(outputWs, col1, col2, startRow, UBound(results))
     If UCase(RESULT_DISPLAY_MODE) = "SEPARATE_SHEET" Then Call AddBackButton(outputWs)
 
     Application.StatusBar = False
 
-    MsgBox "Refine Search complete!" & vbCrLf & vbCrLf & _
-           "Searched within: " & fileCount & " file(s) from previous results" & vbCrLf & _
-           "Keywords: " & keywordList & vbCrLf & _
-           "Matched: " & (UBound(results) + 1) & " file(s)", vbInformation
+    If wasPartialAbort Then
+        Call HandleAbort(outputWs, startCol, startRow, True, "Refine Search", keywordList)
+    Else
+        Call ShowSearchSummary("Refine Search", keywordList)
+    End If
 End Sub
 
 
 ' ==========================================
 ' CREATE FILTERED CONTENT PREVIEW SHEET (ON DEMAND)
-'
-' FIX #2 - PREVIEW LOGIC (OR file-level enforcement):
-'   Before iterating lines, verify that every OR keyword exists
-'   somewhere in the full file content. If any OR keyword is absent
-'   from the entire file, return "" (no preview) - consistent with
-'   the requirement that all OR keywords must exist in the file.
-'
-' AND logic = ROW-LEVEL: all AND keywords must be on the same row.
-' OR  logic = ROW-LEVEL: row included if it contains ANY OR keyword.
-'             FILE-LEVEL gate: ALL OR keywords must appear somewhere.
 ' ==========================================
 
 Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
@@ -1452,7 +1674,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
 
     CreateFilteredContentSheet = ""
 
-    ' Only process readable text files (not binary / Excel)
     If Not IsTextFile(filePath) Or IsExcelFile(filePath) Then Exit Function
 
     Set fso           = CreateObject("Scripting.FileSystemObject")
@@ -1460,7 +1681,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     Set andKws        = CreateObject("System.Collections.ArrayList")
     Set orKws         = CreateObject("System.Collections.ArrayList")
 
-    ' Separate keywords by logic type
     hasAnd = False
     hasOr  = False
     For j = 0 To keywordCount - 1
@@ -1482,27 +1702,21 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     textStream.Close
     On Error GoTo 0
 
-    ' FIX #2 - OR FILE-LEVEL GATE:
-    ' All OR keywords must exist somewhere in the file content.
-    ' This enforces the rule: "OR logic - all keywords must exist in the file"
+    ' OR file-level gate: all OR keywords must exist somewhere in file
     If hasOr Then
         Dim lowerContent As String
         lowerContent = LCase(fileContent)
         For j = 0 To orKws.Count - 1
             If InStr(1, lowerContent, LCase(orKws(j)), vbTextCompare) = 0 Then
-                ' At least one OR keyword missing from entire file - skip this file
                 GoTo Cleanup
             End If
         Next j
     End If
 
-    ' Split into lines - handle all common line endings
     lines = Split(fileContent, vbCrLf)
     If UBound(lines) <= 0 Then lines = Split(fileContent, vbLf)
     If UBound(lines) <= 0 Then lines = Split(fileContent, vbCr)
 
-    ' Filter lines using row-level AND / OR logic
-    ' Store original line number alongside matched line for navigation
     For i = LBound(lines) To UBound(lines)
         If Trim(lines(i)) <> "" Then
             If RowMatchesKeywords(lines(i), andKws, orKws, hasAnd, hasOr) Then
@@ -1513,14 +1727,12 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
 
     If filteredLines.Count = 0 Then GoTo Cleanup
 
-    ' Build safe sheet name
     fileName  = fso.GetFileName(filePath)
     sheetName = "Preview_" & Left(fileName, 23)
     sheetName = Replace(Replace(Replace(Replace(Replace(Replace(Replace( _
                 sheetName, ":", ""), "\", ""), "/", ""), "?", ""), "*", ""), "[", ""), "]", "")
     If Len(sheetName) > 31 Then sheetName = Left(sheetName, 31)
 
-    ' Delete old preview sheet if it exists (refresh)
     On Error Resume Next
     Application.DisplayAlerts = False
     ThisWorkbook.Sheets(sheetName).Delete
@@ -1531,7 +1743,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
     ws.Name        = sheetName
     ws.Tab.Color   = RGB(192, 0, 0)
 
-    ' ---- Header ----
     ws.Range("A1:B1").Merge
     ws.Range("A1").Value = "Content Preview"
     With ws.Range("A1")
@@ -1574,7 +1785,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         .Interior.Color = RGB(192, 0, 0)
     End With
 
-    ' ---- Write filtered lines with keyword highlighting ----
     rowNum = 8
     For i = 0 To filteredLines.Count - 1
         ws.Range("A" & rowNum).Value = filteredLines(i)
@@ -1583,7 +1793,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         cellText = ws.Range("A" & rowNum).Value
         Dim kwPos As Long, srchStart As Long
 
-        ' Highlight AND keywords in green
         If hasAnd Then
             For j = 0 To andKws.Count - 1
                 srchStart = 1
@@ -1598,7 +1807,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
             Next j
         End If
 
-        ' Highlight OR keywords in blue
         If hasOr Then
             For j = 0 To orKws.Count - 1
                 srchStart = 1
@@ -1621,7 +1829,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         End If
     Next i
 
-    ' ---- Legend ----
     ws.Range("A" & (rowNum + 1)).Value = "Legend:"
     ws.Range("A" & (rowNum + 1)).Font.Bold = True
     If hasAnd Then
@@ -1635,7 +1842,6 @@ Function CreateFilteredContentSheet(filePath As String, keywords() As String, _
         ws.Range("A" & (rowNum + 3)).Font.Bold  = True
     End If
 
-    ' ---- Back link ----
     ws.Range("A" & (rowNum + 5)).Value = "Back to Search Results"
     ws.Hyperlinks.Add Anchor:=ws.Range("A" & (rowNum + 5)), _
         Address:="", SubAddress:="'Search'!A1", TextToDisplay:="Back to Search Results"
@@ -1659,14 +1865,6 @@ End Function
 
 ' ==========================================
 ' KEYWORD CONFIG STORE / LOAD (for on-demand preview)
-'
-' FIX #2 (screenshot - LoadPreviewConfig bug):
-' Original code read from column A & B starting at row 2, but
-' StorePreviewConfig wrote count to A1 and data to A2:B(n+1).
-' The LoadPreviewConfig correctly reads count from A1 and data
-' from A2/B2 onwards - this is consistent. However the screenshot
-' shows the ReDim line highlighted, suggesting the array bounds
-' were the issue. Fix: use MAX_KEYWORDS - 1 consistently.
 ' ==========================================
 
 Sub StorePreviewConfig(keywords() As String, keywordLogic() As String, _
@@ -1681,7 +1879,6 @@ Sub StorePreviewConfig(keywords() As String, keywordLogic() As String, _
     End If
     cfgWs.Visible = xlSheetVeryHidden
     cfgWs.Cells.ClearContents
-    ' FIX: Store count in B1 (consistent with LoadPreviewConfig which reads B1)
     cfgWs.Range("B1").Value = keywordCount
     Dim i As Integer
     For i = 0 To keywordCount - 1
@@ -1697,11 +1894,10 @@ Sub LoadPreviewConfig(keywords() As String, keywordLogic() As String, _
     Set cfgWs = ThisWorkbook.Sheets("PreviewConfig")
     On Error GoTo 0
     keywordCount = 0
-    ' FIX #2 (screenshot): ReDim must use MAX_KEYWORDS - 1 as upper bound
+    ' Dynamic ReDim (arrays must be declared as () not (n) by caller)
     ReDim keywords(0 To MAX_KEYWORDS - 1)
     ReDim keywordLogic(0 To MAX_KEYWORDS - 1)
     If cfgWs Is Nothing Then Exit Sub
-    ' FIX: Read count from B1 (matches StorePreviewConfig write location)
     keywordCount = CInt(cfgWs.Range("B1").Value)
     Dim i As Integer
     For i = 0 To keywordCount - 1
@@ -1717,17 +1913,17 @@ End Sub
 
 Sub ClearFilteredContentSheets()
     Dim ws As Worksheet
-    Dim count As Integer
-    count = 0
+    Dim cnt As Integer
+    cnt = 0
     Application.DisplayAlerts = False
     For Each ws In ThisWorkbook.Sheets
         If Left(ws.Name, 8) = "Preview_" Then
             ws.Delete
-            count = count + 1
+            cnt = cnt + 1
         End If
     Next ws
     Application.DisplayAlerts = True
-    MsgBox "Cleared " & count & " preview sheet(s).", vbInformation
+    MsgBox "Cleared " & cnt & " preview sheet(s).", vbInformation
 End Sub
 
 
@@ -1735,20 +1931,12 @@ End Sub
 ' SHARED UI HELPERS
 ' ==========================================
 
-' FIX #1 - BUTTON DISAPPEAR:
-' The original ClearResultsArea deleted every button whose Caption
-' contained "Preview". This matched:
-'   - "Click to Preview"  (result-row Form Controls)  <- intended
-'   - "Search: With Preview"  (dashboard button)       <- UNINTENDED
-'   - "Clear Preview Sheets"  (dashboard button)       <- UNINTENDED
-'
-' Fix: Only delete Form Control buttons that were added by the search
-' macro. Dashboard buttons are added by SetupSearchSheet and have
-' a known set of captions. We now delete only buttons whose OnAction
-' is "OpenPreview" - that is the exact OnAction set on result buttons.
+' ENHANCEMENT #4 - ClearResultsArea:
+' Removes stale "Click to Preview" Form Control buttons by matching
+' OnAction = "OpenPreview". Dashboard buttons have different OnAction
+' values and are never touched, preventing the button-disappear bug.
 
 Sub ClearResultsArea(outputWs As Worksheet, startCol As String, startRow As Integer)
-    ' Clears results data and formatting. Does NOT clear the Results header (rows 1-2).
     Dim clearCol As Integer
     clearCol = ColumnNumber(startCol)
     outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
@@ -1756,8 +1944,8 @@ Sub ClearResultsArea(outputWs As Worksheet, startCol As String, startRow As Inte
     outputWs.Range(ColumnLetter(clearCol) & startRow & ":" & _
                    ColumnLetter(clearCol + 3) & "1000").ClearFormats
 
-    ' FIX #1: Only remove preview result buttons (OnAction = "OpenPreview")
-    ' NOT dashboard control buttons (Search: With Preview, Clear Preview Sheets)
+    ' Only remove Form Control buttons added by search macros (OnAction = "OpenPreview")
+    ' Dashboard buttons (Search: With Preview, Clear Preview Sheets) are unaffected.
     Dim btn As Object
     For Each btn In outputWs.Buttons
         If btn.OnAction = "OpenPreview" Then btn.Delete
@@ -1795,6 +1983,9 @@ Sub FormatResultsTable(outputWs As Worksheet, col1 As String, col2 As String, _
         LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(165, 165, 165)
     outputWs.Columns(col1).ColumnWidth = 35
     outputWs.Columns(col2).ColumnWidth = 55
+    ' ENHANCEMENT #5: Ensure no overflow on the results columns
+    outputWs.Columns(col1).WrapText = False
+    outputWs.Columns(col2).WrapText = False
 End Sub
 
 Sub AddBackButton(outputWs As Worksheet)
@@ -1809,16 +2000,6 @@ End Sub
 
 ' ==========================================
 ' DASHBOARD SETUP
-'
-' FIX #3 - DATE FORMAT: Changed placeholder and format hint from
-'          dd-mmm-yyyy to MM/DD/YY throughout.
-'
-' FIX #5 - KEYWORD ROW: Header row is Row 10, keyword input rows
-'          start at Row 11 (B11:C20 for 10 keywords).
-'          The loop variable currentRow = 10 + i gives rows 11-20.
-'
-' FIX #6 - RESET POPUP: Removed the "New in this version" section
-'          from the completion MsgBox.
 ' ==========================================
 
 Sub SetupSearchSheet()
@@ -1893,8 +2074,6 @@ Sub SetupSearchSheet()
         .RowHeight    = 25
     End With
 
-    ' Start Date row (Row 6)
-    ' FIX #3: Placeholder and format changed to MM/DD/YY
     ws.Range("A6").Value = "Start Date:": ws.Range("A6").Font.Bold = True
     ws.Range("B6").Value = "MM/DD/YY"
     With ws.Range("B6")
@@ -1903,7 +2082,7 @@ Sub SetupSearchSheet()
         .Interior.Color = RGB(255, 245, 245)
         .Borders.LineStyle = xlContinuous
         .Borders.Color     = RGB(192, 128, 128)
-        .NumberFormat = "@"    ' Store as text to avoid Excel auto-converting dates
+        .NumberFormat = "@"
     End With
     ws.Range("C6").Value = "Format: MM/DD/YY  (e.g. 01/15/25)"
     With ws.Range("C6")
@@ -1912,7 +2091,6 @@ Sub SetupSearchSheet()
         .Font.Italic  = True
     End With
 
-    ' End Date row (Row 7)
     ws.Range("A7").Value = "End Date:": ws.Range("A7").Font.Bold = True
     ws.Range("B7").Value = "MM/DD/YY"
     With ws.Range("B7")
@@ -1947,7 +2125,6 @@ Sub SetupSearchSheet()
         .RowHeight    = 25
     End With
 
-    ' FIX #5: Column header row is Row 10; keyword rows start at Row 11
     ws.Range("A10").Value = "Keyword"
     ws.Range("B10").Value = "Search Term"
     ws.Range("C10").Value = "Logic (AND/OR)"
@@ -1958,9 +2135,8 @@ Sub SetupSearchSheet()
         .Borders.LineStyle   = xlContinuous
     End With
 
-    ' Keyword input rows: Row 11 to Row (10 + MAX_KEYWORDS)
     For i = 1 To MAX_KEYWORDS
-        Dim currentRow As Integer: currentRow = 10 + i      ' Rows 11 to 20
+        Dim currentRow As Integer: currentRow = 10 + i
         ws.Range("A" & currentRow).Value = "Keyword " & i
         With ws.Range("A" & currentRow)
             .Font.Bold           = True
@@ -2008,7 +2184,6 @@ Sub SetupSearchSheet()
     btnHeight  = 30
     btnSpacing = 10
 
-    ' Row 1 of buttons: search actions
     Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
     btn.OnAction = "RunSearchByNameOnly": btn.Caption = "Search: Name Only"
     btn.Font.Bold = True: btn.Font.Size = 9
@@ -2017,7 +2192,6 @@ Sub SetupSearchSheet()
     btn.OnAction = "RunSearch": btn.Caption = "Search: Name + Content"
     btn.Font.Bold = True: btn.Font.Size = 9
 
-    ' Row 2 of buttons: preview + refine
     btnTop = btnTop + btnHeight + btnSpacing
     Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
     btn.OnAction = "RunSearchWithContentPreview": btn.Caption = "Search: With Preview"
@@ -2027,7 +2201,6 @@ Sub SetupSearchSheet()
     btn.OnAction = "RunRefineSearch": btn.Caption = "Refine Results"
     btn.Font.Bold = True: btn.Font.Size = 9
 
-    ' Row 3 of buttons: utilities
     btnTop = btnTop + btnHeight + btnSpacing
     Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth, btnHeight)
     btn.OnAction = "ClearFilteredContentSheets": btn.Caption = "Clear Preview Sheets"
@@ -2037,7 +2210,6 @@ Sub SetupSearchSheet()
     btn.OnAction = "SetupSearchSheet": btn.Caption = "Reset Dashboard"
     btn.Font.Bold = True: btn.Font.Size = 9
 
-    ' Row 4 of buttons: ABORT (prominent red styling)
     btnTop = btnTop + btnHeight + btnSpacing
     Set btn = ws.Buttons.Add(btnLeft, btnTop, btnWidth * 2 + btnSpacing, btnHeight)
     btn.OnAction = "AbortSearch"
@@ -2065,17 +2237,18 @@ Sub SetupSearchSheet()
     End With
 
     Dim instrRow As Integer: instrRow = instructionSection + 1
-    Dim instructions(6) As String
+    Dim instructions(7) As String
     instructions(0) = "1. Enter the folder path in cell B4"
-    instructions(1) = "2. (Optional) Enter Start Date and/or End Date in B6/B7 using MM/DD/YY format to filter by file date"
-    instructions(2) = "3. Enter 1-" & MAX_KEYWORDS & " keywords in B11:B" & (10 + MAX_KEYWORDS) & ". Set AND/OR logic in column C (AND/OR only used by Preview search)"
-    instructions(3) = "4. Click a search button: Name Only = all keywords in filename | Name+Content = keyword in name OR body | Preview = AND same row, OR any row (all OR-keywords must exist in file)"
-    instructions(4) = "5. After any search, update keywords then click 'Refine Results' to narrow down within the previous result set"
-    instructions(5) = "6. In 'With Preview' results, click the 'Click to Preview' button to open a filtered row view"
-    instructions(6) = "7. Click 'ABORT / STOP SEARCH' at any time to safely stop a running search without crashing Excel"
+    instructions(1) = "2. (Optional) Enter Start/End Date in B6/B7 using MM/DD/YY. Files are sorted newest-first for fast date filtering."
+    instructions(2) = "3. Enter 1-" & MAX_KEYWORDS & " keywords in B11:B" & (10 + MAX_KEYWORDS) & ". Set AND/OR logic in column C."
+    instructions(3) = "4. Name Only = all keywords in filename | Name+Content = keyword in name OR body | Preview = AND same row, OR any row"
+    instructions(4) = "5. Date filter: once a file older than Start Date is found, you will be prompted to stop early and search only matching files."
+    instructions(5) = "6. After any search, update keywords and click 'Refine Results' to narrow down within previous results."
+    instructions(6) = "7. In 'With Preview' results, click 'Click to Preview' to open a filtered row view."
+    instructions(7) = "8. Click 'ABORT / STOP SEARCH' at any time. Partial results (if any) will be shown."
 
     Dim k As Integer
-    For k = 0 To 6
+    For k = 0 To 7
         ws.Range("A" & instrRow & ":D" & instrRow).Merge
         ws.Range("A" & instrRow).Value    = instructions(k)
         ws.Range("A" & instrRow).WrapText = True
@@ -2091,27 +2264,23 @@ Sub SetupSearchSheet()
     ws.Range("A" & instructionSection & ":D" & instrEndRow).BorderAround _
         LineStyle:=xlContinuous, Weight:=xlMedium, Color:=RGB(160, 32, 32)
 
-    ' ---- Column E: Gap / separator ----
     ws.Columns("E").ColumnWidth = 2
     ws.Range("E1:E" & instrEndRow).Interior.Color  = RGB(200, 200, 200)
     ws.Range("E1:E" & instrEndRow).Borders.LineStyle = xlNone
 
-    ' ---- Column widths (dashboard side) ----
     ws.Columns("A").ColumnWidth = 18
     ws.Columns("B").ColumnWidth = 32
     ws.Columns("C").ColumnWidth = 22
     ws.Columns("D").ColumnWidth = 5
 
-    ' Draw Results section header so it is visible before any search
     Call WriteResultsSectionHeader(ws, GetOutputStartColumn(), False)
 
     ws.Range("B4").Select
     Application.ScreenUpdating = True
 
-    ' FIX #6: Removed "New in this version" section from popup
     MsgBox "Dashboard Setup Complete!" & vbCrLf & vbCrLf & _
-           "Maximum Keywords: " & MAX_KEYWORDS & vbCrLf & _
-           "Keyword rows: B11 to B" & (10 + MAX_KEYWORDS) & vbCrLf & _
-           "Date format: MM/DD/YY (e.g. 01/15/25)" & vbCrLf & vbCrLf & _
+           "Maximum Keywords : " & MAX_KEYWORDS & vbCrLf & _
+           "Keyword rows     : B11 to B" & (10 + MAX_KEYWORDS) & vbCrLf & _
+           "Date format      : MM/DD/YY  (e.g. 01/15/25)" & vbCrLf & vbCrLf & _
            "Click any search button to begin.", vbInformation, "Dashboard Ready"
 End Sub
