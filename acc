@@ -34,3 +34,92 @@ users
   LET(inst,Beta!$A$9,  ids,Beta!$A$12:$A$204,  mk,ids<>"", FILTER(HSTACK(IF(mk,inst,""),ids),mk)),
   ...
 )
+
+
+
+
+
+++++
+
+
+
+
+Create an Excel formula-based solution (preferably using dynamic array formulas available in Excel 365) for the following requirement.
+
+Input Structure
+
+There are multiple worksheets named A1, A2, A3 ... An (for example, A1 to A20).
+
+In each worksheet:
+
+- Cell A9 contains the Instance Name.
+- Cells A12:A204(vary) contain Customer/User IDs associated with that instance.
+- The number of User IDs can vary by sheet.
+- User IDs may be added or removed over time (daily/monthly).
+- The number of instance sheets may also increase or decrease.
+
+Example:
+
+Sheet A1
+
+- A9 = Alpha
+- A12:A13 = ua1, ua2
+
+Sheet A2
+
+- A9 = Beta
+- A12 = ub1
+
+Required Output
+
+Create a consolidated sheet with:
+
+Instance Name| User ID
+Alpha| ua1
+Alpha| ua2
+Beta| ub1
+
+The solution should dynamically:
+
+1. Pull the instance name from A9 of each sheet.
+2. Pull all non-blank User IDs from A12:A204 (vary) of each sheet.
+3. Repeat the instance name for every associated User ID.
+4. Stack data from all sheets into a single two-column table.
+5. Automatically reflect additions/removals of User IDs after refresh/recalculation.
+6. Support a variable number of sheets (A1:A20 for example, but scalable to An).
+
+Future Example
+
+Month 2:
+
+Alpha
+
+- ua1
+- ua3
+- ua4
+
+Beta
+
+- ub1
+- ub2
+- ub3
+
+Expected output:
+
+Instance Name| User ID
+Alpha| ua1
+Alpha| ua3
+Alpha| ua4
+Beta| ub1
+Beta| ub2
+Beta| ub3
+
+Deliverables
+
+1. Provide the complete Excel formula(s).
+2. Explain how the formula works.
+4. If a formula-only solution is not practical for dynamic sheet counts, provide the best vba approach as an alternative.
+5. Include two worked examples:
+   - Example 1: 5 instance sheets with varying user counts.
+   - Example 2: 8 instance sheets with varying user counts and user additions/removals across months.
+6. Clearly state any assumptions and limitations.
