@@ -1,125 +1,186 @@
-=DROP(
-REDUCE(
-"",
-Config!A1:A20,
-LAMBDA(acc,sht,
-VSTACK(
-acc,
-LET(
-inst,INDIRECT("'"&sht&"'!A9"),
-users,FILTER(
-INDIRECT("'"&sht&"'!A10:A1000"),
-INDIRECT("'"&sht&"'!A10:A1000")<>""
-),
-HSTACK(
-EXPAND(inst,ROWS(users),1,inst),
-users
-)
-)
-)
-)
-),
-1
-)
+I need you to act as a senior IBM Planning Analytics (TM1) developer and generate a complete TurboIntegrator (TI) process to create dimensions, attributes, hierarchies/consolidations, and a cube.
+
+The source information is provided in the attached PDF screenshots. Use the screenshots as the primary source of truth. If any element, consolidation, or attribute value is unclear, ask me only for confirmation of the missing details before generating the final code.
+
+Objective
+
+Create the following dimensions:
+
+1. BH_CostCenter
+2. BH_Entity
+3. BH_Measure
+4. BH_Period
+5. BH_Version
+
+Then create the cube:
+
+BH_Test_Data
+
+using all the above dimensions.
+
+---
+
+Dimension 1: BH_CostCenter
+
+Hierarchy
+
+TotalCC
+├── CC100
+├── CC200
+└── CC300
+
+Attributes
+
+Element| Type| Description| Owner
+CC100| N| Operations| Jane.Doe
+CC200| N| Technology| John.Smith
+CC300| N| Finance| Amir.Khan
+
+Create and populate the attributes:
+
+- Type
+- Description
+- Owner
+
+---
+
+Dimension 2: BH_Entity
+
+Hierarchy
+
+Total_Entity
+├── UK01
+├── HK01
+└── US01
+
+Attributes
+
+Element| Region| Description| Type
+UK01| UK| HSBC UK| N
+HK01| APAC| HSBC Hong Kong| N
+US01| AMER| HSBC USA| N
+
+Create and populate the attributes:
+
+- Region
+- Description
+- Type
+
+---
+
+Dimension 3: BH_Measure
+
+Hierarchy
+
+TotalMeasure
+├── Headcount
+├── Cost
+└── FTE
+
+Attributes
+
+Element| Type| Description| Format
+Headcount| N| Average Headcount| 0
+Cost| N| Total Cost| 0
+FTE| N| FTE| 0
+
+Create and populate the attributes:
+
+- Type
+- Description
+- Format
+
+---
+
+Dimension 4: BH_Period
+
+Hierarchy
+
+2026
+├── Jan 26
+├── Feb 26
+└── Mar 26
+
+Attributes
+
+Element| Type| Description
+Jan 26| N| Jan 26
+Feb 26| N| Feb 26
+Mar 26| N| Mar 26
+
+Create and populate the attributes:
+
+- Type
+- Description
+
+---
+
+Dimension 5: BH_Version
+
+Hierarchy
+
+TotalVersion
+├── Actual
+├── Budget
+└── Forecast
+
+Attributes
+
+Element| Type| Description
+Actual| N| Actuals
+Budget| N| Budget
+Forecast| N| Forecast
+
+Create and populate the attributes:
+
+- Type
+- Description
+
+---
+
+Cube Creation
+
+Create a cube named:
+
+BH_Test_Data
+
+Dimensions in order:
+
+1. BH_CostCenter
+2. BH_Entity
+3. BH_Measure
+4. BH_Period
+5. BH_Version
+
+---
+
+Expected Output
+
+Generate complete TM1 TurboIntegrator code with the following:
+
+Create BH_CostCenter dimension, hierarchy, and attributes.
+
+Create BH_Entity dimension, hierarchy, and attributes.
+
+Create BH_Measure dimension, hierarchy, and attributes.
+
+Create BH_Period dimension, hierarchy, and attributes.
+
+Create BH_Version dimension, hierarchy, and attributes.
+
+Create cube BH_Test_Data.
+
+ONCE DONE above, as an optional give code for Populate the cube with random dummy numeric values using TI code.
+
+Requirements for dummy data load
+- Ensure consolidations roll up correctly through all dimensions.
 
 
+Make a note
+- Include comments explaining each major code block.
+- Use best practices for TM1 TI development.
+- Make the code production-quality and easy for a beginner TM1 developer to understand.
+- Clearly separate Prolog, Metadata, Data, and Epilog sections for every TI process.
+- Explain any assumptions made.
 
-
-+++++
-
-
-
-=VSTACK(
-  LET(inst,Alpha!$A$9, ids,Alpha!$A$12:$A$204, mk,ids<>"", FILTER(HSTACK(IF(mk,inst,""),ids),mk)),
-  LET(inst,Beta!$A$9,  ids,Beta!$A$12:$A$204,  mk,ids<>"", FILTER(HSTACK(IF(mk,inst,""),ids),mk)),
-  ...
-)
-
-
-
-
-
-++++
-
-
-
-
-Create an Excel formula-based solution (preferably using dynamic array formulas available in Excel 365) for the following requirement.
-
-Input Structure
-
-There are multiple worksheets named A1, A2, A3 ... An (for example, A1 to A20).
-
-In each worksheet:
-
-- Cell A9 contains the Instance Name.
-- Cells A12:A204(vary) contain Customer/User IDs associated with that instance.
-- The number of User IDs can vary by sheet.
-- User IDs may be added or removed over time (daily/monthly).
-- The number of instance sheets may also increase or decrease.
-
-Example:
-
-Sheet A1
-
-- A9 = Alpha
-- A12:A13 = ua1, ua2
-
-Sheet A2
-
-- A9 = Beta
-- A12 = ub1
-
-Required Output
-
-Create a consolidated sheet with:
-
-Instance Name| User ID
-Alpha| ua1
-Alpha| ua2
-Beta| ub1
-
-The solution should dynamically:
-
-1. Pull the instance name from A9 of each sheet.
-2. Pull all non-blank User IDs from A12:A204 (vary) of each sheet.
-3. Repeat the instance name for every associated User ID.
-4. Stack data from all sheets into a single two-column table.
-5. Automatically reflect additions/removals of User IDs after refresh/recalculation.
-6. Support a variable number of sheets (A1:A20 for example, but scalable to An).
-
-Future Example
-
-Month 2:
-
-Alpha
-
-- ua1
-- ua3
-- ua4
-
-Beta
-
-- ub1
-- ub2
-- ub3
-
-Expected output:
-
-Instance Name| User ID
-Alpha| ua1
-Alpha| ua3
-Alpha| ua4
-Beta| ub1
-Beta| ub2
-Beta| ub3
-
-Deliverables
-
-1. Provide the complete Excel formula(s).
-2. Explain how the formula works.
-4. If a formula-only solution is not practical for dynamic sheet counts, provide the best vba approach as an alternative.
-5. Include two worked examples:
-   - Example 1: 5 instance sheets with varying user counts.
-   - Example 2: 8 instance sheets with varying user counts and user additions/removals across months.
-6. Clearly state any assumptions and limitations.
+Finally, provide the complete runnable TI code for all processes in sequence in pdf. Make sure not to overlap any words and content in pdf
